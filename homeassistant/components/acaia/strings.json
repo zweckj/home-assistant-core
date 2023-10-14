@@ -13,6 +13,14 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "timer_running": {
+        "name": "Timer running"
+      },
+      "connected": {
+        "name": "Connected"
+      }
+    },
     "button": {
       "tare": {
         "name": "Tare"
@@ -22,6 +30,14 @@
       },
       "start_stop": {
         "name": "Start/Stop Timer"
+      }
+    },
+    "sensor": {
+      "weight": {
+        "name": "Weight"
+      },
+      "battery": {
+        "name": "Battery"
       }
     }
   }
