@@ -88,4 +88,9 @@ class AcaiaApiCoordinator(DataUpdateCoordinator):
             self._data[WEIGHT] = msg.value
             _LOGGER.debug("Got weight %s", str(msg.value))
 
+            if msg.button == "start":
+                self.acaia_client.timer_running = True
+            elif msg.button == "stop":
+                self.acaia_client.timer_running = False
+
         self.async_update_listeners()
