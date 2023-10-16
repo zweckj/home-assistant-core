@@ -37,4 +37,16 @@ async def init_integration(hass: HomeAssistant) -> MockConfigEntry:
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    coordinator._on_data_received(
+        "",
+        bytearray(b"\xef\xdd\x08\tZ\x02\x03\x01\x00\x01\x01\x01\x0e^"),
+    )  # send a message with battery level of 90
+
+    coordinator._on_data_received(
+        "",
+        bytearray(b"\xef\xdd\x0c\x08\x05\xe0\x08\x00\x00\x01\x00\xe9\r"),
+    )  # send a message with weight of 227.2
+
     return entry
