@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
-import voluptuous as vol
+import voluptuous as vol  # type: ignore[import]
 
 from homeassistant import config_entries, core, exceptions
 from homeassistant.components.bluetooth import BluetoothServiceInfo
@@ -22,7 +22,14 @@ from homeassistant.const import (
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 
-from .const import DEFAULT_CLIENT_ID, DEFAULT_CLIENT_SECRET, DEFAULT_PORT_LOCAL, DOMAIN
+from .const import (
+    DEFAULT_CLIENT_ID,
+    DEFAULT_CLIENT_SECRET,
+    DEFAULT_PORT_LOCAL,
+    DOMAIN,
+    MACHINE_NAME,
+    SERIAL_NUMBER,
+)
 from .lm_client import LaMarzoccoClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,7 +58,9 @@ STEP_REAUTH_DATA_SCHEMA = LOGIN_DATA_SCHEMA.extend(
 )
 
 
-async def validate_input(hass: core.HomeAssistant, data):
+async def validate_input(
+    hass: core.HomeAssistant, data: Mapping[str, Any]
+) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
 
     try:
@@ -68,8 +77,7 @@ async def validate_input(hass: core.HomeAssistant, data):
         _LOGGER.error("Failed to connect to server")
         raise CannotConnect
 
-    # Return info that you want to store in the config entry.
-    return {"title": machine_info["machine_name"], **machine_info}
+    return machine_info
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -82,21 +90,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovered: dict[str, str] = {}
         self.reauth_entry: ConfigEntry | None
 
-    async def _try_create_entry(self, data):
-        """Try to create an entry."""
-        machine_info = await validate_input(self.hass, data)
-        self._abort_if_unique_id_configured()
-        return self.async_create_entry(
-            title=machine_info["title"], data={**data, **machine_info}
-        )
-
-    async def async_step_user(self, user_input=None) -> FlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Handle the initial step."""
-        if self._async_current_entries():
-            # Config entry already exists, only one allowed.
-            return self.async_abort(reason="single_instance_allowed")
 
         errors = {}
+
+        if self._async_current_entries():
+            return self.async_abort(reason="single_instance_allowed")
 
         if user_input is not None:
             data = user_input.copy()
@@ -106,11 +108,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data[CONF_CLIENT_SECRET] = DEFAULT_CLIENT_SECRET
 
             try:
-                return await self._try_create_entry(data)
+                machine_info = await validate_input(self.hass, data)
+                await self.async_set_unique_id(machine_info[SERIAL_NUMBER])
+                self._abort_if_unique_id_configured()
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+
+            if not errors:
+                return self.async_create_entry(
+                    title=machine_info[MACHINE_NAME], data=data
+                )
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
