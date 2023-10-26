@@ -11,6 +11,7 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from . import (
     DEFAULT_CONF,
+    DISCOVERED_INFO,
     LM_SERVICE_INFO,
     LOGIN_INFO,
     MACHINE_NAME,
@@ -50,6 +51,15 @@ async def test_form(hass: HomeAssistant, mock_lamarzocco: MagicMock) -> None:
 
     assert result2["title"] == MACHINE_NAME
     assert result2["data"] == USER_INPUT | DEFAULT_CONF
+
+    assert len(mock_lamarzocco.try_connect.mock_calls) == 1
+
+    # now test for single instance abort
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "single_instance_allowed"
 
     assert len(mock_lamarzocco.try_connect.mock_calls) == 1
 
@@ -95,7 +105,9 @@ async def test_form_cannot_connect(
     assert len(mock_lamarzocco.try_connect.mock_calls) == 1
 
 
-async def test_bluetooth_discovery(hass: HomeAssistant) -> None:
+async def test_bluetooth_discovery(
+    hass: HomeAssistant, mock_lamarzocco: MagicMock
+) -> None:
     """Test bluetooth discovery."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -105,6 +117,14 @@ async def test_bluetooth_discovery(hass: HomeAssistant) -> None:
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "user"
+
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        USER_INPUT,
+    )
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["data"] == USER_INPUT | DEFAULT_CONF | DISCOVERED_INFO
+    assert len(mock_lamarzocco.try_connect.mock_calls) == 1
 
 
 async def test_show_reauth(
