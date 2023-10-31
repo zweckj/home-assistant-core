@@ -7,7 +7,7 @@ from collections.abc import Callable
 import logging
 from typing import TypedDict
 
-import voluptuous as vol  # type: ignore[import]
+import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall

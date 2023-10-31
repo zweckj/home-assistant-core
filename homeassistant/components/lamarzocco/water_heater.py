@@ -56,7 +56,7 @@ ENTITIES: tuple[LaMarzoccoWaterHeaterEntityDescription, ...] = (
         current_op_fn=lambda client: client.current_status.get("power", False),
         control_fn=lambda client, state: client.set_power(state),
         current_temp_fn=lambda client: client.current_status.get("coffee_temp", 0),
-        target_temp_fn=lambda client: client.current_status.get("coffee_temp_set", 0),
+        target_temp_fn=lambda client: client.current_status.get("coffee_set_temp", 0),
         extra_attributes={},
     ),
     LaMarzoccoWaterHeaterEntityDescription(
@@ -68,10 +68,13 @@ ENTITIES: tuple[LaMarzoccoWaterHeaterEntityDescription, ...] = (
         set_temp_fn=lambda client, temp: client.set_steam_temp(round(temp)),
         current_op_fn=lambda client: client.current_status.get(
             "steam_boiler_enable", False
-        ),
+        )
+        and client.current_status.get(
+            "power", False
+        ),  # water heater is only on if power is on
         control_fn=lambda client, state: client.set_steam_boiler_enable(state),
         current_temp_fn=lambda client: client.current_status.get("steam_temp", 0),
-        target_temp_fn=lambda client: client.current_status.get("steam_temp_set", 0),
+        target_temp_fn=lambda client: client.current_status.get("steam_set_temp", 0),
         extra_attributes={},
     ),
 )
@@ -86,7 +89,7 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     async_add_entities(
-        LaMarzoccoWaterHeater(coordinator, hass, description)
+        LaMarzoccoWaterHeater(coordinator, config_entry, description)
         for description in ENTITIES
         if not description.extra_attributes
         or coordinator.lm.model_name in description.extra_attributes
@@ -162,10 +165,12 @@ class LaMarzoccoWaterHeater(LaMarzoccoEntity, WaterHeaterEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the water heater on."""
         await self.entity_description.control_fn(self._lm_client, True)
+        await self._update_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the water heater off."""
         await self.entity_description.control_fn(self._lm_client, False)
+        await self._update_ha_state()
 
     async def async_set_operation_mode(self, operation_mode: str) -> None:
         """Set the operation mode."""

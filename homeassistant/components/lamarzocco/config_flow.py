@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
-import voluptuous as vol  # type: ignore[import]
+import voluptuous as vol
 
 from homeassistant import config_entries, core, exceptions
 from homeassistant.components.bluetooth import BluetoothServiceInfo
@@ -19,6 +19,7 @@ from homeassistant.const import (
     CONF_PORT,
     CONF_USERNAME,
 )
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import (
@@ -29,6 +30,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_MACHINE,
+    CONF_USE_BLUETOOTH,
     DEFAULT_CLIENT_ID,
     DEFAULT_CLIENT_SECRET,
     DEFAULT_PORT_LOCAL,
@@ -46,8 +48,6 @@ LOGIN_DATA_SCHEMA = vol.Schema(
     },
     extra=vol.PREVENT_EXTRA,
 )
-
-STEP_MACHINE_SELECTION_SCHEMA: vol.Schema
 
 STEP_REAUTH_DATA_SCHEMA = LOGIN_DATA_SCHEMA.extend(
     {
@@ -75,7 +75,7 @@ async def get_machines(hass: core.HomeAssistant, data: dict[str, Any]) -> list[s
         _LOGGER.error("Failed to connect to server")
         raise CannotConnect
 
-    available_machines = [f"{machine[0]} ({machine[1]})" for machine in machines]
+    available_machines = [f"{machine[1]} ({machine[0]})" for machine in machines]
 
     return available_machines
 
@@ -127,8 +127,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Let user select machine to connect to."""
         errors = {}
         if user_input is not None:
-            machine_name, serial_number = user_input[CONF_MACHINE].split(" ")
-            serial_number = serial_number.strip("()")
+            machine_name, serial_number = user_input[CONF_MACHINE].split("(")
+            machine_name = machine_name.strip(" ")
+            serial_number = serial_number.strip(")")
             await self.async_set_unique_id(serial_number)
             self._abort_if_unique_id_configured()
             self._config[SERIAL_NUMBER] = serial_number
@@ -221,6 +222,61 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm",
             data_schema=STEP_REAUTH_DATA_SCHEMA,
             errors=errors,
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Create the options flow."""
+        return OptionsFlowHandler(config_entry)
+
+
+class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
+    """Handles options flow for the component."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options for the custom component."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            if user_input.get(CONF_HOST) and user_input.get(
+                CONF_HOST
+            ) != self.config_entry.data.get(CONF_HOST):
+                lm = LaMarzoccoClient(self.hass, self.config_entry.data)
+                if not await lm.check_local_connection(
+                    credentials=lm.get_credentials_from_entry_data(
+                        self.config_entry.data
+                    ),
+                    host=user_input[CONF_HOST],
+                    serial=self.config_entry.data.get(SERIAL_NUMBER),
+                ):
+                    errors[CONF_HOST] = "cannot_connect"
+            if not errors:
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data=self.config_entry.data | user_input,
+                    options=self.config_entry.options,
+                )
+                return self.async_create_entry(title="", data=user_input)
+
+        options_schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_HOST, default=self.config_entry.data.get(CONF_HOST, "")
+                ): cv.string,
+                vol.Optional(
+                    CONF_USE_BLUETOOTH,
+                    default=self.config_entry.data.get(CONF_USE_BLUETOOTH, True),
+                ): cv.boolean,
+            }
+        )
+
+        return self.async_show_form(
+            step_id="init", data_schema=options_schema, errors=errors
         )
 
 

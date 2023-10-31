@@ -4,7 +4,8 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -34,12 +35,12 @@ class LaMarzoccoEntity(CoordinatorEntity):
     def __init__(
         self,
         coordinator: LmApiCoordinator,
-        hass: HomeAssistant,
+        config_entry: ConfigEntry,
         entity_description: LaMarzoccoEntityDescription,
     ) -> None:
         """Initialize the entity."""
         super().__init__(coordinator)
-        self._hass = hass
+        self._config_entry = config_entry
         self.entity_description = entity_description
         self._lm_client = self.coordinator.data
         self._attr_has_entity_name = True

@@ -16,6 +16,7 @@ from . import (
     LOGIN_INFO,
     MACHINE_DATA,
     MACHINE_SELECTION,
+    OPTIONS_INPUT,
     USER_INPUT,
     WRONG_LOGIN_INFO,
 )
@@ -59,7 +60,7 @@ async def test_form(hass: HomeAssistant, mock_lamarzocco: MagicMock) -> None:
 
     assert result3["type"] == FlowResultType.CREATE_ENTRY
 
-    assert result3["title"] == "GS3AV"
+    assert result3["title"] == "GS3 AV"
     assert result3["data"] == USER_INPUT | DEFAULT_CONF | MACHINE_DATA
 
     assert len(mock_lamarzocco.check_local_connection.mock_calls) == 1
@@ -136,7 +137,7 @@ async def test_form_invalid_host(
 
     result3 = await hass.config_entries.flow.async_configure(
         result2["flow_id"],
-        {"machine": "GS3AV (GS01234)", "host": "192.168.1.1"},
+        MACHINE_SELECTION,
     )
     await hass.async_block_till_done()
 
@@ -195,7 +196,7 @@ async def test_bluetooth_discovery(
 
     assert result3["type"] == FlowResultType.CREATE_ENTRY
 
-    assert result3["title"] == "GS3AV"
+    assert result3["title"] == "GS3 AV"
     assert result3["data"] == USER_INPUT | DEFAULT_CONF | MACHINE_DATA | DISCOVERED_INFO
 
     assert len(mock_lamarzocco.check_local_connection.mock_calls) == 1
@@ -288,3 +289,43 @@ async def test_reauth_errors(
     assert result2["errors"] == {"base": "cannot_connect"}
 
     assert len(mock_lamarzocco.get_all_machines.mock_calls) == 2
+
+
+async def test_options_flow(
+    hass: HomeAssistant, mock_lamarzocco: MagicMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Test options flow."""
+    mock_config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=OPTIONS_INPUT
+    )
+
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["data"] == OPTIONS_INPUT
+
+
+async def test_options_flow_errors(
+    hass: HomeAssistant, mock_lamarzocco: MagicMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Test options flow errors."""
+    mock_config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+
+    mock_lamarzocco.check_local_connection.return_value = False
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=OPTIONS_INPUT
+    )
+
+    assert result2["type"] == FlowResultType.FORM
+    assert result2["errors"] == {"host": "cannot_connect"}
