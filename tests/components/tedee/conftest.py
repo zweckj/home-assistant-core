@@ -5,10 +5,14 @@ from collections.abc import Generator
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pytedee_async.bridge import TedeeBridge
 from pytedee_async.lock import TedeeLock
 import pytest
 
-from homeassistant.components.tedee.const import CONF_LOCAL_ACCESS_TOKEN, DOMAIN
+from homeassistant.components.tedee.const import (
+    CONF_HOME_ASSISTANT_ACCESS_TOKEN,
+    DOMAIN,
+)
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_HOST
 from homeassistant.core import HomeAssistant
 
@@ -23,8 +27,8 @@ def mock_config_entry() -> MockConfigEntry:
         domain=DOMAIN,
         data={
             CONF_ACCESS_TOKEN: "api_token",
-            CONF_LOCAL_ACCESS_TOKEN: "api_token",
             CONF_HOST: "192.168.1.42",
+            CONF_HOME_ASSISTANT_ACCESS_TOKEN: "long_lived_access_token",
         },
         unique_id="unique_id",
     )
@@ -52,6 +56,11 @@ def mock_tedee(request) -> Generator[MagicMock, None, None]:
 
         tedee.get_locks.return_value = None
         tedee.sync.return_value = None
+        tedee.get_bridges.return_value = [
+            TedeeBridge(1234, "0000-0000", "Bridge-AB1C"),
+            TedeeBridge(5678, "9999-9999", "Bridge-CD2E"),
+        ]
+        tedee.get_local_bridge.return_value = TedeeBridge(0, "0000-0000", "Bridge-AB1C")
 
         locks_json = json.loads(load_fixture("locks.json", DOMAIN))
 
