@@ -1,7 +1,7 @@
 """Base class for the La Marzocco entities."""
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -15,15 +15,10 @@ from .coordinator import LmApiCoordinator
 
 
 @dataclass
-class LaMarzoccoEntityDescriptionMixin:
-    """Mixin for all LM entities."""
-
-    extra_attributes: dict
-
-
-@dataclass
-class LaMarzoccoEntityDescription(EntityDescription, LaMarzoccoEntityDescriptionMixin):
+class LaMarzoccoEntityDescription(EntityDescription):
     """Description for all LM entities."""
+
+    extra_attributes: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

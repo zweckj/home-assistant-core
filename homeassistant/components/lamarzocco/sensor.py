@@ -9,6 +9,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -69,6 +70,7 @@ ENTITIES: tuple[LaMarzoccoSensorEntityDescription, ...] = (
         value_fn=lambda client: sum(
             client.current_status.get(p, 0) for p in ("drinks_k1", "total_flushing")
         ),
+        entity_category=EntityCategory.DIAGNOSTIC,
         extra_attributes={
             MODEL_GS3_AV: ATTR_MAP_DRINK_STATS_GS3_AV,
             MODEL_GS3_MP: ATTR_MAP_DRINK_STATS_GS3_MP_LM,

@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, MODEL_GS3_AV, MODEL_LM, MODEL_LMU
+from .const import DOMAIN
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 from .lm_client import LaMarzoccoClient
 
@@ -36,11 +36,6 @@ ENTITIES: tuple[LaMarzoccoButtonEntityDescription, ...] = (
         translation_key="start_backflush",
         icon="mdi:water-sync",
         press_fn=lambda client: client.start_backflush(),
-        extra_attributes={
-            MODEL_GS3_AV: None,
-            MODEL_LM: None,
-            MODEL_LMU: None,
-        },
     ),
 )
 

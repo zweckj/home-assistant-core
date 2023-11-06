@@ -57,7 +57,6 @@ ENTITIES: tuple[LaMarzoccoWaterHeaterEntityDescription, ...] = (
         control_fn=lambda client, state: client.set_power(state),
         current_temp_fn=lambda client: client.current_status.get("coffee_temp", 0),
         target_temp_fn=lambda client: client.current_status.get("coffee_set_temp", 0),
-        extra_attributes={},
     ),
     LaMarzoccoWaterHeaterEntityDescription(
         key="steam_boiler",
@@ -75,7 +74,6 @@ ENTITIES: tuple[LaMarzoccoWaterHeaterEntityDescription, ...] = (
         control_fn=lambda client, state: client.set_steam_boiler_enable(state),
         current_temp_fn=lambda client: client.current_status.get("steam_temp", 0),
         target_temp_fn=lambda client: client.current_status.get("steam_set_temp", 0),
-        extra_attributes={},
     ),
 )
 
