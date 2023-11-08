@@ -64,6 +64,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "battery_charging_sensor": {
+        "name": "Battery charging"
+      }
+    },
     "button": {
       "unlatch": {
         "name": "Pull latch"
