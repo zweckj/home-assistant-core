@@ -27,7 +27,7 @@ async def async_get_config_entry_diagnostics(
     data["current_status"] = coordinator.data.current_status
     data["machine_info"] = coordinator.data.machine_info
     data["config"] = coordinator.data.config
-    data["statistics"] = {"counters": coordinator.data.statistics}
+    data["statistics"] = coordinator.data.statistics
 
     # build a firmware section
     data["firmware"] = {}
