@@ -92,3 +92,73 @@ async def test_shot_timer(
     assert device.manufacturer == "La Marzocco"
     assert device.name == "GS01234"
     assert device.sw_version == "1.1"
+
+
+async def test_current_coffee_temp(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    device_registry: dr.DeviceRegistry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test the La Marzocco Current coffee temp."""
+    state = hass.states.get("sensor.gs01234_current_coffee_temperature")
+    assert state
+    assert state.attributes.get(ATTR_DEVICE_CLASS) == SensorDeviceClass.TEMPERATURE
+    assert state.attributes.get(ATTR_STATE_CLASS) == SensorStateClass.MEASUREMENT
+    assert (
+        state.attributes.get(ATTR_FRIENDLY_NAME) == "GS01234 Current Coffee Temperature"
+    )
+    assert state.attributes.get(ATTR_ICON) == "mdi:thermometer"
+    assert state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) == "°C"
+
+    assert state.state == "93"
+
+    entry = entity_registry.async_get(state.entity_id)
+    assert entry
+    assert entry.device_id
+    assert entry.unique_id == "GS01234_current_temp_coffee"
+
+    device = device_registry.async_get(entry.device_id)
+    assert device
+    assert device.configuration_url is None
+    assert device.entry_type is None
+    assert device.hw_version is None
+    assert device.identifiers == {(DOMAIN, "GS01234")}
+    assert device.manufacturer == "La Marzocco"
+    assert device.name == "GS01234"
+    assert device.sw_version == "1.1"
+
+
+async def test_current_steam_temp(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    device_registry: dr.DeviceRegistry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test the La Marzocco Current Steam temp."""
+    state = hass.states.get("sensor.gs01234_current_steam_temperature")
+    assert state
+    assert state.attributes.get(ATTR_DEVICE_CLASS) == SensorDeviceClass.TEMPERATURE
+    assert state.attributes.get(ATTR_STATE_CLASS) == SensorStateClass.MEASUREMENT
+    assert (
+        state.attributes.get(ATTR_FRIENDLY_NAME) == "GS01234 Current Steam Temperature"
+    )
+    assert state.attributes.get(ATTR_ICON) == "mdi:thermometer"
+    assert state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) == "°C"
+
+    assert state.state == "113"
+
+    entry = entity_registry.async_get(state.entity_id)
+    assert entry
+    assert entry.device_id
+    assert entry.unique_id == "GS01234_current_temp_steam"
+
+    device = device_registry.async_get(entry.device_id)
+    assert device
+    assert device.configuration_url is None
+    assert device.entry_type is None
+    assert device.hw_version is None
+    assert device.identifiers == {(DOMAIN, "GS01234")}
+    assert device.manufacturer == "La Marzocco"
+    assert device.name == "GS01234"
+    assert device.sw_version == "1.1"

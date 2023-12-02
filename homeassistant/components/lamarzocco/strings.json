@@ -178,7 +178,21 @@
         "name": "Start Backflush"
       }
     },
+    "number": {
+      "coffee_temp": {
+        "name": "Coffee Temperature"
+      },
+      "steam_temp": {
+        "name": "Steam Temperature"
+      }
+    },
     "sensor": {
+      "current_temp_coffee": {
+        "name": "Current Coffee Temperature"
+      },
+      "current_temp_steam": {
+        "name": "Current Steam Temperature"
+      },
       "drink_stats": {
         "name": "Drink Statistics"
       },
@@ -209,14 +223,6 @@
       },
       "gateway_firmware": {
         "name": "Gateway Firmware"
-      }
-    },
-    "water_heater": {
-      "coffee_boiler": {
-        "name": "Coffee Boiler"
-      },
-      "steam_boiler": {
-        "name": "Steam Boiler"
       }
     }
   }

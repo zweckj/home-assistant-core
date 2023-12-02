@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -76,13 +76,34 @@ ENTITIES: tuple[LaMarzoccoSensorEntityDescription, ...] = (
         key="shot_timer",
         translation_key="shot_timer",
         icon="mdi:timer",
-        native_unit_of_measurement="s",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.DURATION,
         available_fn=lambda client: client.current_status.get("brew_active_duration")
         is not None,
         value_fn=lambda client: client.current_status.get("brew_active_duration", 0),
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    LaMarzoccoSensorEntityDescription(
+        key="current_temp_coffee",
+        translation_key="current_temp_coffee",
+        icon="mdi:thermometer",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        available_fn=lambda client: client.current_status.get("coffee_temp")
+        is not None,
+        value_fn=lambda client: client.current_status.get("coffee_temp", 0),
+    ),
+    LaMarzoccoSensorEntityDescription(
+        key="current_temp_steam",
+        translation_key="current_temp_steam",
+        icon="mdi:thermometer",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        available_fn=lambda client: client.current_status.get("steam_temp") is not None,
+        value_fn=lambda client: client.current_status.get("steam_temp", 0),
     ),
 )
 

@@ -12,10 +12,10 @@ from .services import async_setup_services
 PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
+    Platform.NUMBER,
     Platform.SENSOR,
     Platform.SWITCH,
     Platform.UPDATE,
-    Platform.WATER_HEATER,
 ]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
