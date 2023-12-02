@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from lmcloud.const import MODEL_GS3_AV, MODEL_GS3_MP, MODEL_LM, MODEL_LMU
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -14,7 +16,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, MODEL_GS3_AV, MODEL_GS3_MP, MODEL_LM, MODEL_LMU
+from .const import DOMAIN
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 from .lm_client import LaMarzoccoClient
 
@@ -103,10 +105,10 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     async_add_entities(
-        LaMarzoccoSensorEntity(coordinator, config_entry, description)
+        LaMarzoccoSensorEntity(coordinator, hass, description)
         for description in ENTITIES
         if not description.extra_attributes
-        or coordinator.lm.model_name in description.extra_attributes
+        or coordinator.data.model_name in description.extra_attributes
     )
 
 
