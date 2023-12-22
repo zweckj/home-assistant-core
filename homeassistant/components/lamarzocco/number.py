@@ -14,6 +14,8 @@ from homeassistant.const import PRECISION_TENTHS, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from lmcloud.const import LaMarzoccoModel
+
 from .const import DOMAIN
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 from .lm_client import LaMarzoccoClient
@@ -25,6 +27,7 @@ class LaMarzoccoNumberEntityDescriptionMixin:
 
     native_value_fn: Callable[[LaMarzoccoClient], float | int]
     set_value_fn: Callable[[LaMarzoccoClient, float | int], Coroutine[Any, Any, bool]]
+    supported_models: tuple[LaMarzoccoModel, ...]
 
 
 @dataclass
@@ -48,6 +51,12 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_max_value=104,
         set_value_fn=lambda client, temp: client.set_coffee_temp(temp),
         native_value_fn=lambda client: client.current_status.get("coffee_set_temp", 0),
+        supported_models=(
+            LaMarzoccoModel.GS3_AV,
+            LaMarzoccoModel.GS3_MP,
+            LaMarzoccoModel.LINEA_MICRA,
+            LaMarzoccoModel.LINEA_MINI,
+        ),
     ),
     LaMarzoccoNumberEntityDescription(
         key="steam_temp",
@@ -60,6 +69,10 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_max_value=131,
         set_value_fn=lambda client, temp: client.set_steam_temp(round(temp)),
         native_value_fn=lambda client: client.current_status.get("steam_set_temp", 0),
+        supported_models=(
+            LaMarzoccoModel.GS3_AV,
+            LaMarzoccoModel.GS3_MP,
+        ),
     ),
 )
 
@@ -75,6 +88,7 @@ async def async_setup_entry(
     async_add_entities(
         LaMarzoccoNumberEntity(coordinator, hass, description)
         for description in ENTITIES
+        if coordinator.data.model_name in description.supported_models
     )
 
 

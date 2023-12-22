@@ -186,6 +186,11 @@
         "name": "Steam Temperature"
       }
     },
+    "select": {
+      "steam_temp_select": {
+        "name": "Steam Level"
+      }
+    },
     "sensor": {
       "current_temp_coffee": {
         "name": "Current Coffee Temperature"

@@ -6,6 +6,7 @@
   "steam_boiler_enable": true,
   "steam_temp": 113,
   "steam_set_temp": 128,
+  "steam_level_set": 2,
   "steam_boiler_on": true,
   "coffee_temp": 93,
   "coffee_set_temp": 95,

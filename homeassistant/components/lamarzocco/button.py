@@ -51,8 +51,7 @@ async def async_setup_entry(
     async_add_entities(
         LaMarzoccoButtonEntity(coordinator, hass, description)
         for description in ENTITIES
-        if not description.extra_attributes
-        or coordinator.data.model_name in description.extra_attributes
+        if coordinator.data.model_name in description.supported_models
     )
 
 
