@@ -7,3 +7,5 @@ NAME = "Tedee"
 SCAN_INTERVAL = timedelta(seconds=10)
 
 CONF_LOCAL_ACCESS_TOKEN = "local_access_token"
+CONF_USE_CLOUD = "use_cloud"
+CONF_BRIDGE_ID = "bridge_id"
