@@ -21,7 +21,14 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from .const import CONF_BRIDGE_ID, CONF_LOCAL_ACCESS_TOKEN, CONF_USE_CLOUD, DOMAIN, NAME
+from .const import (
+    CONF_CLOUD_BRIDGE_ID,
+    CONF_LOCAL_ACCESS_TOKEN,
+    CONF_USE_CLOUD_API,
+    CONF_USE_LOCAL_API,
+    DOMAIN,
+    NAME,
+)
 
 
 class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -36,6 +43,30 @@ class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
         self.reauth_entry: ConfigEntry | None = None
 
     async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the initial step."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            if user_input.get(CONF_USE_LOCAL_API):
+                return await self.async_step_configure_local(user_input)
+            if user_input.get(CONF_USE_CLOUD_API):
+                return await self.async_step_configure_cloud(user_input)
+            errors["base"] = "no_option_selected"
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_USE_LOCAL_API): bool,
+                    vol.Optional(CONF_USE_CLOUD_API): bool,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_configure_local(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
@@ -66,7 +97,7 @@ class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
                     return self.async_abort(reason="reauth_successful")
                 await self.async_set_unique_id(self._local_bridge.serial)
                 self._abort_if_unique_id_configured()
-                if user_input.get(CONF_USE_CLOUD):
+                if user_input.get(CONF_USE_CLOUD_API):
                     self._previous_step_data = user_input
                     return await self.async_step_configure_cloud()
                 return self.async_create_entry(title=NAME, data=user_input)
@@ -120,7 +151,7 @@ class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
                             title=NAME,
                             data=user_input
                             | self._previous_step_data
-                            | {CONF_BRIDGE_ID: cloud_bridge.bridge_id},
+                            | {CONF_CLOUD_BRIDGE_ID: cloud_bridge.bridge_id},
                         )
 
                     self._bridges = bridges
@@ -143,7 +174,7 @@ class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
             selected_bridge = [
                 bridge
                 for bridge in self._bridges
-                if str(bridge.bridge_id) == user_input[CONF_BRIDGE_ID]
+                if str(bridge.bridge_id) == user_input[CONF_CLOUD_BRIDGE_ID]
             ][0]
             await self.async_set_unique_id(selected_bridge.serial)
             self._abort_if_unique_id_configured()
@@ -155,7 +186,7 @@ class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
 
         bridge_selection_schema = vol.Schema(
             {
-                vol.Required(CONF_BRIDGE_ID): SelectSelector(
+                vol.Required(CONF_CLOUD_BRIDGE_ID): SelectSelector(
                     SelectSelectorConfig(
                         options=[
                             SelectOptionDict(

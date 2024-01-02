@@ -4,6 +4,13 @@
       "user": {
         "title": "Setup your tedee locks",
         "data": {
+          "use_local_api": "Use the local API",
+          "use_cloud_api": "Use the cloud API"
+        }
+      },
+      "configure_local": {
+        "title": "Setup your tedee locks",
+        "data": {
           "local_access_token": "Local access token",
           "host": "[%key:common::config_flow::data::host%]"
         },
@@ -12,14 +19,22 @@
           "local_access_token": "You can find it in the tedee app under \"Bridge Settings\" -> \"Local API\"."
         }
       },
+      "configure_cloud": {
+        "data": {
+          "access_token": "Personal access key"
+        },
+        "data_description": {
+          "access_token": "Personal access key with Scopes \"Devices: Read\" and \"Locks: Operate\""
+        }
+      },
       "reauth_confirm": {
         "title": "Update of access key required",
         "description": "Tedee needs an updated access key, because the existing one is invalid, or might have expired.",
         "data": {
-          "local_access_token": "[%key:component::tedee::config::step::user::data::local_access_token%]"
+          "local_access_token": "[%key:component::tedee::config::step::configure_local::data::local_access_token%]"
         },
         "data_description": {
-          "local_access_token": "[%key:component::tedee::config::step::user::data_description::local_access_token%]"
+          "local_access_token": "[%key:component::tedee::config::step::configure_local::data_description::local_access_token%]"
         }
       }
     },
