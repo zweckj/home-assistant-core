@@ -126,7 +126,7 @@ class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
             bridges: list[TedeeBridge] = []
             tedee_client = TedeeClient(personal_token=user_input[CONF_ACCESS_TOKEN])
             try:
-                await tedee_client.get_bridges()
+                bridges = await tedee_client.get_bridges()
             except TedeeAuthException:
                 errors[CONF_ACCESS_TOKEN] = "invalid_api_key"
             except TedeeClientException:
@@ -211,14 +211,34 @@ class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
         self.reauth_entry = self.hass.config_entries.async_get_entry(
             self.context["entry_id"]
         )
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Confirm reauth upon an API authentication error."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if user_input.get(CONF_USE_LOCAL_API):
+                pass
+            if user_input.get(CONF_USE_CLOUD_API):
+                pass
+            errors["base"] = "no_option_selected"
+
+        assert self.reauth_entry
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
+                    vol.Optional(
                         CONF_LOCAL_ACCESS_TOKEN,
-                        default=entry_data[CONF_LOCAL_ACCESS_TOKEN],
+                        default=self.reauth_entry.data.get(CONF_LOCAL_ACCESS_TOKEN),
+                    ): str,
+                    vol.Optional(
+                        CONF_ACCESS_TOKEN,
+                        default=self.reauth_entry.data.get(CONF_ACCESS_TOKEN),
                     ): str,
                 }
             ),
+            errors=errors,
         )
