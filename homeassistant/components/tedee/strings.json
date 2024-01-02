@@ -45,7 +45,8 @@
     "error": {
       "invalid_api_key": "[%key:common::config_flow::error::invalid_api_key%]",
       "invalid_host": "[%key:common::config_flow::error::invalid_host%]",
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "no_option_selected": "Must select at least one"
     }
   },
   "entity": {
