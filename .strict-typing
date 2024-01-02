@@ -75,6 +75,7 @@ homeassistant.components.androidtv_remote.*
 homeassistant.components.anel_pwrctrl.*
 homeassistant.components.anova.*
 homeassistant.components.anthemav.*
+homeassistant.components.apache_kafka.*
 homeassistant.components.apcupsd.*
 homeassistant.components.apprise.*
 homeassistant.components.aprs.*
@@ -84,6 +85,7 @@ homeassistant.components.aranet.*
 homeassistant.components.arcam_fmj.*
 homeassistant.components.arris_tg2492lg.*
 homeassistant.components.aruba.*
+homeassistant.components.arwn.*
 homeassistant.components.aseko_pool_live.*
 homeassistant.components.assist_pipeline.*
 homeassistant.components.asterisk_cdr.*
@@ -201,6 +203,7 @@ homeassistant.components.homekit_controller.utils
 homeassistant.components.homewizard.*
 homeassistant.components.http.*
 homeassistant.components.huawei_lte.*
+homeassistant.components.humidifier.*
 homeassistant.components.hydrawise.*
 homeassistant.components.hyperion.*
 homeassistant.components.ibeacon.*
