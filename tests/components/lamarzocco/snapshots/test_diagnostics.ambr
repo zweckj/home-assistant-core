@@ -265,6 +265,7 @@
       }),
     }),
     'machine_info': dict({
+<<<<<<< HEAD
       'machine_name': '**REDACTED**',
       'serial_number': '**REDACTED**',
     }),
@@ -1460,6 +1461,9 @@
     }),
     'machine_info': dict({
       'machine_name': 'MR01234',
+=======
+      'machine_name': 'GS01234',
+>>>>>>> add snapshot
       'serial_number': '**REDACTED**',
     }),
     'statistics': dict({
