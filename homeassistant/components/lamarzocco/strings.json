@@ -35,6 +35,11 @@
     }
   },
   "entity": {
+    "select": {
+      "steam_temp_select": {
+        "name": "Steam level"
+      }
+    },
     "switch": {
       "main": {
         "name": "Main"
