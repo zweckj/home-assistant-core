@@ -56,6 +56,9 @@ async def test_coffee_boiler(
     mock_lamarzocco.set_coffee_temp.assert_called_once_with(temperature=95)
 
 
+@pytest.mark.parametrize(
+    "device_fixture", [LaMarzoccoModel.GS3_AV, LaMarzoccoModel.GS3_MP]
+)
 async def test_steam_boiler(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
@@ -66,16 +69,7 @@ async def test_steam_boiler(
 
     serial_number = mock_lamarzocco.serial_number
 
-    mock_lamarzocco.set_power.return_value = None
-    mock_lamarzocco.set_coffee_temp.return_value = None
-
     state = hass.states.get(f"number.{serial_number}_steam_temperature")
-    if mock_lamarzocco.model_name in (
-        LaMarzoccoModel.LINEA_MICRA,
-        LaMarzoccoModel.LINEA_MINI,
-    ):
-        assert state is None
-        return
     assert state
     assert state == snapshot
 
@@ -97,3 +91,20 @@ async def test_steam_boiler(
 
     assert len(mock_lamarzocco.set_steam_temp.mock_calls) == 1
     mock_lamarzocco.set_steam_temp.assert_called_once_with(temperature=131)
+
+
+@pytest.mark.parametrize(
+    "device_fixture", [LaMarzoccoModel.LINEA_MICRA, LaMarzoccoModel.LINEA_MINI]
+)
+async def test_steam_boiler_none(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    entity_registry: er.EntityRegistry,
+    snapshot: SnapshotAssertion,
+) -> None:
+    """Ensure steam boiler number is None for unsupported models."""
+
+    serial_number = mock_lamarzocco.serial_number
+
+    state = hass.states.get(f"number.{serial_number}_steam_temperature")
+    assert state is None
