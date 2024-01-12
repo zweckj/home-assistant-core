@@ -9,6 +9,7 @@ from .coordinator import LaMarzoccoUpdateCoordinator
 
 PLATFORMS = [
     Platform.SWITCH,
+    Platform.UPDATE,
 ]
 
 

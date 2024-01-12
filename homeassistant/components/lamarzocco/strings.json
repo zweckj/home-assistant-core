@@ -51,6 +51,14 @@
       "steam_boiler": {
         "name": "Steam boiler"
       }
+    },
+    "update": {
+      "machine_firmware": {
+        "name": "Machine firmware"
+      },
+      "gateway_firmware": {
+        "name": "Gateway firmware"
+      }
     }
   }
 }
