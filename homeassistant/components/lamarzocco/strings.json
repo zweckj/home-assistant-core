@@ -35,6 +35,23 @@
     }
   },
   "entity": {
+    "sensor": {
+      "current_temp_coffee": {
+        "name": "Current coffee temperature"
+      },
+      "current_temp_steam": {
+        "name": "Current steam temperature"
+      },
+      "drink_stats_coffee": {
+        "name": "Drink statistics coffee"
+      },
+      "drink_stats_flushing": {
+        "name": "Drink statistics flushing"
+      },
+      "shot_timer": {
+        "name": "Shot timer"
+      }
+    },
     "switch": {
       "main": {
         "name": "Main"
