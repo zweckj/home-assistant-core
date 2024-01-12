@@ -19,6 +19,7 @@ from homeassistant.helpers import entity_registry as er
 pytestmark = pytest.mark.usefixtures("init_integration")
 
 
+@pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.LINEA_MICRA])
 async def test_steam_boiler_level(
     hass: HomeAssistant,
     entity_registry: er.EntityRegistry,
@@ -30,10 +31,6 @@ async def test_steam_boiler_level(
     serial_number = mock_lamarzocco.serial_number
 
     state = hass.states.get(f"select.{serial_number}_steam_level")
-
-    if mock_lamarzocco.model_name != LaMarzoccoModel.LINEA_MICRA:
-        assert state is None
-        return
 
     assert state
     assert state == snapshot
@@ -56,3 +53,18 @@ async def test_steam_boiler_level(
 
     assert len(mock_lamarzocco.set_steam_level.mock_calls) == 1
     mock_lamarzocco.set_steam_level.assert_called_once_with(level=1)
+
+
+@pytest.mark.parametrize(
+    "device_fixture",
+    [LaMarzoccoModel.GS3_AV, LaMarzoccoModel.GS3_MP, LaMarzoccoModel.LINEA_MINI],
+)
+async def test_steam_boiler_level_none(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+) -> None:
+    """Ensure the La Marzocco Steam Level Select is not created for non-Micra models."""
+    serial_number = mock_lamarzocco.serial_number
+    state = hass.states.get(f"select.{serial_number}_steam_level")
+
+    assert state is None
