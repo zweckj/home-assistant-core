@@ -35,6 +35,14 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "water_reservoir": {
+        "name": "Water reservoir"
+      },
+      "brew_active": {
+        "name": "Brew active"
+      }
+    },
     "switch": {
       "main": {
         "name": "Main"
