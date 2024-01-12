@@ -1,6 +1,7 @@
 """Test the LaMarzocco services."""
 from unittest.mock import MagicMock
 
+from lmcloud.const import LaMarzoccoModel
 from lmcloud.exceptions import RequestNotSuccessful
 import pytest
 
@@ -26,7 +27,7 @@ from homeassistant.components.lamarzocco.services import (
     SERVICE_PREINFUSION_TIME,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from tests.common import MockConfigEntry
 
@@ -125,6 +126,33 @@ async def test_service_set_dose(
     mock_lamarzocco.set_dose.assert_called_once_with(key=2, value=300)
 
 
+@pytest.mark.parametrize(
+    "device_fixture",
+    [LaMarzoccoModel.GS3_MP, LaMarzoccoModel.LINEA_MICRA, LaMarzoccoModel.LINEA_MINI],
+)
+async def test_service_set_dose_validation_error(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Ensure the set dose service is only callable by GS3AV."""
+
+    with pytest.raises(
+        ServiceValidationError,
+        match=f"Model {mock_lamarzocco.model_name} does not support this service",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_DOSE,
+            {
+                CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
+                CONF_KEY: 2,
+                CONF_PULSES: 300,
+            },
+            blocking=True,
+        )
+
+
 async def test_service_set_dose_hot_water(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
@@ -144,6 +172,31 @@ async def test_service_set_dose_hot_water(
 
     assert len(mock_lamarzocco.set_dose_hot_water.mock_calls) == 1
     mock_lamarzocco.set_dose_hot_water.assert_called_once_with(value=16)
+
+
+@pytest.mark.parametrize(
+    "device_fixture", [LaMarzoccoModel.LINEA_MICRA, LaMarzoccoModel.LINEA_MINI]
+)
+async def test_service_set_dose_hot_water_validation_error(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test the La Marzocco set dose hot water service."""
+
+    with pytest.raises(
+        ServiceValidationError,
+        match=f"Model {mock_lamarzocco.model_name} does not support this service",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_DOSE_HOT_WATER,
+            {
+                CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
+                CONF_SECONDS: 16,
+            },
+            blocking=True,
+        )
 
 
 async def test_service_set_prebrew_times(
@@ -171,6 +224,64 @@ async def test_service_set_prebrew_times(
     )
 
 
+@pytest.mark.parametrize(
+    "device_fixture",
+    [LaMarzoccoModel.GS3_MP],
+)
+async def test_service_set_prebrew_times_unsupported_model(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Ensure GS3MP can not call."""
+
+    with pytest.raises(
+        ServiceValidationError,
+        match=f"Model {mock_lamarzocco.model_name} does not support this service",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_PREBREW_TIMES,
+            {
+                CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
+                CONF_KEY: 3,
+                CONF_SECONDS_ON: 4,
+                CONF_SECONDS_OFF: 5,
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "device_fixture",
+    [LaMarzoccoModel.LINEA_MICRA, LaMarzoccoModel.LINEA_MINI],
+)
+@pytest.mark.parametrize("key", ["2", "3", "4"])
+async def test_service_set_prebrew_times_invalid_key(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+    key: str,
+) -> None:
+    """Ensure keys greater than 1 fail for Mini and Micra."""
+
+    with pytest.raises(
+        ServiceValidationError,
+        match=f"Key {key} is not supported for model {mock_lamarzocco.model_name}",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_PREBREW_TIMES,
+            {
+                CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
+                CONF_KEY: int(key),
+                CONF_SECONDS_ON: 4,
+                CONF_SECONDS_OFF: 5,
+            },
+            blocking=True,
+        )
+
+
 async def test_service_set_preinfusion_time(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
@@ -191,3 +302,59 @@ async def test_service_set_preinfusion_time(
 
     assert len(mock_lamarzocco.set_preinfusion_time.mock_calls) == 1
     mock_lamarzocco.set_preinfusion_time.assert_called_once_with(key=3, seconds=6)
+
+
+@pytest.mark.parametrize(
+    "device_fixture",
+    [LaMarzoccoModel.GS3_MP],
+)
+async def test_service_set_preinfusion_times_unsupported_model(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Ensure GS3MP can not call."""
+
+    with pytest.raises(
+        ServiceValidationError,
+        match=f"Model {mock_lamarzocco.model_name} does not support this service",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_PREINFUSION_TIME,
+            {
+                CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
+                CONF_KEY: 3,
+                CONF_SECONDS: 6,
+            },
+            blocking=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "device_fixture",
+    [LaMarzoccoModel.LINEA_MICRA, LaMarzoccoModel.LINEA_MINI],
+)
+@pytest.mark.parametrize("key", ["2", "3", "4"])
+async def test_service_set_preinfusion_times_invalid_key(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+    key: str,
+) -> None:
+    """Ensure keys greater than 1 fail for Mini and Micra."""
+
+    with pytest.raises(
+        ServiceValidationError,
+        match=f"Key {key} is not supported for model {mock_lamarzocco.model_name}",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_PREINFUSION_TIME,
+            {
+                CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
+                CONF_KEY: int(key),
+                CONF_SECONDS: 6,
+            },
+            blocking=True,
+        )

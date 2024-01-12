@@ -198,6 +198,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         coordinator = __get_coordinator(hass, service)
         if coordinator.lm.model_name != LaMarzoccoModel.GS3_AV:
             raise ServiceValidationError(
+                f"Model {coordinator.lm.model_name} does not support this service",
                 translation_domain=DOMAIN,
                 translation_key="invalid_model",
                 translation_placeholders={
@@ -219,6 +220,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             LaMarzoccoModel.GS3_MP,
         ):
             raise ServiceValidationError(
+                f"Model {coordinator.lm.model_name} does not support this service",
                 translation_domain=DOMAIN,
                 translation_key="invalid_model",
                 translation_placeholders={
@@ -240,6 +242,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
         if coordinator.lm.model_name == LaMarzoccoModel.GS3_MP:
             raise ServiceValidationError(
+                f"Model {coordinator.lm.model_name} does not support this service",
                 translation_domain=DOMAIN,
                 translation_key="invalid_model",
                 translation_placeholders={
@@ -255,6 +258,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             and key > 1
         ):
             raise ServiceValidationError(
+                f"Key {key} is not supported for model {coordinator.lm.model_name}",
                 translation_domain=DOMAIN,
                 translation_key="invalid_key",
                 translation_placeholders={
@@ -282,7 +286,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
         coordinator = __get_coordinator(hass, service)
 
         if coordinator.lm.model_name == LaMarzoccoModel.GS3_MP:
-            raise ServiceValidationError(translation_key="invalid_model")
+            raise ServiceValidationError(
+                f"Model {coordinator.lm.model_name} does not support this service",
+                translation_domain=DOMAIN,
+                translation_key="invalid_model",
+                translation_placeholders={
+                    "model": coordinator.lm.model_name,
+                },
+            )
 
         if (
             coordinator.lm.model_name
@@ -293,6 +304,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             and key > 1
         ):
             raise ServiceValidationError(
+                f"Key {key} is not supported for model {coordinator.lm.model_name}",
                 translation_domain=DOMAIN,
                 translation_key="invalid_key",
                 translation_placeholders={
