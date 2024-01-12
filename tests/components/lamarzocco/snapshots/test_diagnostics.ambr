@@ -562,35 +562,37 @@
       }),
     }),
     'machine_info': dict({
-      'machine_name': '**REDACTED**',
+      'machine_name': 'GS01234',
       'serial_number': '**REDACTED**',
     }),
-    'statistics': list([
-      dict({
-        'coffeeType': 0,
-        'count': 1047,
-      }),
-      dict({
-        'coffeeType': 1,
-        'count': 560,
-      }),
-      dict({
-        'coffeeType': 2,
-        'count': 468,
-      }),
-      dict({
-        'coffeeType': 3,
-        'count': 312,
-      }),
-      dict({
-        'coffeeType': 4,
-        'count': 2252,
-      }),
-      dict({
-        'coffeeType': -1,
-        'count': 1740,
-      }),
-    ]),
+    'statistics': dict({
+      'stats': list([
+        dict({
+          'coffeeType': 0,
+          'count': 1047,
+        }),
+        dict({
+          'coffeeType': 1,
+          'count': 560,
+        }),
+        dict({
+          'coffeeType': 2,
+          'count': 468,
+        }),
+        dict({
+          'coffeeType': 3,
+          'count': 312,
+        }),
+        dict({
+          'coffeeType': 4,
+          'count': 2252,
+        }),
+        dict({
+          'coffeeType': -1,
+          'count': 1740,
+        }),
+      ]),
+    }),
   })
 # ---
 # name: test_diagnostics[GS3 MP]
@@ -859,35 +861,37 @@
       }),
     }),
     'machine_info': dict({
-      'machine_name': '**REDACTED**',
+      'machine_name': 'GS01234',
       'serial_number': '**REDACTED**',
     }),
-    'statistics': list([
-      dict({
-        'coffeeType': 0,
-        'count': 1047,
-      }),
-      dict({
-        'coffeeType': 1,
-        'count': 560,
-      }),
-      dict({
-        'coffeeType': 2,
-        'count': 468,
-      }),
-      dict({
-        'coffeeType': 3,
-        'count': 312,
-      }),
-      dict({
-        'coffeeType': 4,
-        'count': 2252,
-      }),
-      dict({
-        'coffeeType': -1,
-        'count': 1740,
-      }),
-    ]),
+    'statistics': dict({
+      'stats': list([
+        dict({
+          'coffeeType': 0,
+          'count': 1047,
+        }),
+        dict({
+          'coffeeType': 1,
+          'count': 560,
+        }),
+        dict({
+          'coffeeType': 2,
+          'count': 468,
+        }),
+        dict({
+          'coffeeType': 3,
+          'count': 312,
+        }),
+        dict({
+          'coffeeType': 4,
+          'count': 2252,
+        }),
+        dict({
+          'coffeeType': -1,
+          'count': 1740,
+        }),
+      ]),
+    }),
   })
 # ---
 # name: test_diagnostics[Linea Mini]
@@ -1156,35 +1160,37 @@
       }),
     }),
     'machine_info': dict({
-      'machine_name': '**REDACTED**',
+      'machine_name': 'LM01234',
       'serial_number': '**REDACTED**',
     }),
-    'statistics': list([
-      dict({
-        'coffeeType': 0,
-        'count': 1047,
-      }),
-      dict({
-        'coffeeType': 1,
-        'count': 560,
-      }),
-      dict({
-        'coffeeType': 2,
-        'count': 468,
-      }),
-      dict({
-        'coffeeType': 3,
-        'count': 312,
-      }),
-      dict({
-        'coffeeType': 4,
-        'count': 2252,
-      }),
-      dict({
-        'coffeeType': -1,
-        'count': 1740,
-      }),
-    ]),
+    'statistics': dict({
+      'stats': list([
+        dict({
+          'coffeeType': 0,
+          'count': 1047,
+        }),
+        dict({
+          'coffeeType': 1,
+          'count': 560,
+        }),
+        dict({
+          'coffeeType': 2,
+          'count': 468,
+        }),
+        dict({
+          'coffeeType': 3,
+          'count': 312,
+        }),
+        dict({
+          'coffeeType': 4,
+          'count': 2252,
+        }),
+        dict({
+          'coffeeType': -1,
+          'count': 1740,
+        }),
+      ]),
+    }),
   })
 # ---
 # name: test_diagnostics[Micra]
@@ -1453,34 +1459,36 @@
       }),
     }),
     'machine_info': dict({
-      'machine_name': '**REDACTED**',
+      'machine_name': 'MR01234',
       'serial_number': '**REDACTED**',
     }),
-    'statistics': list([
-      dict({
-        'coffeeType': 0,
-        'count': 1047,
-      }),
-      dict({
-        'coffeeType': 1,
-        'count': 560,
-      }),
-      dict({
-        'coffeeType': 2,
-        'count': 468,
-      }),
-      dict({
-        'coffeeType': 3,
-        'count': 312,
-      }),
-      dict({
-        'coffeeType': 4,
-        'count': 2252,
-      }),
-      dict({
-        'coffeeType': -1,
-        'count': 1740,
-      }),
-    ]),
+    'statistics': dict({
+      'stats': list([
+        dict({
+          'coffeeType': 0,
+          'count': 1047,
+        }),
+        dict({
+          'coffeeType': 1,
+          'count': 560,
+        }),
+        dict({
+          'coffeeType': 2,
+          'count': 468,
+        }),
+        dict({
+          'coffeeType': 3,
+          'count': 312,
+        }),
+        dict({
+          'coffeeType': 4,
+          'count': 2252,
+        }),
+        dict({
+          'coffeeType': -1,
+          'count': 1740,
+        }),
+      ]),
+    }),
   })
 # ---
