@@ -1,0 +1,331 @@
+# serializer version: 1
+# name: test_coffee_boiler[GS3 AV]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'temperature',
+      'friendly_name': 'GS01234 Coffee temperature',
+      'icon': 'mdi:coffee-maker',
+      'max': 104,
+      'min': 85,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_coffee_temperature',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '95',
+  })
+# ---
+# name: test_coffee_boiler[GS3 AV].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': dict({
+      'max': 104,
+      'min': 85,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+    }),
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'number',
+    'entity_category': None,
+    'entity_id': 'number.gs01234_coffee_temperature',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': <NumberDeviceClass.TEMPERATURE: 'temperature'>,
+    'original_icon': 'mdi:coffee-maker',
+    'original_name': 'Coffee temperature',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'coffee_temp',
+    'unique_id': 'GS01234_coffee_temp',
+    'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+  })
+# ---
+# name: test_coffee_boiler[GS3 MP]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'temperature',
+      'friendly_name': 'GS01234 Coffee temperature',
+      'icon': 'mdi:coffee-maker',
+      'max': 104,
+      'min': 85,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_coffee_temperature',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '95',
+  })
+# ---
+# name: test_coffee_boiler[GS3 MP].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': dict({
+      'max': 104,
+      'min': 85,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+    }),
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'number',
+    'entity_category': None,
+    'entity_id': 'number.gs01234_coffee_temperature',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': <NumberDeviceClass.TEMPERATURE: 'temperature'>,
+    'original_icon': 'mdi:coffee-maker',
+    'original_name': 'Coffee temperature',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'coffee_temp',
+    'unique_id': 'GS01234_coffee_temp',
+    'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+  })
+# ---
+# name: test_coffee_boiler[Linea Mini]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'temperature',
+      'friendly_name': 'LM01234 Coffee temperature',
+      'icon': 'mdi:coffee-maker',
+      'max': 104,
+      'min': 85,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.lm01234_coffee_temperature',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '95',
+  })
+# ---
+# name: test_coffee_boiler[Linea Mini].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': dict({
+      'max': 104,
+      'min': 85,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+    }),
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'number',
+    'entity_category': None,
+    'entity_id': 'number.lm01234_coffee_temperature',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': <NumberDeviceClass.TEMPERATURE: 'temperature'>,
+    'original_icon': 'mdi:coffee-maker',
+    'original_name': 'Coffee temperature',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'coffee_temp',
+    'unique_id': 'LM01234_coffee_temp',
+    'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+  })
+# ---
+# name: test_coffee_boiler[Micra]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'temperature',
+      'friendly_name': 'MR01234 Coffee temperature',
+      'icon': 'mdi:coffee-maker',
+      'max': 104,
+      'min': 85,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.mr01234_coffee_temperature',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '95',
+  })
+# ---
+# name: test_coffee_boiler[Micra].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': dict({
+      'max': 104,
+      'min': 85,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+    }),
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'number',
+    'entity_category': None,
+    'entity_id': 'number.mr01234_coffee_temperature',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': <NumberDeviceClass.TEMPERATURE: 'temperature'>,
+    'original_icon': 'mdi:coffee-maker',
+    'original_name': 'Coffee temperature',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'coffee_temp',
+    'unique_id': 'MR01234_coffee_temp',
+    'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+  })
+# ---
+# name: test_steam_boiler[GS3 AV]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'temperature',
+      'friendly_name': 'GS01234 Steam temperature',
+      'icon': 'mdi:kettle-steam',
+      'max': 131,
+      'min': 126,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_steam_temperature',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '128',
+  })
+# ---
+# name: test_steam_boiler[GS3 AV].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': dict({
+      'max': 131,
+      'min': 126,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+    }),
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'number',
+    'entity_category': None,
+    'entity_id': 'number.gs01234_steam_temperature',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': <NumberDeviceClass.TEMPERATURE: 'temperature'>,
+    'original_icon': 'mdi:kettle-steam',
+    'original_name': 'Steam temperature',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'steam_temp',
+    'unique_id': 'GS01234_steam_temp',
+    'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+  })
+# ---
+# name: test_steam_boiler[GS3 MP]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'temperature',
+      'friendly_name': 'GS01234 Steam temperature',
+      'icon': 'mdi:kettle-steam',
+      'max': 131,
+      'min': 126,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_steam_temperature',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '128',
+  })
+# ---
+# name: test_steam_boiler[GS3 MP].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': dict({
+      'max': 131,
+      'min': 126,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+    }),
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'number',
+    'entity_category': None,
+    'entity_id': 'number.gs01234_steam_temperature',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': <NumberDeviceClass.TEMPERATURE: 'temperature'>,
+    'original_icon': 'mdi:kettle-steam',
+    'original_name': 'Steam temperature',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'steam_temp',
+    'unique_id': 'GS01234_steam_temp',
+    'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
+  })
+# ---
