@@ -99,8 +99,6 @@ async def test_steam_boiler(
 async def test_steam_boiler_none(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
-    entity_registry: er.EntityRegistry,
-    snapshot: SnapshotAssertion,
 ) -> None:
     """Ensure steam boiler number is None for unsupported models."""
 
