@@ -1,5 +1,5 @@
 # serializer version: 1
-# name: test_binary_sensors[GS3 AV][GS01234_brew_active-binary_sensor]
+# name: test_binary_sensors[GS01234_brew_active-binary_sensor]
   StateSnapshot({
     'attributes': ReadOnlyDict({
       'device_class': 'running',
@@ -13,7 +13,7 @@
     'state': 'off',
   })
 # ---
-# name: test_binary_sensors[GS3 AV][GS01234_brew_active-entry]
+# name: test_binary_sensors[GS01234_brew_active-entry]
   EntityRegistryEntrySnapshot({
     'aliases': set({
     }),
@@ -44,7 +44,7 @@
     'unit_of_measurement': None,
   })
 # ---
-# name: test_binary_sensors[GS3 AV][GS01234_water_reservoir-binary_sensor]
+# name: test_binary_sensors[GS01234_water_reservoir-binary_sensor]
   StateSnapshot({
     'attributes': ReadOnlyDict({
       'device_class': 'problem',
@@ -58,7 +58,7 @@
     'state': 'off',
   })
 # ---
-# name: test_binary_sensors[GS3 AV][GS01234_water_reservoir-entry]
+# name: test_binary_sensors[GS01234_water_reservoir-entry]
   EntityRegistryEntrySnapshot({
     'aliases': set({
     }),
@@ -86,276 +86,6 @@
     'supported_features': 0,
     'translation_key': 'water_reservoir',
     'unique_id': 'GS01234_water_reservoir',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_binary_sensors[GS3 MP][GS01234_brew_active-binary_sensor]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'device_class': 'running',
-      'friendly_name': 'GS01234 Brew active',
-      'icon': 'mdi:cup-water',
-    }),
-    'context': <ANY>,
-    'entity_id': 'binary_sensor.gs01234_brew_active',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'off',
-  })
-# ---
-# name: test_binary_sensors[GS3 MP][GS01234_brew_active-entry]
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'binary_sensor',
-    'entity_category': <EntityCategory.DIAGNOSTIC: 'diagnostic'>,
-    'entity_id': 'binary_sensor.gs01234_brew_active',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': <BinarySensorDeviceClass.RUNNING: 'running'>,
-    'original_icon': 'mdi:cup-water',
-    'original_name': 'Brew active',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'brew_active',
-    'unique_id': 'GS01234_brew_active',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_binary_sensors[GS3 MP][GS01234_water_reservoir-binary_sensor]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'device_class': 'problem',
-      'friendly_name': 'GS01234 Water reservoir',
-      'icon': 'mdi:water-well',
-    }),
-    'context': <ANY>,
-    'entity_id': 'binary_sensor.gs01234_water_reservoir',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'off',
-  })
-# ---
-# name: test_binary_sensors[GS3 MP][GS01234_water_reservoir-entry]
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'binary_sensor',
-    'entity_category': <EntityCategory.DIAGNOSTIC: 'diagnostic'>,
-    'entity_id': 'binary_sensor.gs01234_water_reservoir',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': <BinarySensorDeviceClass.PROBLEM: 'problem'>,
-    'original_icon': 'mdi:water-well',
-    'original_name': 'Water reservoir',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'water_reservoir',
-    'unique_id': 'GS01234_water_reservoir',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_binary_sensors[Linea Mini][LM01234_brew_active-binary_sensor]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'device_class': 'running',
-      'friendly_name': 'LM01234 Brew active',
-      'icon': 'mdi:cup-water',
-    }),
-    'context': <ANY>,
-    'entity_id': 'binary_sensor.lm01234_brew_active',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'off',
-  })
-# ---
-# name: test_binary_sensors[Linea Mini][LM01234_brew_active-entry]
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'binary_sensor',
-    'entity_category': <EntityCategory.DIAGNOSTIC: 'diagnostic'>,
-    'entity_id': 'binary_sensor.lm01234_brew_active',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': <BinarySensorDeviceClass.RUNNING: 'running'>,
-    'original_icon': 'mdi:cup-water',
-    'original_name': 'Brew active',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'brew_active',
-    'unique_id': 'LM01234_brew_active',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_binary_sensors[Linea Mini][LM01234_water_reservoir-binary_sensor]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'device_class': 'problem',
-      'friendly_name': 'LM01234 Water reservoir',
-      'icon': 'mdi:water-well',
-    }),
-    'context': <ANY>,
-    'entity_id': 'binary_sensor.lm01234_water_reservoir',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'off',
-  })
-# ---
-# name: test_binary_sensors[Linea Mini][LM01234_water_reservoir-entry]
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'binary_sensor',
-    'entity_category': <EntityCategory.DIAGNOSTIC: 'diagnostic'>,
-    'entity_id': 'binary_sensor.lm01234_water_reservoir',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': <BinarySensorDeviceClass.PROBLEM: 'problem'>,
-    'original_icon': 'mdi:water-well',
-    'original_name': 'Water reservoir',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'water_reservoir',
-    'unique_id': 'LM01234_water_reservoir',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_binary_sensors[Micra][MR01234_brew_active-binary_sensor]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'device_class': 'running',
-      'friendly_name': 'MR01234 Brew active',
-      'icon': 'mdi:cup-water',
-    }),
-    'context': <ANY>,
-    'entity_id': 'binary_sensor.mr01234_brew_active',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'off',
-  })
-# ---
-# name: test_binary_sensors[Micra][MR01234_brew_active-entry]
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'binary_sensor',
-    'entity_category': <EntityCategory.DIAGNOSTIC: 'diagnostic'>,
-    'entity_id': 'binary_sensor.mr01234_brew_active',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': <BinarySensorDeviceClass.RUNNING: 'running'>,
-    'original_icon': 'mdi:cup-water',
-    'original_name': 'Brew active',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'brew_active',
-    'unique_id': 'MR01234_brew_active',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_binary_sensors[Micra][MR01234_water_reservoir-binary_sensor]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'device_class': 'problem',
-      'friendly_name': 'MR01234 Water reservoir',
-      'icon': 'mdi:water-well',
-    }),
-    'context': <ANY>,
-    'entity_id': 'binary_sensor.mr01234_water_reservoir',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'off',
-  })
-# ---
-# name: test_binary_sensors[Micra][MR01234_water_reservoir-entry]
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'binary_sensor',
-    'entity_category': <EntityCategory.DIAGNOSTIC: 'diagnostic'>,
-    'entity_id': 'binary_sensor.mr01234_water_reservoir',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': <BinarySensorDeviceClass.PROBLEM: 'problem'>,
-    'original_icon': 'mdi:water-well',
-    'original_name': 'Water reservoir',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'water_reservoir',
-    'unique_id': 'MR01234_water_reservoir',
     'unit_of_measurement': None,
   })
 # ---
