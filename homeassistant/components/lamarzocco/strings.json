@@ -36,6 +36,14 @@
     }
   },
   "entity": {
+    "number": {
+      "coffee_temp": {
+        "name": "Coffee temperature"
+      },
+      "steam_temp": {
+        "name": "Steam temperature"
+      }
+    },
     "switch": {
       "main": {
         "name": "Main"
