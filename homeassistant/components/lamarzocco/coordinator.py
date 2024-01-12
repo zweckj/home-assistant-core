@@ -21,7 +21,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_MACHINE, DOMAIN
+from .const import CONF_MACHINE, CONF_USE_BLUETOOTH, DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=30)
 
@@ -77,37 +77,43 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None]):
             machine_serial=self.config_entry.data[CONF_MACHINE],
         )
         _LOGGER.debug("Model name: %s", self._lm.model_name)
+
         # initialize Bluetooth
-        if mac_address and name:
-            # coming from discovery
-            _LOGGER.debug("Initializing with known Bluetooth device")
-            self._use_bluetooth = True
-            await self._lm.init_bluetooth_with_known_device(username, mac_address, name)
-        else:
-            # check if there are any bluetooth adapters to use
-            count = bluetooth.async_scanner_count(self.hass, connectable=True)
-            if count > 0:
-                _LOGGER.debug("Found Bluetooth adapters, initializing with Bluetooth")
-
-                bt_scanner = bluetooth.async_get_scanner(self.hass)
-
-                try:
-                    await self._lm.init_bluetooth(
-                        username=username,
-                        init_client=False,
-                        bluetooth_scanner=bt_scanner,
+        if self.config_entry.data.get(CONF_USE_BLUETOOTH, True):
+            if mac_address and name:
+                # coming from discovery
+                _LOGGER.debug("Initializing with known Bluetooth device")
+                self._use_bluetooth = True
+                await self._lm.init_bluetooth_with_known_device(
+                    username, mac_address, name
+                )
+            else:
+                # check if there are any bluetooth adapters to use
+                count = bluetooth.async_scanner_count(self.hass, connectable=True)
+                if count > 0:
+                    _LOGGER.debug(
+                        "Found Bluetooth adapters, initializing with Bluetooth"
                     )
-                except (BluetoothConnectionFailed, BluetoothDeviceNotFound) as ex:
-                    _LOGGER.debug(ex, exc_info=True)
-                else:
-                    # found a device, add MAC address to config entry
-                    new_data = self.config_entry.data.copy()
-                    new_data[CONF_MAC] = self._lm.lm_bluetooth.address
-                    self.hass.config_entries.async_update_entry(
-                        self.config_entry,
-                        data=new_data,
-                    )
-                    self._use_bluetooth = True
+
+                    bt_scanner = bluetooth.async_get_scanner(self.hass)
+
+                    try:
+                        await self._lm.init_bluetooth(
+                            username=username,
+                            init_client=False,
+                            bluetooth_scanner=bt_scanner,
+                        )
+                    except (BluetoothConnectionFailed, BluetoothDeviceNotFound) as ex:
+                        _LOGGER.debug(ex, exc_info=True)
+                    else:
+                        # found a device, add MAC address to config entry
+                        new_data = self.config_entry.data.copy()
+                        new_data[CONF_MAC] = self._lm.lm_bluetooth.address
+                        self.hass.config_entries.async_update_entry(
+                            self.config_entry,
+                            data=new_data,
+                        )
+                        self._use_bluetooth = True
 
         # initialize local API
         if host:

@@ -5,7 +5,11 @@ from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 import pytest
 
 from homeassistant import config_entries
-from homeassistant.components.lamarzocco.const import CONF_MACHINE, DOMAIN
+from homeassistant.components.lamarzocco.const import (
+    CONF_MACHINE,
+    CONF_USE_BLUETOOTH,
+    DOMAIN,
+)
 from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.const import CONF_HOST, CONF_MAC, CONF_NAME
 from homeassistant.core import HomeAssistant
@@ -331,3 +335,29 @@ async def test_reauth_errors(
     assert result2["errors"] == {"base": reason}
 
     assert len(mock_lamarzocco.get_all_machines.mock_calls) == 1
+
+
+async def test_options_flow(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test options flow."""
+    mock_config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_USE_BLUETOOTH: False,
+        },
+    )
+
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["data"] == {
+        CONF_USE_BLUETOOTH: False,
+    }
