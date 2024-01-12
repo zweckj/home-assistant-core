@@ -50,7 +50,7 @@ async def async_setup_entry(
 
 
 class LaMarzoccoButtonEntity(LaMarzoccoEntity, ButtonEntity):
-    """Button supporting backflush."""
+    """La Marzocco Button Entity."""
 
     entity_description: LaMarzoccoButtonEntityDescription
 
