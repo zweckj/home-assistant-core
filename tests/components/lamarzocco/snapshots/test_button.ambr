@@ -1,5 +1,5 @@
 # serializer version: 1
-# name: test_start_backflush[GS3 AV]
+# name: test_start_backflush
   StateSnapshot({
     'attributes': ReadOnlyDict({
       'friendly_name': 'GS01234 Start Backflush',
@@ -12,7 +12,7 @@
     'state': 'unknown',
   })
 # ---
-# name: test_start_backflush[GS3 AV].1
+# name: test_start_backflush.1
   EntityRegistryEntrySnapshot({
     'aliases': set({
     }),
@@ -40,138 +40,6 @@
     'supported_features': 0,
     'translation_key': 'start_backflush',
     'unique_id': 'GS01234_start_backflush',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_start_backflush[GS3 MP]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'friendly_name': 'GS01234 Start Backflush',
-      'icon': 'mdi:water-sync',
-    }),
-    'context': <ANY>,
-    'entity_id': 'button.gs01234_start_backflush',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'unknown',
-  })
-# ---
-# name: test_start_backflush[GS3 MP].1
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'button',
-    'entity_category': None,
-    'entity_id': 'button.gs01234_start_backflush',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': None,
-    'original_icon': 'mdi:water-sync',
-    'original_name': 'Start Backflush',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'start_backflush',
-    'unique_id': 'GS01234_start_backflush',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_start_backflush[Linea Mini]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'friendly_name': 'LM01234 Start Backflush',
-      'icon': 'mdi:water-sync',
-    }),
-    'context': <ANY>,
-    'entity_id': 'button.lm01234_start_backflush',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'unknown',
-  })
-# ---
-# name: test_start_backflush[Linea Mini].1
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'button',
-    'entity_category': None,
-    'entity_id': 'button.lm01234_start_backflush',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': None,
-    'original_icon': 'mdi:water-sync',
-    'original_name': 'Start Backflush',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'start_backflush',
-    'unique_id': 'LM01234_start_backflush',
-    'unit_of_measurement': None,
-  })
-# ---
-# name: test_start_backflush[Micra]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'friendly_name': 'MR01234 Start Backflush',
-      'icon': 'mdi:water-sync',
-    }),
-    'context': <ANY>,
-    'entity_id': 'button.mr01234_start_backflush',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'unknown',
-  })
-# ---
-# name: test_start_backflush[Micra].1
-  EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
-    'area_id': None,
-    'capabilities': None,
-    'config_entry_id': <ANY>,
-    'device_class': None,
-    'device_id': <ANY>,
-    'disabled_by': None,
-    'domain': 'button',
-    'entity_category': None,
-    'entity_id': 'button.mr01234_start_backflush',
-    'has_entity_name': True,
-    'hidden_by': None,
-    'icon': None,
-    'id': <ANY>,
-    'name': None,
-    'options': dict({
-    }),
-    'original_device_class': None,
-    'original_icon': 'mdi:water-sync',
-    'original_name': 'Start Backflush',
-    'platform': 'lamarzocco',
-    'previous_unique_id': None,
-    'supported_features': 0,
-    'translation_key': 'start_backflush',
-    'unique_id': 'MR01234_start_backflush',
     'unit_of_measurement': None,
   })
 # ---
