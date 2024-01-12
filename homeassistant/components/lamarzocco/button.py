@@ -19,7 +19,7 @@ class LaMarzoccoButtonEntityDescription(
     LaMarzoccoEntityDescription,
     ButtonEntityDescription,
 ):
-    """Description of an La Marzocco Button."""
+    """Description of an La Marzocco button."""
 
     press_fn: Callable[[LaMarzoccoUpdateCoordinator], Coroutine[Any, Any, None]]
 
