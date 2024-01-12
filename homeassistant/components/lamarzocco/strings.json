@@ -35,6 +35,11 @@
     }
   },
   "entity": {
+    "button": {
+      "start_backflush": {
+        "name": "Start Backflush"
+      }
+    },
     "switch": {
       "main": {
         "name": "Main"
