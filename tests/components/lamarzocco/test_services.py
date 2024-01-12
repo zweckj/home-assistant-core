@@ -44,9 +44,9 @@ async def test_service_auto_on_off_enable(
         DOMAIN,
         SERVICE_AUTO_ON_OFF_ENABLE,
         {
+            CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
             CONF_DAY_OF_WEEK: "mon",
             CONF_ENABLE: True,
-            CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
         },
         blocking=True,
     )
@@ -66,6 +66,7 @@ async def test_service_auto_on_off_enable(
             DOMAIN,
             SERVICE_AUTO_ON_OFF_ENABLE,
             {
+                CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
                 CONF_DAY_OF_WEEK: "mon",
                 CONF_ENABLE: True,
             },
@@ -78,14 +79,15 @@ async def test_service_auto_on_off_enable(
 async def test_service_set_auto_on_off_times(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Test the La Marzocco auto on/off times service."""
-    mock_lamarzocco.set_auto_on_off.return_value = None
 
     await hass.services.async_call(
         DOMAIN,
         SERVICE_AUTO_ON_OFF_TIMES,
         {
+            CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
             CONF_DAY_OF_WEEK: "tue",
             CONF_HOUR_ON: 8,
             CONF_MINUTE_ON: 30,
@@ -104,14 +106,15 @@ async def test_service_set_auto_on_off_times(
 async def test_service_set_dose(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Test the La Marzocco set dose service."""
-    mock_lamarzocco.set_dose.return_value = None
 
     await hass.services.async_call(
         DOMAIN,
         SERVICE_DOSE,
         {
+            CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
             CONF_KEY: 2,
             CONF_PULSES: 300,
         },
@@ -125,14 +128,15 @@ async def test_service_set_dose(
 async def test_service_set_dose_hot_water(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Test the La Marzocco set dose hot water service."""
-    mock_lamarzocco.set_dose_hot_water.return_value = None
 
     await hass.services.async_call(
         DOMAIN,
         SERVICE_DOSE_HOT_WATER,
         {
+            CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
             CONF_SECONDS: 16,
         },
         blocking=True,
@@ -145,14 +149,15 @@ async def test_service_set_dose_hot_water(
 async def test_service_set_prebrew_times(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Test the La Marzocco set prebrew times service."""
-    mock_lamarzocco.set_prebrew_times.return_value = None
 
     await hass.services.async_call(
         DOMAIN,
         SERVICE_PREBREW_TIMES,
         {
+            CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
             CONF_KEY: 3,
             CONF_SECONDS_ON: 4,
             CONF_SECONDS_OFF: 5,
@@ -169,14 +174,15 @@ async def test_service_set_prebrew_times(
 async def test_service_set_preinfusion_time(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Test the La Marzocco set preinfusion time service."""
-    mock_lamarzocco.set_prebrew_times.return_value = None
 
     await hass.services.async_call(
         DOMAIN,
         SERVICE_PREINFUSION_TIME,
         {
+            CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
             CONF_KEY: 3,
             CONF_SECONDS: 6,
         },
