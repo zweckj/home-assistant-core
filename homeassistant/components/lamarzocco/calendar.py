@@ -10,6 +10,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .entity import LaMarzoccoBaseEntity
 
+CALENDAR_KEY = "auto_on_off_schedule"
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -19,13 +21,13 @@ async def async_setup_entry(
     """Set up switch entities and services."""
 
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
-    async_add_entities([LaMarzoccoCalendarEntity(coordinator, "auto_on_off_schedule")])
+    async_add_entities([LaMarzoccoCalendarEntity(coordinator, CALENDAR_KEY)])
 
 
 class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
     """Class representing a La Marzocco Calendar."""
 
-    _attr_translation_key = "auto_on_off_schedule"
+    _attr_translation_key = CALENDAR_KEY
 
     @property
     def event(self) -> CalendarEvent | None:
@@ -35,7 +37,7 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
         for date in self._asnyc_date_range(
             datetime.today(), datetime.today() + timedelta(days=6)
         ):
-            scheduled = self._async_get_calendar_event_from_schedule_date(date)
+            scheduled = self._async_get_calendar_event(date)
             if scheduled:
                 if scheduled.end > datetime.now():
                     continue
@@ -53,7 +55,7 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
         events: list[CalendarEvent] = []
 
         for date in self._asnyc_date_range(start_date, end_date):
-            scheduled = self._async_get_calendar_event_from_schedule_date(date)
+            scheduled = self._async_get_calendar_event(date)
             if scheduled:
                 events.append(scheduled)
         return events
@@ -66,9 +68,7 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
             yield current_date
             current_date += timedelta(days=1)
 
-    def _async_get_calendar_event_from_schedule_date(
-        self, date: datetime
-    ) -> CalendarEvent | None:
+    def _async_get_calendar_event(self, date: datetime) -> CalendarEvent | None:
         """Return calendar event for a given weekday."""
 
         # check first if auto/on off is turned on in general
