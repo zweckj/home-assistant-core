@@ -76,7 +76,7 @@ async def test_no_calendar_events_global_disable(
     """Assert no events when global auto on/off is disabled."""
 
     mock_lamarzocco.current_status["global_auto"] = "Disabled"
-    test_time = datetime(2024, 1, 12, 11, tzinfo=dt_util.UTC)
+    test_time = datetime(2024, 1, 12, 11, tzinfo=dt_util.DEFAULT_TIME_ZONE)
     freezer.move_to(test_time)
 
     await async_init_integration(hass, mock_config_entry)
