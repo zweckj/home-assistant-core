@@ -35,6 +35,11 @@
     }
   },
   "entity": {
+    "calendar": {
+      "auto_on_off_schedule": {
+        "name": "Auto on/off schedule"
+      }
+    },
     "switch": {
       "main": {
         "name": "Main"
