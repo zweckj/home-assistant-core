@@ -12,7 +12,12 @@ from homeassistant.core import HomeAssistant
 
 from . import USER_INPUT
 
-from tests.common import MockConfigEntry, load_fixture
+from tests.common import (
+    MockConfigEntry,
+    load_fixture,
+    load_json_array_fixture,
+    load_json_object_fixture,
+)
 
 
 @pytest.fixture
@@ -92,8 +97,11 @@ def mock_lamarzocco(
         lamarzocco.current_status = json.loads(
             load_fixture("current_status.json", DOMAIN)
         )
-        lamarzocco.config = json.loads(load_fixture("config.json", DOMAIN))
-        lamarzocco.statistics = json.loads(load_fixture("statistics.json", DOMAIN))
+        lamarzocco.current_status = load_json_object_fixture(
+            "current_status.json", DOMAIN
+        )
+        lamarzocco.config = load_json_object_fixture("config.json", DOMAIN)
+        lamarzocco.statistics = load_json_array_fixture("statistics.json", DOMAIN)
 
         lamarzocco.get_all_machines.return_value = [
             (serial_number, model_name),
