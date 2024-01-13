@@ -6,6 +6,7 @@ from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .entity import LaMarzoccoBaseEntity
@@ -35,11 +36,11 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
         # only need to check the next 6 days, because if we don't find anything there
         # then there is no event scheduled
         for date in self._asnyc_date_range(
-            datetime.today(), datetime.today() + timedelta(days=6)
+            dt_util.now(), dt_util.now() + timedelta(days=6)
         ):
             scheduled = self._async_get_calendar_event(date)
             if scheduled:
-                if scheduled.end > datetime.now():
+                if scheduled.start < dt_util.now() and scheduled.end < dt_util.now():
                     continue
                 return scheduled
         return None
@@ -86,10 +87,14 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
             start=date.replace(
                 hour=int(hour_on),
                 minute=int(minute_on),
+                second=0,
+                microsecond=0,
             ),
             end=date.replace(
                 hour=int(hour_off),
                 minute=int(minute_off),
+                second=0,
+                microsecond=0,
             ),
             summary=f"Machine {self.coordinator.lm.true_model_name} ({self.coordinator.lm.serial_number}) on",
             description="Machine is scheduled to turn on at the start time and off at the end time",
