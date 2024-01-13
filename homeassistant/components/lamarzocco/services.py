@@ -5,6 +5,7 @@ import logging
 from typing import Any, Final
 
 from lmcloud.const import LaMarzoccoModel
+from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
@@ -112,7 +113,7 @@ async def __call_service(
     """Call a service and handle exceptions."""
     try:
         await func(*args, **kwargs)
-    except Exception as ex:
+    except (AuthFail, RequestNotSuccessful, TimeoutError) as ex:
         raise HomeAssistantError("Service call encountered error: %s" % str(ex)) from ex
 
 
@@ -125,6 +126,7 @@ def __get_coordinator(
 
     if not entry:
         raise ServiceValidationError(
+            f"Invalid config entry: {entry_id}",
             translation_domain=DOMAIN,
             translation_key="invalid_config_entry",
             translation_placeholders={
@@ -133,6 +135,7 @@ def __get_coordinator(
         )
     if entry.state != ConfigEntryState.LOADED:
         raise ServiceValidationError(
+            f"Config entry {entry.title} is not loaded",
             translation_domain=DOMAIN,
             translation_key="unloaded_config_entry",
             translation_placeholders={

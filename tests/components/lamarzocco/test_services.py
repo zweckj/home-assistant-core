@@ -57,6 +57,13 @@ async def test_service_auto_on_off_enable(
         day_of_week="mon", enable=True
     )
 
+
+async def test_service_call_error(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test an exception during the service call."""
     mock_lamarzocco.set_auto_on_off_enable.side_effect = RequestNotSuccessful(
         "BadRequest"
     )
@@ -74,7 +81,53 @@ async def test_service_auto_on_off_enable(
             blocking=True,
         )
 
-    assert len(mock_lamarzocco.set_auto_on_off_enable.mock_calls) == 2
+
+async def test_invalid_config_entry(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test validation error for invalid config entry."""
+    entry_id = "invalid"
+    with pytest.raises(
+        ServiceValidationError,
+        match=f"Invalid config entry: {entry_id}",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_DOSE,
+            {
+                CONF_CONFIG_ENTRY: entry_id,
+                CONF_KEY: 2,
+                CONF_PULSES: 300,
+            },
+            blocking=True,
+        )
+
+
+async def test_unloaded_config_entry(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test validation error for unloaded config entry."""
+
+    await mock_config_entry.async_unload(hass)
+
+    with pytest.raises(
+        ServiceValidationError,
+        match=f"Config entry {mock_config_entry.title} is not loaded",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_DOSE,
+            {
+                CONF_CONFIG_ENTRY: mock_config_entry.entry_id,
+                CONF_KEY: 2,
+                CONF_PULSES: 300,
+            },
+            blocking=True,
+        )
 
 
 async def test_service_set_auto_on_off_times(
