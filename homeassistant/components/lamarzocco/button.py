@@ -4,13 +4,14 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
+from lmcloud import LMCloud as LaMarzoccoClient
+
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import LaMarzoccoUpdateCoordinator
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 
 
@@ -21,7 +22,7 @@ class LaMarzoccoButtonEntityDescription(
 ):
     """Description of an La Marzocco button."""
 
-    press_fn: Callable[[LaMarzoccoUpdateCoordinator], Coroutine[Any, Any, None]]
+    press_fn: Callable[[LaMarzoccoClient], Coroutine[Any, Any, None]]
 
 
 ENTITIES: tuple[LaMarzoccoButtonEntityDescription, ...] = (
@@ -29,7 +30,7 @@ ENTITIES: tuple[LaMarzoccoButtonEntityDescription, ...] = (
         key="start_backflush",
         translation_key="start_backflush",
         icon="mdi:water-sync",
-        press_fn=lambda coordinator: coordinator.lm.start_backflush(),
+        press_fn=lambda lm: lm.start_backflush(),
     ),
 )
 
@@ -56,4 +57,4 @@ class LaMarzoccoButtonEntity(LaMarzoccoEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Press button."""
-        await self.entity_description.press_fn(self.coordinator)
+        await self.entity_description.press_fn(self.coordinator.lm)
