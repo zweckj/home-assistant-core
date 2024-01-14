@@ -140,14 +140,14 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_min_value=2,
         native_max_value=29,
         entity_category=EntityCategory.CONFIG,
-        set_value_fn=lambda coordinator, on_time: coordinator.lm.configure_prebrew(
-            off_time=int(coordinator.lm.current_status.get("preinfusion_k1", 5) * 1000),
+        set_value_fn=lambda coordinator, off_time: coordinator.lm.configure_prebrew(
+            off_time=int(off_time * 1000),
         ),
         native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
             "preinfusion_k1", 5
         ),
         enabled_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "preinfusion_k1", False
+            "enable_preinfusion", False
         ),
         supported_models=(
             LaMarzoccoModel.LINEA_MICRA,
