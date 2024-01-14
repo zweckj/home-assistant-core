@@ -23,7 +23,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, NUMBER_KEYS_GS3_AV
 from .coordinator import LaMarzoccoUpdateCoordinator
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 
@@ -183,7 +183,7 @@ async def async_setup_entry(
     for description in KEY_ENTITIES:
         if coordinator.lm.model_name in description.supported_models:
             if coordinator.lm.model_name == LaMarzoccoModel.GS3_AV:
-                for key in range(1, 4):
+                for key in range(1, NUMBER_KEYS_GS3_AV + 1):
                     entities.append(
                         LaMarzoccoKeyNumberEntity(
                             coordinator, description, key=key, single_key=False
@@ -191,7 +191,6 @@ async def async_setup_entry(
                     )
             else:
                 entities.append(LaMarzoccoKeyNumberEntity(coordinator, description))
-            entities.append(LaMarzoccoKeyNumberEntity(coordinator, description))
 
     async_add_entities(entities)
 
@@ -228,10 +227,10 @@ class LaMarzoccoKeyNumberEntity(LaMarzoccoEntity, NumberEntity):
         super().__init__(coordinator, description)
         self.key = key
         if not single_key:
-            self._attr_translation_key = f"{self._attr_translation_key}_key"
+            self._attr_translation_key = f"{description.translation_key}_key"
             self._attr_translation_placeholders = {"key": str(key)}
-            self._attr_unique_id = f"{self._attr_unique_id}_key{key}"
-            # TODO: Disable keys > 1
+            self._attr_unique_id = f"{super()._attr_unique_id}_key{key}"
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> float:

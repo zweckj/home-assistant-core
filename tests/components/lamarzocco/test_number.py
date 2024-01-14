@@ -7,6 +7,7 @@ from lmcloud.const import LaMarzoccoModel
 import pytest
 from syrupy import SnapshotAssertion
 
+from homeassistant.components.lamarzocco.const import NUMBER_KEYS_GS3_AV
 from homeassistant.components.number import (
     ATTR_VALUE,
     DOMAIN as NUMBER_DOMAIN,
@@ -170,12 +171,13 @@ async def test_pre_brew_infusion_numbers(
 
 
 @pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.GS3_AV])
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
 @pytest.mark.parametrize(
     ("entity_name", "value", "kwargs"),
     [
-        ("prebrew_off_time", 6, {"on_time": 3000, "off_time": 6000, "key": 1}),
-        ("prebrew_on_time", 6, {"on_time": 6000, "off_time": 5000, "key": 1}),
-        ("preinfusion_off_time", 7, {"off_time": 7000, "key": 1}),
+        ("prebrew_off_time", 6, {"on_time": 3000, "off_time": 6000}),
+        ("prebrew_on_time", 6, {"on_time": 6000, "off_time": 5000}),
+        ("preinfusion_off_time", 7, {"off_time": 7000}),
     ],
 )
 async def test_pre_brew_infusion_key_numbers(
@@ -192,7 +194,10 @@ async def test_pre_brew_infusion_key_numbers(
 
     serial_number = mock_lamarzocco.serial_number
 
-    for key in range(1, 4):
+    state = hass.states.get(f"number.{serial_number}_{entity_name}")
+    assert state is None
+
+    for key in range(1, NUMBER_KEYS_GS3_AV + 1):
         state = hass.states.get(f"number.{serial_number}_{entity_name}_key_{key}")
         assert state
         assert state == snapshot(name=f"{serial_number}_{entity_name}_key_{key}-state")
@@ -210,13 +215,28 @@ async def test_pre_brew_infusion_key_numbers(
 
         kwargs["key"] = key
 
-        assert len(mock_lamarzocco.configure_prebrew.mock_calls) == 1
-        mock_lamarzocco.configure_prebrew.assert_called_once_with(**kwargs)
+        assert len(mock_lamarzocco.configure_prebrew.mock_calls) == key
+        mock_lamarzocco.configure_prebrew.assert_called_with(**kwargs)
 
 
-@pytest.mark.parametrize(
-    "device_fixture", [LaMarzoccoModel.GS3_AV, LaMarzoccoModel.GS3_MP]
-)
+@pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.GS3_AV])
+async def test_disabled_entites(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+) -> None:
+    """Test the La Marzocco prebrew/-infusion sensors for GS3AV model."""
+
+    ENTITIES = ("prebrew_off_time", "prebrew_on_time", "preinfusion_off_time")
+
+    serial_number = mock_lamarzocco.serial_number
+
+    for entity_name in ENTITIES:
+        for key in range(1, NUMBER_KEYS_GS3_AV + 1):
+            state = hass.states.get(f"number.{serial_number}_{entity_name}_key_{key}")
+            assert state is None
+
+
+@pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.GS3_MP])
 async def test_not_existing_entites(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
@@ -228,6 +248,9 @@ async def test_not_existing_entites(
     for entity in ("prebrew_off_time", "prebrew_on_time", "preinfusion_off_time"):
         state = hass.states.get(f"number.{serial_number}_{entity}")
         assert state is None
+        for key in range(1, NUMBER_KEYS_GS3_AV + 1):
+            state = hass.states.get(f"number.{serial_number}_{entity}_key_{key}")
+            assert state is None
 
 
 @pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.LINEA_MICRA])

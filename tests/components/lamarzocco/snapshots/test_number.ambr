@@ -54,6 +54,234 @@
     'unit_of_measurement': <UnitOfTemperature.CELSIUS: '°C'>,
   })
 # ---
+# name: test_pre_brew_infusion_key_numbers[prebrew_off_time-6-kwargs0-GS3 AV][GS01234_prebrew_off_time_key_1-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Prebrew off time Key 1',
+      'icon': 'mdi:water-off',
+      'max': 10,
+      'min': 1,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_prebrew_off_time_key_1',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '3',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[prebrew_off_time-6-kwargs0-GS3 AV][GS01234_prebrew_off_time_key_2-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Prebrew off time Key 2',
+      'icon': 'mdi:water-off',
+      'max': 10,
+      'min': 1,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_prebrew_off_time_key_2',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '3',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[prebrew_off_time-6-kwargs0-GS3 AV][GS01234_prebrew_off_time_key_3-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Prebrew off time Key 3',
+      'icon': 'mdi:water-off',
+      'max': 10,
+      'min': 1,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_prebrew_off_time_key_3',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '3',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[prebrew_off_time-6-kwargs0-GS3 AV][GS01234_prebrew_off_time_key_4-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Prebrew off time Key 4',
+      'icon': 'mdi:water-off',
+      'max': 10,
+      'min': 1,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_prebrew_off_time_key_4',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '3',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[prebrew_on_time-6-kwargs1-GS3 AV][GS01234_prebrew_on_time_key_1-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Prebrew on time Key 1',
+      'icon': 'mdi:water',
+      'max': 10,
+      'min': 2,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_prebrew_on_time_key_1',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '5',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[prebrew_on_time-6-kwargs1-GS3 AV][GS01234_prebrew_on_time_key_2-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Prebrew on time Key 2',
+      'icon': 'mdi:water',
+      'max': 10,
+      'min': 2,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_prebrew_on_time_key_2',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '5',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[prebrew_on_time-6-kwargs1-GS3 AV][GS01234_prebrew_on_time_key_3-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Prebrew on time Key 3',
+      'icon': 'mdi:water',
+      'max': 10,
+      'min': 2,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_prebrew_on_time_key_3',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '5',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[prebrew_on_time-6-kwargs1-GS3 AV][GS01234_prebrew_on_time_key_4-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Prebrew on time Key 4',
+      'icon': 'mdi:water',
+      'max': 10,
+      'min': 2,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_prebrew_on_time_key_4',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '5',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[preinfusion_off_time-7-kwargs2-GS3 AV][GS01234_preinfusion_off_time_key_1-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Preinfusion off time Key 1',
+      'icon': 'mdi:water-off',
+      'max': 29,
+      'min': 2,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_preinfusion_off_time_key_1',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '4',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[preinfusion_off_time-7-kwargs2-GS3 AV][GS01234_preinfusion_off_time_key_2-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Preinfusion off time Key 2',
+      'icon': 'mdi:water-off',
+      'max': 29,
+      'min': 2,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_preinfusion_off_time_key_2',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '4',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[preinfusion_off_time-7-kwargs2-GS3 AV][GS01234_preinfusion_off_time_key_3-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Preinfusion off time Key 3',
+      'icon': 'mdi:water-off',
+      'max': 29,
+      'min': 2,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_preinfusion_off_time_key_3',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '4',
+  })
+# ---
+# name: test_pre_brew_infusion_key_numbers[preinfusion_off_time-7-kwargs2-GS3 AV][GS01234_preinfusion_off_time_key_4-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'device_class': 'duration',
+      'friendly_name': 'GS01234 Preinfusion off time Key 4',
+      'icon': 'mdi:water-off',
+      'max': 29,
+      'min': 2,
+      'mode': <NumberMode.AUTO: 'auto'>,
+      'step': 0.1,
+      'unit_of_measurement': <UnitOfTime.SECONDS: 's'>,
+    }),
+    'context': <ANY>,
+    'entity_id': 'number.gs01234_preinfusion_off_time_key_4',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': '4',
+  })
+# ---
 # name: test_pre_brew_infusion_numbers[prebrew_off_time-6-kwargs0-Linea Mini]
   StateSnapshot({
     'attributes': ReadOnlyDict({
