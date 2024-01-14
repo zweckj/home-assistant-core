@@ -100,5 +100,6 @@ def mock_lamarzocco(
         ]
         lamarzocco.check_local_connection.return_value = True
         lamarzocco.initialized = False
+        lamarzocco.websocket_connected = True
 
         yield lamarzocco

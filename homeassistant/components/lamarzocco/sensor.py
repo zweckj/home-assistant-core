@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from lmcloud import LMCloud as LaMarzoccoClient
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -10,12 +12,11 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, UnitOfTemperature, UnitOfTime
+from homeassistant.const import CONF_HOST, EntityCategory, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import LaMarzoccoUpdateCoordinator
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 
 
@@ -26,7 +27,7 @@ class LaMarzoccoSensorEntityDescription(
 ):
     """Description of a La Marzocco sensor."""
 
-    value_fn: Callable[[LaMarzoccoUpdateCoordinator], float | int]
+    value_fn: Callable[[LaMarzoccoClient], float | int]
 
 
 ENTITIES: tuple[LaMarzoccoSensorEntityDescription, ...] = (
@@ -36,7 +37,7 @@ ENTITIES: tuple[LaMarzoccoSensorEntityDescription, ...] = (
         icon="mdi:chart-line",
         native_unit_of_measurement="drinks",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda coordinator: coordinator.lm.current_status.get("drinks_k1", 0),
+        value_fn=lambda lm: lm.current_status.get("drinks_k1", 0),
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     LaMarzoccoSensorEntityDescription(
@@ -45,9 +46,7 @@ ENTITIES: tuple[LaMarzoccoSensorEntityDescription, ...] = (
         icon="mdi:chart-line",
         native_unit_of_measurement="drinks",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "total_flushing", 0
-        ),
+        value_fn=lambda lm: lm.current_status.get("total_flushing", 0),
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     LaMarzoccoSensorEntityDescription(
@@ -57,9 +56,8 @@ ENTITIES: tuple[LaMarzoccoSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfTime.SECONDS,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.DURATION,
-        value_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "brew_active_duration", 0
-        ),
+        value_fn=lambda lm: lm.current_status.get("brew_active_duration", 0),
+        available_fn=lambda lm: lm.websocket_connected,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     LaMarzoccoSensorEntityDescription(
@@ -69,9 +67,7 @@ ENTITIES: tuple[LaMarzoccoSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.TEMPERATURE,
-        value_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "coffee_temp", 0
-        ),
+        value_fn=lambda lm: lm.current_status.get("coffee_temp", 0),
     ),
     LaMarzoccoSensorEntityDescription(
         key="current_temp_steam",
@@ -80,7 +76,7 @@ ENTITIES: tuple[LaMarzoccoSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.TEMPERATURE,
-        value_fn=lambda coordinator: coordinator.lm.current_status.get("steam_temp", 0),
+        value_fn=lambda lm: lm.current_status.get("steam_temp", 0),
     ),
 )
 
@@ -93,11 +89,14 @@ async def async_setup_entry(
     """Set up sensor entities."""
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    async_add_entities(
-        LaMarzoccoSensorEntity(coordinator, description)
-        for description in ENTITIES
-        if coordinator.lm.model_name in description.supported_models
-    )
+    entities: list[LaMarzoccoSensorEntity] = []
+    for description in ENTITIES:
+        if coordinator.lm.model_name in description.supported_models:
+            if description.key == "shot_timer" and not config_entry.data.get(CONF_HOST):
+                continue
+            entities.append(LaMarzoccoSensorEntity(coordinator, description))
+
+    async_add_entities(entities)
 
 
 class LaMarzoccoSensorEntity(LaMarzoccoEntity, SensorEntity):
@@ -108,4 +107,4 @@ class LaMarzoccoSensorEntity(LaMarzoccoEntity, SensorEntity):
     @property
     def native_value(self) -> int | float:
         """State of the sensor."""
-        return self.entity_description.value_fn(self.coordinator)
+        return self.entity_description.value_fn(self.coordinator.lm)

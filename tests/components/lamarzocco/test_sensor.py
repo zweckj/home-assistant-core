@@ -7,6 +7,8 @@ from syrupy import SnapshotAssertion
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from tests.common import MockConfigEntry
+
 pytestmark = pytest.mark.usefixtures("init_integration")
 
 
@@ -38,3 +40,15 @@ async def test_sensors(
         assert entry
         assert entry.device_id
         assert entry == snapshot(name=f"{serial_number}_{sensor}-entry")
+
+
+async def test_shot_timer_not_exists(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test the La Marzocco sensors."""
+
+    data = mock_config_entry.data.copy()
+    data["shot_timer"] = False
+    hass.config_entries.async_update_entry(mock_config_entry, data=data)
