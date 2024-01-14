@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from lmcloud import LMCloud as LaMarzoccoClient
+
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
@@ -14,7 +16,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import LaMarzoccoUpdateCoordinator
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 
 
@@ -25,8 +26,8 @@ class LaMarzoccoUpdateEntityDescription(
 ):
     """Description of an La Marzocco Switch."""
 
-    current_fw_fn: Callable[[LaMarzoccoUpdateCoordinator], str]
-    latest_fw_fn: Callable[[LaMarzoccoUpdateCoordinator], str]
+    current_fw_fn: Callable[[LaMarzoccoClient], str]
+    latest_fw_fn: Callable[[LaMarzoccoClient], str]
 
 
 ENTITIES: tuple[LaMarzoccoUpdateEntityDescription, ...] = (
@@ -35,8 +36,8 @@ ENTITIES: tuple[LaMarzoccoUpdateEntityDescription, ...] = (
         translation_key="machine_firmware",
         device_class=UpdateDeviceClass.FIRMWARE,
         icon="mdi:cloud-download",
-        current_fw_fn=lambda coordinator: coordinator.lm.firmware_version,
-        latest_fw_fn=lambda coordinator: coordinator.lm.latest_firmware_version,
+        current_fw_fn=lambda lm: lm.firmware_version,
+        latest_fw_fn=lambda lm: lm.latest_firmware_version,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     LaMarzoccoUpdateEntityDescription(
@@ -44,8 +45,8 @@ ENTITIES: tuple[LaMarzoccoUpdateEntityDescription, ...] = (
         translation_key="gateway_firmware",
         device_class=UpdateDeviceClass.FIRMWARE,
         icon="mdi:cloud-download",
-        current_fw_fn=lambda coordinator: coordinator.lm.gateway_version,
-        latest_fw_fn=lambda coordinator: coordinator.lm.latest_gateway_version,
+        current_fw_fn=lambda lm: lm.gateway_version,
+        latest_fw_fn=lambda lm: lm.latest_gateway_version,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
@@ -74,9 +75,9 @@ class LaMarzoccoUpdateEntity(LaMarzoccoEntity, UpdateEntity):
     @property
     def installed_version(self) -> str | None:
         """Return the current firmware version."""
-        return self.entity_description.current_fw_fn(self.coordinator)
+        return self.entity_description.current_fw_fn(self.coordinator.lm)
 
     @property
     def latest_version(self) -> str:
         """Return the latest firmware version."""
-        return self.entity_description.latest_fw_fn(self.coordinator)
+        return self.entity_description.latest_fw_fn(self.coordinator.lm)
