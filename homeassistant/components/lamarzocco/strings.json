@@ -41,6 +41,15 @@
       },
       "steam_temp": {
         "name": "Steam temperature"
+      },
+      "prebrew_on": {
+        "name": "Prebrew on time"
+      },
+      "prebrew_off": {
+        "name": "Prebrew off time"
+      },
+      "preinfusion_off": {
+        "name": "Preinfusion off time"
       }
     },
     "switch": {

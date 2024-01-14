@@ -4,6 +4,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
+from lmcloud import LMCloud as LaMarzoccoClient
 from lmcloud.const import LaMarzoccoModel
 
 from homeassistant.components.number import (
@@ -23,7 +24,6 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import LaMarzoccoUpdateCoordinator
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 
 
@@ -34,11 +34,10 @@ class LaMarzoccoNumberEntityDescription(
 ):
     """Description of an La Marzocco number entity."""
 
-    native_value_fn: Callable[[LaMarzoccoUpdateCoordinator], float | int]
-    set_value_fn: Callable[
-        [LaMarzoccoUpdateCoordinator, float | int], Coroutine[Any, Any, bool]
-    ]
-    enabled_fn: Callable[[LaMarzoccoUpdateCoordinator], bool] = lambda _: True
+    native_value_fn: Callable[[LaMarzoccoClient], float | int]
+    set_value_fn: Callable[[LaMarzoccoClient, float | int], Coroutine[Any, Any, bool]]
+    enabled_fn: Callable[[LaMarzoccoClient], bool] = lambda _: True
+    not_settable_reason: str = ""
 
 
 ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
@@ -51,10 +50,8 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_step=PRECISION_TENTHS,
         native_min_value=85,
         native_max_value=104,
-        set_value_fn=lambda coordinator, temp: coordinator.lm.set_coffee_temp(temp),
-        native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "coffee_set_temp", 0
-        ),
+        set_value_fn=lambda lm, temp: lm.set_coffee_temp(temp),
+        native_value_fn=lambda lm: lm.current_status.get("coffee_set_temp", 0),
     ),
     LaMarzoccoNumberEntityDescription(
         key="steam_temp",
@@ -65,12 +62,8 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_step=PRECISION_TENTHS,
         native_min_value=126,
         native_max_value=131,
-        set_value_fn=lambda coordinator, temp: coordinator.lm.set_steam_temp(
-            round(temp)
-        ),
-        native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "steam_set_temp", 0
-        ),
+        set_value_fn=lambda lm, temp: lm.set_steam_temp(round(temp)),
+        native_value_fn=lambda lm: lm.current_status.get("steam_set_temp", 0),
         supported_models=(
             LaMarzoccoModel.GS3_AV,
             LaMarzoccoModel.GS3_MP,
@@ -86,18 +79,13 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_min_value=1,
         native_max_value=10,
         entity_category=EntityCategory.CONFIG,
-        set_value_fn=lambda coordinator, off_time: coordinator.lm.configure_prebrew(
-            on_time=int(
-                coordinator.lm.current_status.get("prebrewing_ton_k1", 5) * 1000
-            ),
+        set_value_fn=lambda lm, off_time: lm.configure_prebrew(
+            on_time=int(lm.current_status.get("prebrewing_ton_k1", 5) * 1000),
             off_time=int(off_time * 1000),
         ),
-        native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "prebrewing_ton_k1", 5
-        ),
-        enabled_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "enable_prebrewing", False
-        ),
+        native_value_fn=lambda lm: lm.current_status.get("prebrewing_ton_k1", 5),
+        enabled_fn=lambda lm: lm.current_status.get("enable_prebrewing", False),
+        not_settable_reason="Prebrewing is not enabled",
         supported_models=(
             LaMarzoccoModel.LINEA_MICRA,
             LaMarzoccoModel.LINEA_MINI,
@@ -113,18 +101,13 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_min_value=2,
         native_max_value=10,
         entity_category=EntityCategory.CONFIG,
-        set_value_fn=lambda coordinator, on_time: coordinator.lm.configure_prebrew(
+        set_value_fn=lambda lm, on_time: lm.configure_prebrew(
             on_time=int(on_time * 1000),
-            off_time=int(
-                coordinator.lm.current_status.get("prebrewing_toff_k1", 5) * 1000
-            ),
+            off_time=int(lm.current_status.get("prebrewing_toff_k1", 5) * 1000),
         ),
-        native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "prebrewing_toff_k1", 5
-        ),
-        enabled_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "enable_prebrewing", False
-        ),
+        native_value_fn=lambda lm: lm.current_status.get("prebrewing_toff_k1", 5),
+        enabled_fn=lambda lm: lm.current_status.get("enable_prebrewing", False),
+        not_settable_reason="Prebrewing is not enabled",
         supported_models=(
             LaMarzoccoModel.LINEA_MICRA,
             LaMarzoccoModel.LINEA_MINI,
@@ -140,15 +123,12 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_min_value=2,
         native_max_value=29,
         entity_category=EntityCategory.CONFIG,
-        set_value_fn=lambda coordinator, off_time: coordinator.lm.configure_prebrew(
+        set_value_fn=lambda lm, off_time: lm.configure_prebrew(
             off_time=int(off_time * 1000),
         ),
-        native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "preinfusion_k1", 5
-        ),
-        enabled_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "enable_preinfusion", False
-        ),
+        native_value_fn=lambda lm: lm.current_status.get("preinfusion_k1", 5),
+        enabled_fn=lambda lm: lm.current_status.get("enable_preinfusion", False),
+        not_settable_reason="Preinfusion is not enabled",
         supported_models=(
             LaMarzoccoModel.LINEA_MICRA,
             LaMarzoccoModel.LINEA_MINI,
@@ -180,11 +160,13 @@ class LaMarzoccoNumberEntity(LaMarzoccoEntity, NumberEntity):
     @property
     def native_value(self) -> float:
         """Return the current value."""
-        return self.entity_description.native_value_fn(self.coordinator)
+        return self.entity_description.native_value_fn(self.coordinator.lm)
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
-        if not self.entity_description.enabled_fn(self.coordinator):
-            raise HomeAssistantError("Feature not enabled")
-        await self.entity_description.set_value_fn(self.coordinator, value)
+        if not self.entity_description.enabled_fn(self.coordinator.lm):
+            raise HomeAssistantError(
+                f"Not possible to set: {self.entity_description.not_settable_reason}"
+            )
+        await self.entity_description.set_value_fn(self.coordinator.lm, value)
         self.async_write_ha_state()
