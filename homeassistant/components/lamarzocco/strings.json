@@ -36,6 +36,9 @@
   },
   "entity": {
     "select": {
+      "prebrew_infusion_select": {
+        "name": "Prebrew/-infusion mode"
+      },
       "steam_temp_select": {
         "name": "Steam level"
       }

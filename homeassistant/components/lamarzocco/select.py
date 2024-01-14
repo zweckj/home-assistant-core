@@ -23,9 +23,9 @@ class LaMarzoccoSelectEntityDescription(
 ):
     """Description of an La Marzocco Water Heater."""
 
-    current_option_fn: Callable[[LaMarzoccoUpdateCoordinator], int]
+    current_option_fn: Callable[[LaMarzoccoUpdateCoordinator], str]
     select_option_fn: Callable[
-        [LaMarzoccoUpdateCoordinator, int], Coroutine[Any, Any, bool]
+        [LaMarzoccoUpdateCoordinator, str], Coroutine[Any, Any, bool]
     ]
 
 
@@ -36,12 +36,28 @@ ENTITIES: tuple[LaMarzoccoSelectEntityDescription, ...] = (
         icon="mdi:kettle-steam",
         options=["1", "2", "3"],
         select_option_fn=lambda coordinator, option: coordinator.lm.set_steam_level(
-            option
+            int(option)
         ),
         current_option_fn=lambda coordinator: coordinator.lm.current_status.get(
             "steam_level_set", 3
         ),
         supported_models=(LaMarzoccoModel.LINEA_MICRA,),
+    ),
+    LaMarzoccoSelectEntityDescription(
+        key="prebrew_infusion_select",
+        translation_key="prebrew_infusion_select",
+        icon="mdi:kettle-steam",
+        options=["Disabled", "Prebrew", "Preinfusion"],
+        select_option_fn=lambda coordinator,
+        option: coordinator.lm.select_pre_brew_infusion_mode(option),
+        current_option_fn=lambda coordinator: coordinator.lm.current_status.get(
+            "steam_level_set", 3
+        ),
+        supported_models=(
+            LaMarzoccoModel.GS3_AV,
+            LaMarzoccoModel.LINEA_MICRA,
+            LaMarzoccoModel.LINEA_MINI,
+        ),
     ),
 )
 
@@ -73,5 +89,5 @@ class LaMarzoccoNumberEntity(LaMarzoccoEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Change the selected option."""
-        await self.entity_description.select_option_fn(self.coordinator, int(option))
+        await self.entity_description.select_option_fn(self.coordinator, option)
         self.async_write_ha_state()
