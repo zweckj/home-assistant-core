@@ -24,6 +24,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
+from .coordinator import LaMarzoccoUpdateCoordinator
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 
 
@@ -36,8 +37,21 @@ class LaMarzoccoNumberEntityDescription(
 
     native_value_fn: Callable[[LaMarzoccoClient], float | int]
     set_value_fn: Callable[[LaMarzoccoClient, float | int], Coroutine[Any, Any, bool]]
-    enabled_fn: Callable[[LaMarzoccoClient], bool] = lambda _: True
-    not_settable_reason: str = ""
+
+
+@dataclass(frozen=True, kw_only=True)
+class LaMarzoccoKeyNumberEntityDescription(
+    LaMarzoccoEntityDescription,
+    NumberEntityDescription,
+):
+    """Description of an La Marzocco number entity with keys."""
+
+    key_native_value_fn: Callable[[LaMarzoccoClient, int], float | int]
+    key_set_value_fn: Callable[
+        [LaMarzoccoClient, float | int, int], Coroutine[Any, Any, bool]
+    ]
+    enabled_fn: Callable[[LaMarzoccoClient], bool]
+    not_settable_reason: str
 
 
 ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
@@ -69,7 +83,10 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
             LaMarzoccoModel.GS3_MP,
         ),
     ),
-    LaMarzoccoNumberEntityDescription(
+)
+
+KEY_ENTITIES: tuple[LaMarzoccoKeyNumberEntityDescription, ...] = (
+    LaMarzoccoKeyNumberEntityDescription(
         key="prebrew_off",
         translation_key="prebrew_off",
         icon="mdi:water-off",
@@ -79,19 +96,23 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_min_value=1,
         native_max_value=10,
         entity_category=EntityCategory.CONFIG,
-        set_value_fn=lambda lm, off_time: lm.configure_prebrew(
-            on_time=int(lm.current_status.get("prebrewing_ton_k1", 5) * 1000),
+        key_set_value_fn=lambda lm, off_time, key: lm.configure_prebrew(
+            on_time=int(lm.current_status.get(f"prebrewing_ton_k{key}", 5) * 1000),
             off_time=int(off_time * 1000),
+            key=key,
         ),
-        native_value_fn=lambda lm: lm.current_status.get("prebrewing_ton_k1", 5),
+        key_native_value_fn=lambda lm, key: lm.current_status.get(
+            f"prebrewing_ton_k{key}", 5
+        ),
         enabled_fn=lambda lm: lm.current_status.get("enable_prebrewing", False),
         not_settable_reason="Prebrewing is not enabled",
         supported_models=(
             LaMarzoccoModel.LINEA_MICRA,
             LaMarzoccoModel.LINEA_MINI,
+            LaMarzoccoModel.GS3_AV,
         ),
     ),
-    LaMarzoccoNumberEntityDescription(
+    LaMarzoccoKeyNumberEntityDescription(
         key="prebrew_on",
         translation_key="prebrew_on",
         icon="mdi:water",
@@ -101,19 +122,23 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_min_value=2,
         native_max_value=10,
         entity_category=EntityCategory.CONFIG,
-        set_value_fn=lambda lm, on_time: lm.configure_prebrew(
+        key_set_value_fn=lambda lm, on_time, key: lm.configure_prebrew(
             on_time=int(on_time * 1000),
-            off_time=int(lm.current_status.get("prebrewing_toff_k1", 5) * 1000),
+            off_time=int(lm.current_status.get(f"prebrewing_toff_k{key}", 5) * 1000),
+            key=key,
         ),
-        native_value_fn=lambda lm: lm.current_status.get("prebrewing_toff_k1", 5),
+        key_native_value_fn=lambda lm, key: lm.current_status.get(
+            f"prebrewing_toff_k{key}]", 5
+        ),
         enabled_fn=lambda lm: lm.current_status.get("enable_prebrewing", False),
         not_settable_reason="Prebrewing is not enabled",
         supported_models=(
             LaMarzoccoModel.LINEA_MICRA,
             LaMarzoccoModel.LINEA_MINI,
+            LaMarzoccoModel.GS3_AV,
         ),
     ),
-    LaMarzoccoNumberEntityDescription(
+    LaMarzoccoKeyNumberEntityDescription(
         key="preinfusion_off",
         translation_key="preinfusion_off",
         icon="mdi:water-off",
@@ -123,15 +148,18 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_min_value=2,
         native_max_value=29,
         entity_category=EntityCategory.CONFIG,
-        set_value_fn=lambda lm, off_time: lm.configure_prebrew(
-            off_time=int(off_time * 1000),
+        key_set_value_fn=lambda lm, off_time, key: lm.configure_prebrew(
+            off_time=int(off_time * 1000), key=key
         ),
-        native_value_fn=lambda lm: lm.current_status.get("preinfusion_k1", 5),
+        key_native_value_fn=lambda lm, key: lm.current_status.get(
+            f"preinfusion_k{key}", 5
+        ),
         enabled_fn=lambda lm: lm.current_status.get("enable_preinfusion", False),
         not_settable_reason="Preinfusion is not enabled",
         supported_models=(
             LaMarzoccoModel.LINEA_MICRA,
             LaMarzoccoModel.LINEA_MINI,
+            LaMarzoccoModel.GS3_AV,
         ),
     ),
 )
@@ -151,9 +179,25 @@ async def async_setup_entry(
         if coordinator.lm.model_name in description.supported_models
     )
 
+    entities: list[LaMarzoccoKeyNumberEntity] = []
+    for description in KEY_ENTITIES:
+        if coordinator.lm.model_name in description.supported_models:
+            if coordinator.lm.model_name == LaMarzoccoModel.GS3_AV:
+                for key in range(1, 4):
+                    entities.append(
+                        LaMarzoccoKeyNumberEntity(
+                            coordinator, description, key=key, single_key=False
+                        )
+                    )
+            else:
+                entities.append(LaMarzoccoKeyNumberEntity(coordinator, description))
+            entities.append(LaMarzoccoKeyNumberEntity(coordinator, description))
+
+    async_add_entities(entities)
+
 
 class LaMarzoccoNumberEntity(LaMarzoccoEntity, NumberEntity):
-    """Water heater representing espresso machine temperature data."""
+    """Number representing espresso machine temperature data."""
 
     entity_description: LaMarzoccoNumberEntityDescription
 
@@ -164,9 +208,45 @@ class LaMarzoccoNumberEntity(LaMarzoccoEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
+        await self.entity_description.set_value_fn(self.coordinator.lm, value)
+        self.async_write_ha_state()
+
+
+class LaMarzoccoKeyNumberEntity(LaMarzoccoEntity, NumberEntity):
+    """Number representing espresso machine temperature data with keys."""
+
+    entity_description: LaMarzoccoKeyNumberEntityDescription
+
+    def __init__(
+        self,
+        coordinator: LaMarzoccoUpdateCoordinator,
+        description: LaMarzoccoKeyNumberEntityDescription,
+        key: int = 1,
+        single_key: bool = True,
+    ) -> None:
+        """Initialize the entity."""
+        super().__init__(coordinator, description)
+        self.key = key
+        if not single_key:
+            self._attr_translation_key = f"{self._attr_translation_key}_key"
+            self._attr_translation_placeholders = {"key": str(key)}
+            self._attr_unique_id = f"{self._attr_unique_id}_key{key}"
+            # TODO: Disable keys > 1
+
+    @property
+    def native_value(self) -> float:
+        """Return the current value."""
+        return self.entity_description.key_native_value_fn(
+            self.coordinator.lm, self.key
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the value."""
         if not self.entity_description.enabled_fn(self.coordinator.lm):
             raise HomeAssistantError(
                 f"Not possible to set: {self.entity_description.not_settable_reason}"
             )
-        await self.entity_description.set_value_fn(self.coordinator.lm, value)
+        await self.entity_description.key_set_value_fn(
+            self.coordinator.lm, value, self.key
+        )
         self.async_write_ha_state()

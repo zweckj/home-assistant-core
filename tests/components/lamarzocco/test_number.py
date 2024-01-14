@@ -120,9 +120,9 @@ async def test_steam_boiler_none(
 @pytest.mark.parametrize(
     ("entity_name", "value", "kwargs"),
     [
-        ("prebrew_off_time", 6, {"on_time": 3000, "off_time": 6000}),
-        ("prebrew_on_time", 6, {"on_time": 6000, "off_time": 5000}),
-        ("preinfusion_off_time", 7, {"off_time": 7000}),
+        ("prebrew_off_time", 6, {"on_time": 3000, "off_time": 6000, "key": 1}),
+        ("prebrew_on_time", 6, {"on_time": 6000, "off_time": 5000, "key": 1}),
+        ("preinfusion_off_time", 7, {"off_time": 7000, "key": 1}),
     ],
 )
 async def test_pre_brew_infusion_numbers(
@@ -135,7 +135,7 @@ async def test_pre_brew_infusion_numbers(
     value: float,
     kwargs: dict[str, float],
 ) -> None:
-    """Test the La Marzocco coffee temperature Number."""
+    """Test the La Marzocco prebrew/-infusion sensors."""
 
     mock_lamarzocco.current_status["enable_preinfusion"] = True
 
