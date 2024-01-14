@@ -169,6 +169,51 @@ async def test_pre_brew_infusion_numbers(
     mock_lamarzocco.configure_prebrew.assert_called_once_with(**kwargs)
 
 
+@pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.GS3_AV])
+@pytest.mark.parametrize(
+    ("entity_name", "value", "kwargs"),
+    [
+        ("prebrew_off_time", 6, {"on_time": 3000, "off_time": 6000, "key": 1}),
+        ("prebrew_on_time", 6, {"on_time": 6000, "off_time": 5000, "key": 1}),
+        ("preinfusion_off_time", 7, {"off_time": 7000, "key": 1}),
+    ],
+)
+async def test_pre_brew_infusion_key_numbers(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    snapshot: SnapshotAssertion,
+    entity_name: str,
+    value: float,
+    kwargs: dict[str, float],
+) -> None:
+    """Test the La Marzocco prebrew/-infusion sensors for GS3AV model."""
+
+    mock_lamarzocco.current_status["enable_preinfusion"] = True
+
+    serial_number = mock_lamarzocco.serial_number
+
+    for key in range(1, 4):
+        state = hass.states.get(f"number.{serial_number}_{entity_name}_key_{key}")
+        assert state
+        assert state == snapshot(name=f"{serial_number}_{entity_name}_key_{key}-state")
+
+        # on/off service calls
+        await hass.services.async_call(
+            NUMBER_DOMAIN,
+            SERVICE_SET_VALUE,
+            {
+                ATTR_ENTITY_ID: f"number.{serial_number}_{entity_name}_key_{key}",
+                ATTR_VALUE: value,
+            },
+            blocking=True,
+        )
+
+        kwargs["key"] = key
+
+        assert len(mock_lamarzocco.configure_prebrew.mock_calls) == 1
+        mock_lamarzocco.configure_prebrew.assert_called_once_with(**kwargs)
+
+
 @pytest.mark.parametrize(
     "device_fixture", [LaMarzoccoModel.GS3_AV, LaMarzoccoModel.GS3_MP]
 )

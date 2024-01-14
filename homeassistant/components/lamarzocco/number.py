@@ -197,7 +197,7 @@ async def async_setup_entry(
 
 
 class LaMarzoccoNumberEntity(LaMarzoccoEntity, NumberEntity):
-    """Number representing espresso machine temperature data."""
+    """Number entity representing espresso machine temperature data."""
 
     entity_description: LaMarzoccoNumberEntityDescription
 
