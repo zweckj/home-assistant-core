@@ -1,16 +1,15 @@
 """Tests for La Marzocco sensors."""
 from unittest.mock import MagicMock
 
-import pytest
 from syrupy import SnapshotAssertion
 
+from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from . import async_init_integration
+
 from tests.common import MockConfigEntry
-
-pytestmark = pytest.mark.usefixtures("init_integration")
-
 
 SENSORS = (
     "drink_statistics_coffee",
@@ -25,11 +24,14 @@ async def test_sensors(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
     entity_registry: er.EntityRegistry,
+    mock_config_entry: MockConfigEntry,
     snapshot: SnapshotAssertion,
 ) -> None:
     """Test the La Marzocco sensors."""
 
     serial_number = mock_lamarzocco.serial_number
+
+    await async_init_integration(hass, mock_config_entry)
 
     for sensor in SENSORS:
         state = hass.states.get(f"sensor.{serial_number}_{sensor}")
@@ -49,6 +51,12 @@ async def test_shot_timer_not_exists(
 ) -> None:
     """Test the La Marzocco sensors."""
 
+    serial_number = mock_lamarzocco.serial_number
+
     data = mock_config_entry.data.copy()
-    data["shot_timer"] = False
+    del data[CONF_HOST]
     hass.config_entries.async_update_entry(mock_config_entry, data=data)
+
+    await async_init_integration(hass, mock_config_entry)
+    state = hass.states.get(f"sensor.{serial_number}_shot_timer")
+    assert state is None
