@@ -12,8 +12,14 @@ from homeassistant.components.number import (
     NumberEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PRECISION_TENTHS, UnitOfTemperature
+from homeassistant.const import (
+    PRECISION_TENTHS,
+    EntityCategory,
+    UnitOfTemperature,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -32,6 +38,7 @@ class LaMarzoccoNumberEntityDescription(
     set_value_fn: Callable[
         [LaMarzoccoUpdateCoordinator, float | int], Coroutine[Any, Any, bool]
     ]
+    enabled_fn: Callable[[LaMarzoccoUpdateCoordinator], bool] = lambda _: True
 
 
 ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
@@ -69,6 +76,84 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
             LaMarzoccoModel.GS3_MP,
         ),
     ),
+    LaMarzoccoNumberEntityDescription(
+        key="prebrew_off",
+        translation_key="prebrew_off",
+        icon="mdi:water-off",
+        device_class=NumberDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        native_step=PRECISION_TENTHS,
+        native_min_value=1,
+        native_max_value=10,
+        entity_category=EntityCategory.CONFIG,
+        set_value_fn=lambda coordinator, off_time: coordinator.lm.configure_prebrew(
+            on_time=int(
+                coordinator.lm.current_status.get("prebrewing_ton_k1", 5) * 1000
+            ),
+            off_time=int(off_time * 1000),
+        ),
+        native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
+            "prebrewing_ton_k1", 5
+        ),
+        enabled_fn=lambda coordinator: coordinator.lm.current_status.get(
+            "enable_prebrewing", False
+        ),
+        supported_models=(
+            LaMarzoccoModel.LINEA_MICRA,
+            LaMarzoccoModel.LINEA_MINI,
+        ),
+    ),
+    LaMarzoccoNumberEntityDescription(
+        key="prebrew_on",
+        translation_key="prebrew_on",
+        icon="mdi:water",
+        device_class=NumberDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        native_step=PRECISION_TENTHS,
+        native_min_value=2,
+        native_max_value=10,
+        entity_category=EntityCategory.CONFIG,
+        set_value_fn=lambda coordinator, on_time: coordinator.lm.configure_prebrew(
+            on_time=int(on_time * 1000),
+            off_time=int(
+                coordinator.lm.current_status.get("prebrewing_toff_k1", 5) * 1000
+            ),
+        ),
+        native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
+            "prebrewing_toff_k1", 5
+        ),
+        enabled_fn=lambda coordinator: coordinator.lm.current_status.get(
+            "enable_prebrewing", False
+        ),
+        supported_models=(
+            LaMarzoccoModel.LINEA_MICRA,
+            LaMarzoccoModel.LINEA_MINI,
+        ),
+    ),
+    LaMarzoccoNumberEntityDescription(
+        key="preinfusion_off",
+        translation_key="preinfusion_off",
+        icon="mdi:water-off",
+        device_class=NumberDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        native_step=PRECISION_TENTHS,
+        native_min_value=2,
+        native_max_value=29,
+        entity_category=EntityCategory.CONFIG,
+        set_value_fn=lambda coordinator, on_time: coordinator.lm.configure_prebrew(
+            off_time=int(coordinator.lm.current_status.get("preinfusion_k1", 5) * 1000),
+        ),
+        native_value_fn=lambda coordinator: coordinator.lm.current_status.get(
+            "preinfusion_k1", 5
+        ),
+        enabled_fn=lambda coordinator: coordinator.lm.current_status.get(
+            "preinfusion_k1", False
+        ),
+        supported_models=(
+            LaMarzoccoModel.LINEA_MICRA,
+            LaMarzoccoModel.LINEA_MINI,
+        ),
+    ),
 )
 
 
@@ -99,5 +184,7 @@ class LaMarzoccoNumberEntity(LaMarzoccoEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
+        if not self.entity_description.enabled_fn(self.coordinator):
+            raise HomeAssistantError("Feature not enabled")
         await self.entity_description.set_value_fn(self.coordinator, value)
         self.async_write_ha_state()
