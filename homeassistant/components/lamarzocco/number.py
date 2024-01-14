@@ -46,8 +46,8 @@ class LaMarzoccoKeyNumberEntityDescription(
 ):
     """Description of an La Marzocco number entity with keys."""
 
-    key_native_value_fn: Callable[[LaMarzoccoClient, int], float | int]
-    key_set_value_fn: Callable[
+    native_value_fn: Callable[[LaMarzoccoClient, int], float | int]
+    set_value_fn: Callable[
         [LaMarzoccoClient, float | int, int], Coroutine[Any, Any, bool]
     ]
     enabled_fn: Callable[[LaMarzoccoClient], bool]
@@ -96,12 +96,12 @@ KEY_ENTITIES: tuple[LaMarzoccoKeyNumberEntityDescription, ...] = (
         native_min_value=1,
         native_max_value=10,
         entity_category=EntityCategory.CONFIG,
-        key_set_value_fn=lambda lm, off_time, key: lm.configure_prebrew(
+        set_value_fn=lambda lm, off_time, key: lm.configure_prebrew(
             on_time=int(lm.current_status.get(f"prebrewing_ton_k{key}", 5) * 1000),
             off_time=int(off_time * 1000),
             key=key,
         ),
-        key_native_value_fn=lambda lm, key: lm.current_status.get(
+        native_value_fn=lambda lm, key: lm.current_status.get(
             f"prebrewing_ton_k{key}", 5
         ),
         enabled_fn=lambda lm: lm.current_status.get("enable_prebrewing", False),
@@ -122,12 +122,12 @@ KEY_ENTITIES: tuple[LaMarzoccoKeyNumberEntityDescription, ...] = (
         native_min_value=2,
         native_max_value=10,
         entity_category=EntityCategory.CONFIG,
-        key_set_value_fn=lambda lm, on_time, key: lm.configure_prebrew(
+        set_value_fn=lambda lm, on_time, key: lm.configure_prebrew(
             on_time=int(on_time * 1000),
             off_time=int(lm.current_status.get(f"prebrewing_toff_k{key}", 5) * 1000),
             key=key,
         ),
-        key_native_value_fn=lambda lm, key: lm.current_status.get(
+        native_value_fn=lambda lm, key: lm.current_status.get(
             f"prebrewing_toff_k{key}]", 5
         ),
         enabled_fn=lambda lm: lm.current_status.get("enable_prebrewing", False),
@@ -148,12 +148,10 @@ KEY_ENTITIES: tuple[LaMarzoccoKeyNumberEntityDescription, ...] = (
         native_min_value=2,
         native_max_value=29,
         entity_category=EntityCategory.CONFIG,
-        key_set_value_fn=lambda lm, off_time, key: lm.configure_prebrew(
+        set_value_fn=lambda lm, off_time, key: lm.configure_prebrew(
             off_time=int(off_time * 1000), key=key
         ),
-        key_native_value_fn=lambda lm, key: lm.current_status.get(
-            f"preinfusion_k{key}", 5
-        ),
+        native_value_fn=lambda lm, key: lm.current_status.get(f"preinfusion_k{key}", 5),
         enabled_fn=lambda lm: lm.current_status.get("enable_preinfusion", False),
         not_settable_reason="Preinfusion is not enabled",
         supported_models=(
@@ -235,9 +233,7 @@ class LaMarzoccoKeyNumberEntity(LaMarzoccoEntity, NumberEntity):
     @property
     def native_value(self) -> float:
         """Return the current value."""
-        return self.entity_description.key_native_value_fn(
-            self.coordinator.lm, self.key
-        )
+        return self.entity_description.native_value_fn(self.coordinator.lm, self.key)
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
@@ -245,7 +241,5 @@ class LaMarzoccoKeyNumberEntity(LaMarzoccoEntity, NumberEntity):
             raise HomeAssistantError(
                 f"Not possible to set: {self.entity_description.not_settable_reason}"
             )
-        await self.entity_description.key_set_value_fn(
-            self.coordinator.lm, value, self.key
-        )
+        await self.entity_description.set_value_fn(self.coordinator.lm, value, self.key)
         self.async_write_ha_state()
