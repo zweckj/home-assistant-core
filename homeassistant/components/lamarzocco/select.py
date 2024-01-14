@@ -50,9 +50,7 @@ ENTITIES: tuple[LaMarzoccoSelectEntityDescription, ...] = (
         options=["Disabled", "Prebrew", "Preinfusion"],
         select_option_fn=lambda coordinator,
         option: coordinator.lm.select_pre_brew_infusion_mode(option),
-        current_option_fn=lambda coordinator: coordinator.lm.current_status.get(
-            "steam_level_set", 3
-        ),
+        current_option_fn=lambda coordinator: coordinator.lm.pre_brew_infusion_mode,
         supported_models=(
             LaMarzoccoModel.GS3_AV,
             LaMarzoccoModel.LINEA_MICRA,
