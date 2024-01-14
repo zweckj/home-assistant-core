@@ -38,12 +38,6 @@
     "invalid_config_entry": {
       "message": "Invalid config entry provided. Got {config_entry}"
     },
-    "invalid_key": {
-      "message": "Model {model} only supports key {key}"
-    },
-    "invalid_model": {
-      "message": "Model {model} does not support this service"
-    },
     "unloaded_config_entry": {
       "message": "Config entry {config_entry} is not loaded"
     }
@@ -113,78 +107,6 @@
         "minute_off": {
           "name": "Minute off",
           "description": "The minute to turn the machine off (0-59)"
-        }
-      }
-    },
-    "set_dose": {
-      "name": "Set dose",
-      "description": "Set the dose for a specific button",
-      "fields": {
-        "config_entry": {
-          "name": "Config Entry",
-          "description": "The config entry to use for this service."
-        },
-        "key": {
-          "name": "Key",
-          "description": "The button to set the dose for (1-4)"
-        },
-        "pulses": {
-          "name": "Dose",
-          "description": "The dose in pulses (roughly ~0.5ml per pulse)"
-        }
-      }
-    },
-    "set_dose_hot_water": {
-      "name": "Set hot water dose",
-      "description": "Set the dose for the hot water button",
-      "fields": {
-        "config_entry": {
-          "name": "Config Entry",
-          "description": "The config entry to use for this service."
-        },
-        "seconds": {
-          "name": "Dose",
-          "description": "The number of seconds to stream hot water"
-        }
-      }
-    },
-    "set_prebrew_times": {
-      "name": "Set Prebrew times",
-      "description": "Set the prebrew times for each button",
-      "fields": {
-        "config_entry": {
-          "name": "Config Entry",
-          "description": "The config entry to use for this service."
-        },
-        "key": {
-          "name": "Key",
-          "description": "The button to set the prebrew time for (1-4)"
-        },
-        "seconds_on": {
-          "name": "Prebrew time on",
-          "description": "The time in seconds for the pump to run during prebrewing (0-5.9s)"
-        },
-        "seconds_off": {
-          "name": "Prebrew time fff",
-          "description": "The time in seconds for the pump to rest during prebrewing (0-5.9s)"
-        }
-      }
-    },
-    "set_preinfusion_time": {
-      "name": "Set Preinfusion time",
-      "description": "Set the preinfusion time for each button",
-      "fields": {
-        "config_entry": {
-          "name": "Config Entry",
-          "description": "The config entry to use for this service."
-        },
-        "key": {
-          "name": "Key",
-          "description": "The button to set the preinfusion time for (1-4)"
-        },
-        "seconds": {
-          "name": "Preinfusion time",
-          "description": "The time in seconds to run preinfusion (0-24.9s)"
         }
       }
     }

@@ -4,7 +4,6 @@ from collections.abc import Callable, Coroutine
 import logging
 from typing import Any, Final
 
-from lmcloud.const import LaMarzoccoModel
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 import voluptuous as vol
 
@@ -82,27 +81,6 @@ SET_AUTO_ON_OFF_TIMES_SCHEMA = CONFIG_ENTRY_SCHEMA.extend(
         vol.Optional(CONF_MINUTE_OFF, default=0): vol.All(
             vol.Coerce(int), vol.Range(min=0, max=59)
         ),
-    }
-)
-
-SET_PREBREW_TIMES_SCHEMA = CONFIG_ENTRY_SCHEMA.extend(
-    {
-        vol.Required(CONF_SECONDS_ON): vol.All(
-            vol.Coerce(float), vol.Range(min=0, max=5.9)
-        ),
-        vol.Required(CONF_SECONDS_OFF): vol.All(
-            vol.Coerce(float), vol.Range(min=0, max=5.9)
-        ),
-        vol.Required(CONF_KEY): vol.All(vol.Coerce(int), vol.Range(min=1, max=4)),
-    }
-)
-
-SET_PREINFUSION_TIME_SCHEMA = CONFIG_ENTRY_SCHEMA.extend(
-    {
-        vol.Required(CONF_SECONDS): vol.All(
-            vol.Coerce(float), vol.Range(min=0, max=24.9)
-        ),
-        vol.Required(CONF_KEY): vol.All(vol.Coerce(int), vol.Range(min=1, max=4)),
     }
 )
 
@@ -192,151 +170,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
             minute_off=minute_off,
         )
 
-    async def _set_dose(service: ServiceCall) -> None:
-        """Service call to set the dose for a key."""
-
-        key = service.data[CONF_KEY]
-        pulses = service.data[CONF_PULSES]
-
-        coordinator = __get_coordinator(hass, service)
-        if coordinator.lm.model_name != LaMarzoccoModel.GS3_AV:
-            raise ServiceValidationError(
-                f"Model {coordinator.lm.model_name} does not support this service",
-                translation_domain=DOMAIN,
-                translation_key="invalid_model",
-                translation_placeholders={
-                    "model": coordinator.lm.model_name,
-                },
-            )
-
-        _LOGGER.debug("Setting dose for key: %s to pulses: %s", key, pulses)
-        await __call_service(coordinator.lm.set_dose, key=key, value=pulses)
-
-    async def _set_dose_hot_water(service: ServiceCall) -> None:
-        """Service call to set the hot water dose."""
-
-        seconds = service.data[CONF_SECONDS]
-        coordinator = __get_coordinator(hass, service)
-
-        if coordinator.lm.model_name not in (
-            LaMarzoccoModel.GS3_AV,
-            LaMarzoccoModel.GS3_MP,
-        ):
-            raise ServiceValidationError(
-                f"Model {coordinator.lm.model_name} does not support this service",
-                translation_domain=DOMAIN,
-                translation_key="invalid_model",
-                translation_placeholders={
-                    "model": coordinator.lm.model_name,
-                },
-            )
-
-        _LOGGER.debug("Setting hot water dose to seconds: %s", seconds)
-        await __call_service(coordinator.lm.set_dose_hot_water, value=seconds)
-
-    async def _set_prebrew_times(service: ServiceCall) -> None:
-        """Service call to set prebrew on time."""
-
-        key = int(service.data[CONF_KEY])
-        seconds_on = float(service.data[CONF_SECONDS_ON])
-        seconds_off = float(service.data[CONF_SECONDS_OFF])
-
-        coordinator = __get_coordinator(hass, service)
-
-        if coordinator.lm.model_name == LaMarzoccoModel.GS3_MP:
-            raise ServiceValidationError(
-                f"Model {coordinator.lm.model_name} does not support this service",
-                translation_domain=DOMAIN,
-                translation_key="invalid_model",
-                translation_placeholders={
-                    "model": coordinator.lm.model_name,
-                },
-            )
-        if (
-            coordinator.lm.model_name
-            in (
-                LaMarzoccoModel.LINEA_MINI,
-                LaMarzoccoModel.LINEA_MICRA,
-            )
-            and key > 1
-        ):
-            raise ServiceValidationError(
-                f"Key {key} is not supported for model {coordinator.lm.model_name}",
-                translation_domain=DOMAIN,
-                translation_key="invalid_key",
-                translation_placeholders={
-                    "model": coordinator.lm.model_name,
-                    "key": "1",
-                },
-            )
-
-        _LOGGER.debug(
-            "Setting prebrew on time for %s to %s and %s", key, seconds_on, seconds_off
-        )
-        await __call_service(
-            coordinator.lm.set_prebrew_times,
-            key=key,
-            seconds_on=seconds_on,
-            seconds_off=seconds_off,
-        )
-
-    async def _set_preinfusion_time(service: ServiceCall) -> None:
-        """Service call to set preinfusion time."""
-
-        key = int(service.data[CONF_KEY])
-        seconds = float(service.data[CONF_SECONDS])
-
-        coordinator = __get_coordinator(hass, service)
-
-        if coordinator.lm.model_name == LaMarzoccoModel.GS3_MP:
-            raise ServiceValidationError(
-                f"Model {coordinator.lm.model_name} does not support this service",
-                translation_domain=DOMAIN,
-                translation_key="invalid_model",
-                translation_placeholders={
-                    "model": coordinator.lm.model_name,
-                },
-            )
-
-        if (
-            coordinator.lm.model_name
-            in (
-                LaMarzoccoModel.LINEA_MINI,
-                LaMarzoccoModel.LINEA_MICRA,
-            )
-            and key > 1
-        ):
-            raise ServiceValidationError(
-                f"Key {key} is not supported for model {coordinator.lm.model_name}",
-                translation_domain=DOMAIN,
-                translation_key="invalid_key",
-                translation_placeholders={
-                    "model": coordinator.lm.model_name,
-                    "key": "1",
-                },
-            )
-
-        _LOGGER.debug("Setting prebrew on time for %s to %s", key, seconds)
-        await __call_service(
-            coordinator.lm.set_preinfusion_time,
-            key=key,
-            seconds=seconds,
-        )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_DOSE,
-        _set_dose,
-        schema=SET_DOSE_SCHEMA,
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_DOSE_HOT_WATER,
-        _set_dose_hot_water,
-        schema=SET_DOSE_HOT_WATER_SCHEMA,
-    )
-
     hass.services.async_register(
         DOMAIN,
         SERVICE_AUTO_ON_OFF_ENABLE,
@@ -349,18 +182,4 @@ def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_AUTO_ON_OFF_TIMES,
         _set_auto_on_off_times,
         schema=SET_AUTO_ON_OFF_TIMES_SCHEMA,
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_PREBREW_TIMES,
-        _set_prebrew_times,
-        schema=SET_PREBREW_TIMES_SCHEMA,
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_PREINFUSION_TIME,
-        _set_preinfusion_time,
-        schema=SET_PREINFUSION_TIME_SCHEMA,
     )
