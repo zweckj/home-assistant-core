@@ -92,6 +92,8 @@ def mock_lamarzocco(
         lamarzocco.gateway_version = "v2.2-rc0"
         lamarzocco.latest_gateway_version = "v3.1-rc4"
 
+        lamarzocco.pre_brew_infusion_mode = "Prebrew"
+
         lamarzocco.current_status = load_json_object_fixture(
             "current_status.json", DOMAIN
         )
