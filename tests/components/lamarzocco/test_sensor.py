@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from syrupy import SnapshotAssertion
 
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
@@ -49,14 +49,26 @@ async def test_shot_timer_not_exists(
     mock_lamarzocco: MagicMock,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """Test the La Marzocco doesn't exist if host not set."""
-
-    serial_number = mock_lamarzocco.serial_number
+    """Test the La Marzocco shot timer doesn't exist if host not set."""
 
     data = mock_config_entry.data.copy()
     del data[CONF_HOST]
     hass.config_entries.async_update_entry(mock_config_entry, data=data)
 
     await async_init_integration(hass, mock_config_entry)
-    state = hass.states.get(f"sensor.{serial_number}_shot_timer")
+    state = hass.states.get(f"sensor.{mock_lamarzocco.serial_number}_shot_timer")
     assert state is None
+
+
+async def test_shot_timer_unavailable(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test the La Marzocco brew_active becomes unavailable."""
+
+    mock_lamarzocco.websocket_connected = False
+    await async_init_integration(hass, mock_config_entry)
+    state = hass.states.get(f"sensor.{mock_lamarzocco.serial_number}_shot_timer")
+    assert state
+    assert state.state == STATE_UNAVAILABLE
