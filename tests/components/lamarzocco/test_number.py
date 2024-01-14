@@ -135,7 +135,7 @@ async def test_pre_brew_infusion_numbers(
     value: float,
     kwargs: dict[str, float],
 ) -> None:
-    """Test the La Marzocco coffee temperature Number."""
+    """Test the La Marzocco prebrew/-infusion sensors."""
 
     mock_lamarzocco.current_status["enable_preinfusion"] = True
 
