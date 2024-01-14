@@ -49,7 +49,7 @@ async def test_shot_timer_not_exists(
     mock_lamarzocco: MagicMock,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """Test the La Marzocco sensors."""
+    """Test the La Marzocco doesn't exist if host not set."""
 
     serial_number = mock_lamarzocco.serial_number
 
