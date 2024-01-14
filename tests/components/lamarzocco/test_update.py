@@ -22,7 +22,7 @@ async def test_update_entites(
 
     serial_number = mock_lamarzocco.serial_number
 
-    for entity_name in ["machine_firmware", "gateway_firmware"]:
+    for entity_name in ("machine_firmware", "gateway_firmware"):
         state = hass.states.get(f"update.{serial_number}_{entity_name}")
         assert state
         assert state == snapshot(name=f"{entity_name}-state")
