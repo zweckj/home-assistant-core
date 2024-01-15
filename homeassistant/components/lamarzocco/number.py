@@ -213,9 +213,7 @@ async def async_setup_entry(
             if coordinator.lm.model_name == LaMarzoccoModel.GS3_AV:
                 for key in range(1, NUMBER_KEYS_GS3_AV + 1):
                     entities.append(
-                        LaMarzoccoKeyNumberEntity(
-                            coordinator, description, key=key, single_key=False
-                        )
+                        LaMarzoccoKeyNumberEntity(coordinator, description, key)
                     )
             else:
                 entities.append(LaMarzoccoKeyNumberEntity(coordinator, description))
@@ -248,17 +246,18 @@ class LaMarzoccoKeyNumberEntity(LaMarzoccoEntity, NumberEntity):
         self,
         coordinator: LaMarzoccoUpdateCoordinator,
         description: LaMarzoccoKeyNumberEntityDescription,
-        key: int = 1,
-        single_key: bool = True,
+        key: int | None = None,
     ) -> None:
         """Initialize the entity."""
         super().__init__(coordinator, description)
-        self.key = key
-        if not single_key:
+        if key is None:
+            key = 1
+        else:
             self._attr_translation_key = f"{description.translation_key}_key"
             self._attr_translation_placeholders = {"key": str(key)}
             self._attr_unique_id = f"{super()._attr_unique_id}_key{key}"
             self._attr_entity_registry_enabled_default = False
+        self.key = key
 
     @property
     def native_value(self) -> float:
