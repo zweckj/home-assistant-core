@@ -37,7 +37,9 @@ class LaMarzoccoNumberEntityDescription(
     """Description of an La Marzocco number entity."""
 
     native_value_fn: Callable[[LaMarzoccoClient], float | int]
-    set_value_fn: Callable[[LaMarzoccoClient, float | int], Coroutine[Any, Any, bool]]
+    set_value_fn: Callable[
+        [LaMarzoccoUpdateCoordinator, float | int], Coroutine[Any, Any, bool]
+    ]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -65,7 +67,7 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_step=PRECISION_TENTHS,
         native_min_value=85,
         native_max_value=104,
-        set_value_fn=lambda lm, temp: lm.set_coffee_temp(temp),
+        set_value_fn=lambda coordinator, temp: coordinator.lm.set_coffee_temp(temp),
         native_value_fn=lambda lm: lm.current_status.get("coffee_set_temp", 0),
     ),
     LaMarzoccoNumberEntityDescription(
@@ -77,7 +79,7 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_step=PRECISION_WHOLE,
         native_min_value=126,
         native_max_value=131,
-        set_value_fn=lambda lm, temp: lm.set_steam_temp(int(temp)),
+        set_value_fn=lambda coordinator, temp: coordinator.lm.set_steam_temp(int(temp)),
         native_value_fn=lambda lm: lm.current_status.get("steam_set_temp", 0),
         supported_models=(
             LaMarzoccoModel.GS3_AV,
@@ -93,7 +95,9 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_step=PRECISION_WHOLE,
         native_min_value=0,
         native_max_value=30,
-        set_value_fn=lambda lm, value: lm.set_dose_hot_water(value=int(value)),
+        set_value_fn=lambda coordinator, value: coordinator.lm.set_dose_hot_water(
+            value=int(value)
+        ),
         native_value_fn=lambda lm: lm.current_status.get("dose_k5", 0),
         supported_models=(
             LaMarzoccoModel.GS3_AV,
@@ -233,7 +237,7 @@ class LaMarzoccoNumberEntity(LaMarzoccoEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
-        await self.entity_description.set_value_fn(self.coordinator.lm, value)
+        await self.entity_description.set_value_fn(self.coordinator, value)
         self.async_write_ha_state()
 
 
