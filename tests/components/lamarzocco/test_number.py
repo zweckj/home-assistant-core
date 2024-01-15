@@ -44,7 +44,7 @@ async def test_coffee_boiler(
     device = device_registry.async_get(entry.device_id)
     assert device
 
-    # on/off service calls
+    # service call
     await hass.services.async_call(
         NUMBER_DOMAIN,
         SERVICE_SET_VALUE,
@@ -98,7 +98,7 @@ async def test_gs3_exclusive(
     device = device_registry.async_get(entry.device_id)
     assert device
 
-    # on/off service calls
+    # service call
     await hass.services.async_call(
         NUMBER_DOMAIN,
         SERVICE_SET_VALUE,
@@ -170,7 +170,7 @@ async def test_pre_brew_infusion_numbers(
     device = device_registry.async_get(entry.device_id)
     assert device
 
-    # on/off service calls
+    # service call
     await hass.services.async_call(
         NUMBER_DOMAIN,
         SERVICE_SET_VALUE,
@@ -231,7 +231,7 @@ async def test_pre_brew_infusion_key_numbers(
         assert state
         assert state == snapshot(name=f"{serial_number}_{entity_name}_key_{key}-state")
 
-        # on/off service calls
+        # service call
         await hass.services.async_call(
             NUMBER_DOMAIN,
             SERVICE_SET_VALUE,
