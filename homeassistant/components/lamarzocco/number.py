@@ -1,4 +1,4 @@
-"""Water heater platform for La Marzocco espresso machines."""
+"""Number platform for La Marzocco espresso machines."""
 
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
