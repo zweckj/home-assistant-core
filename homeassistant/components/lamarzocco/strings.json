@@ -19,12 +19,11 @@
           "password": "[%key:common::config_flow::data::password%]"
         },
         "data_description": {
-          "username": "Your username from the La Marzocco app",
-          "password": "Your password from the La Marzocco app"
+          "password": "Your password from the La Marzocco app",
+          "username": "Your username from the La Marzocco app"
         }
       },
       "machine_selection": {
-        "description": "Select the machine you want to integrate. Set the \"IP\" to get access to shot time related sensors.",
         "data": {
           "host": "[%key:common::config_flow::data::ip%]",
           "machine": "Machine"
@@ -36,9 +35,23 @@
     }
   },
   "entity": {
+    "button": {
+      "start_backflush": {
+        "name": "Start Backflush"
+      }
+    },
     "switch": {
+      "main": {
+        "name": "Main"
+      },
       "auto_on_off": {
         "name": "Auto on/off"
+      },
+      "prebrew": {
+        "name": "Prebrew"
+      },
+      "preinfusion": {
+        "name": "Preinfusion"
       },
       "steam_boiler": {
         "name": "Steam boiler"
