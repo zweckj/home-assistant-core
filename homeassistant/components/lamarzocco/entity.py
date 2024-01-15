@@ -24,22 +24,16 @@ class LaMarzoccoEntityDescription(EntityDescription):
     )
 
 
-class LaMarzoccoEntity(CoordinatorEntity[LaMarzoccoUpdateCoordinator]):
+class LaMarzoccoBaseEntity(CoordinatorEntity[LaMarzoccoUpdateCoordinator]):
     """Common elements for all entities."""
 
-    entity_description: LaMarzoccoEntityDescription
     _attr_has_entity_name = True
 
-    def __init__(
-        self,
-        coordinator: LaMarzoccoUpdateCoordinator,
-        entity_description: LaMarzoccoEntityDescription,
-    ) -> None:
+    def __init__(self, coordinator: LaMarzoccoUpdateCoordinator, key: str) -> None:
         """Initialize the entity."""
         super().__init__(coordinator)
-        self.entity_description = entity_description
         lm = coordinator.lm
-        self._attr_unique_id = f"{lm.serial_number}_{entity_description.key}"
+        self._attr_unique_id = f"{lm.serial_number}_{key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, lm.serial_number)},
             name=lm.machine_name,
@@ -48,3 +42,19 @@ class LaMarzoccoEntity(CoordinatorEntity[LaMarzoccoUpdateCoordinator]):
             serial_number=lm.serial_number,
             sw_version=lm.firmware_version,
         )
+
+
+class LaMarzoccoEntity(LaMarzoccoBaseEntity):
+    """Common elements for all entities."""
+
+    entity_description: LaMarzoccoEntityDescription
+
+    def __init__(
+        self,
+        coordinator: LaMarzoccoUpdateCoordinator,
+        entity_description: LaMarzoccoEntityDescription,
+    ) -> None:
+        """Initialize the entity."""
+
+        super().__init__(coordinator, entity_description.key)
+        self.entity_description = entity_description
