@@ -19,12 +19,11 @@
           "password": "[%key:common::config_flow::data::password%]"
         },
         "data_description": {
-          "username": "Your username from the La Marzocco app",
-          "password": "Your password from the La Marzocco app"
+          "password": "Your password from the La Marzocco app",
+          "username": "Your username from the La Marzocco app"
         }
       },
       "machine_selection": {
-        "description": "Select the machine you want to integrate. Set the \"IP\" to get access to shot time related sensors.",
         "data": {
           "host": "[%key:common::config_flow::data::ip%]",
           "machine": "Machine"
@@ -36,7 +35,18 @@
     }
   },
   "entity": {
+    "select": {
+      "prebrew_infusion_select": {
+        "name": "Prebrew/-infusion mode"
+      },
+      "steam_temp_select": {
+        "name": "Steam level"
+      }
+    },
     "switch": {
+      "main": {
+        "name": "Main"
+      },
       "auto_on_off": {
         "name": "Auto on/off"
       },
