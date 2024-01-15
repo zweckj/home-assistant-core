@@ -69,9 +69,6 @@
       }
     },
     "switch": {
-      "main": {
-        "name": "Main"
-      },
       "auto_on_off": {
         "name": "Auto on/off"
       },
