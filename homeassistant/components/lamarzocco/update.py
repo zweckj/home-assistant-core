@@ -95,6 +95,11 @@ class LaMarzoccoUpdateEntity(LaMarzoccoEntity, UpdateEntity):
         return UpdateEntityFeature.INSTALL
 
     @property
+    def in_progress(self) -> bool:
+        """Return if an update is in progress."""
+        return self._update_in_progress
+
+    @property
     def installed_version(self) -> str | None:
         """Return the current firmware version."""
         return self.entity_description.current_fw_fn(self.coordinator.lm)
