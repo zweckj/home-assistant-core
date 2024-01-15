@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Coroutine
 import logging
-from typing import Any, Final
+from typing import Any
 
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 import voluptuous as vol
@@ -12,33 +12,23 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, selector
 
-from .const import DOMAIN
+from .const import (
+    CONF_CONFIG_ENTRY,
+    CONF_DAY_OF_WEEK,
+    CONF_ENABLE,
+    CONF_HOUR_OFF,
+    CONF_HOUR_ON,
+    CONF_MINUTE_OFF,
+    CONF_MINUTE_ON,
+    DAYS,
+    DOMAIN,
+    SERVICE_AUTO_ON_OFF_ENABLE,
+    SERVICE_AUTO_ON_OFF_TIMES,
+)
 from .coordinator import LaMarzoccoUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-
-SERVICE_DOSE = "set_dose"
-SERVICE_DOSE_HOT_WATER = "set_dose_hot_water"
-SERVICE_AUTO_ON_OFF_ENABLE = "set_auto_on_off_enable"
-SERVICE_AUTO_ON_OFF_TIMES = "set_auto_on_off_times"
-SERVICE_PREBREW_TIMES = "set_prebrew_times"
-SERVICE_PREINFUSION_TIME = "set_preinfusion_time"
-
-CONF_CONFIG_ENTRY: Final = "config_entry"
-CONF_DAY_OF_WEEK = "day_of_week"
-CONF_ENABLE = "enable"
-CONF_HOUR_ON = "hour_on"
-CONF_HOUR_OFF = "hour_off"
-CONF_MINUTE_ON = "minute_on"
-CONF_MINUTE_OFF = "minute_off"
-CONF_SECONDS_ON = "seconds_on"
-CONF_SECONDS_OFF = "seconds_off"
-CONF_SECONDS = "seconds"
-CONF_KEY = "key"
-CONF_PULSES = "pulses"
-
-DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 CONFIG_ENTRY_SCHEMA = vol.Schema(
     {
@@ -50,18 +40,6 @@ CONFIG_ENTRY_SCHEMA = vol.Schema(
     }
 )
 
-SET_DOSE_SCHEMA = CONFIG_ENTRY_SCHEMA.extend(
-    {
-        vol.Required(CONF_KEY): vol.All(vol.Coerce(int), vol.Range(min=1, max=5)),
-        vol.Required(CONF_PULSES): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000)),
-    }
-)
-
-SET_DOSE_HOT_WATER_SCHEMA = CONFIG_ENTRY_SCHEMA.extend(
-    {
-        vol.Required("seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=30)),
-    }
-)
 
 SET_AUTO_ON_OFF_ENABLE_SCHEMA = CONFIG_ENTRY_SCHEMA.extend(
     {
