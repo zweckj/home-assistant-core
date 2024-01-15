@@ -62,18 +62,31 @@ async def test_coffee_boiler(
 @pytest.mark.parametrize(
     "device_fixture", [LaMarzoccoModel.GS3_AV, LaMarzoccoModel.GS3_MP]
 )
-async def test_steam_boiler(
+@pytest.mark.parametrize(
+    ("entity_name", "value", "func_name", "kwargs"),
+    [
+        ("steam_temperature", 131, "set_steam_temp", {"temperature": 131}),
+        ("dose_hot_water", 15, "set_dose_hot_water", {"value": 15}),
+    ],
+)
+async def test_gs3_exclusive(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
     entity_registry: er.EntityRegistry,
     device_registry: dr.DeviceRegistry,
     snapshot: SnapshotAssertion,
+    entity_name: str,
+    value: float,
+    func_name: str,
+    kwargs: dict[str, float],
 ) -> None:
-    """Test the La Marzocco steam temperature number."""
+    """Test exclusive entities for GS3 AV/MP."""
 
     serial_number = mock_lamarzocco.serial_number
 
-    state = hass.states.get(f"number.{serial_number}_steam_temperature")
+    func = getattr(mock_lamarzocco, func_name)
+
+    state = hass.states.get(f"number.{serial_number}_{entity_name}")
     assert state
     assert state == snapshot
 
@@ -90,29 +103,31 @@ async def test_steam_boiler(
         NUMBER_DOMAIN,
         SERVICE_SET_VALUE,
         {
-            ATTR_ENTITY_ID: f"number.{serial_number}_steam_temperature",
-            ATTR_VALUE: 131,
+            ATTR_ENTITY_ID: f"number.{serial_number}_{entity_name}",
+            ATTR_VALUE: value,
         },
         blocking=True,
     )
 
-    assert len(mock_lamarzocco.set_steam_temp.mock_calls) == 1
-    mock_lamarzocco.set_steam_temp.assert_called_once_with(temperature=131)
+    assert len(func.mock_calls) == 1
+    func.assert_called_once_with(**kwargs)
 
 
 @pytest.mark.parametrize(
     "device_fixture", [LaMarzoccoModel.LINEA_MICRA, LaMarzoccoModel.LINEA_MINI]
 )
-async def test_steam_boiler_none(
+async def test_gs3_exclusive_none(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
 ) -> None:
-    """Ensure steam boiler number is None for unsupported models."""
+    """Ensure GS3 exclusive is None for unsupported models."""
+
+    ENTITIES = ("steam_temperature", "dose_hot_water")
 
     serial_number = mock_lamarzocco.serial_number
-
-    state = hass.states.get(f"number.{serial_number}_steam_temperature")
-    assert state is None
+    for entity in ENTITIES:
+        state = hass.states.get(f"number.{serial_number}_{entity}")
+        assert state is None
 
 
 @pytest.mark.parametrize(
@@ -173,11 +188,22 @@ async def test_pre_brew_infusion_numbers(
 @pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.GS3_AV])
 @pytest.mark.usefixtures("entity_registry_enabled_by_default")
 @pytest.mark.parametrize(
-    ("entity_name", "value", "kwargs"),
+    ("entity_name", "value", "function_name", "kwargs"),
     [
-        ("prebrew_off_time", 6, {"on_time": 3000, "off_time": 6000}),
-        ("prebrew_on_time", 6, {"on_time": 6000, "off_time": 5000}),
-        ("preinfusion_off_time", 7, {"off_time": 7000}),
+        (
+            "prebrew_off_time",
+            6,
+            "configure_prebrew",
+            {"on_time": 3000, "off_time": 6000},
+        ),
+        (
+            "prebrew_on_time",
+            6,
+            "configure_prebrew",
+            {"on_time": 6000, "off_time": 5000},
+        ),
+        ("preinfusion_off_time", 7, "configure_prebrew", {"off_time": 7000}),
+        ("dose", 6, "set_dose", {"value": 6}),
     ],
 )
 async def test_pre_brew_infusion_key_numbers(
@@ -186,13 +212,16 @@ async def test_pre_brew_infusion_key_numbers(
     snapshot: SnapshotAssertion,
     entity_name: str,
     value: float,
+    function_name: str,
     kwargs: dict[str, float],
 ) -> None:
-    """Test the La Marzocco prebrew/-infusion sensors for GS3AV model."""
+    """Test the La Marzocco number sensors for GS3AV model."""
 
     mock_lamarzocco.current_status["enable_preinfusion"] = True
 
     serial_number = mock_lamarzocco.serial_number
+
+    func = getattr(mock_lamarzocco, function_name)
 
     state = hass.states.get(f"number.{serial_number}_{entity_name}")
     assert state is None
@@ -215,8 +244,8 @@ async def test_pre_brew_infusion_key_numbers(
 
         kwargs["key"] = key
 
-        assert len(mock_lamarzocco.configure_prebrew.mock_calls) == key
-        mock_lamarzocco.configure_prebrew.assert_called_with(**kwargs)
+        assert len(func.mock_calls) == key
+        func.assert_called_with(**kwargs)
 
 
 @pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.GS3_AV])
@@ -226,7 +255,12 @@ async def test_disabled_entites(
 ) -> None:
     """Test the La Marzocco prebrew/-infusion sensors for GS3AV model."""
 
-    ENTITIES = ("prebrew_off_time", "prebrew_on_time", "preinfusion_off_time")
+    ENTITIES = (
+        "prebrew_off_time",
+        "prebrew_on_time",
+        "preinfusion_off_time",
+        "set_dose",
+    )
 
     serial_number = mock_lamarzocco.serial_number
 
@@ -236,21 +270,49 @@ async def test_disabled_entites(
             assert state is None
 
 
-@pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.GS3_MP])
+@pytest.mark.parametrize(
+    "device_fixture",
+    [LaMarzoccoModel.GS3_MP, LaMarzoccoModel.LINEA_MICRA, LaMarzoccoModel.LINEA_MINI],
+)
+async def test_not_existing_key_entites(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+) -> None:
+    """Assert not existing key entities."""
+
+    serial_number = mock_lamarzocco.serial_number
+
+    for entity in (
+        "prebrew_off_time",
+        "prebrew_on_time",
+        "preinfusion_off_time",
+        "set_dose",
+    ):
+        for key in range(1, NUMBER_KEYS_GS3_AV + 1):
+            state = hass.states.get(f"number.{serial_number}_{entity}_key_{key}")
+            assert state is None
+
+
+@pytest.mark.parametrize(
+    "device_fixture",
+    [LaMarzoccoModel.GS3_MP],
+)
 async def test_not_existing_entites(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
 ) -> None:
-    """Assert not available entities."""
+    """Assert not existing entities."""
 
     serial_number = mock_lamarzocco.serial_number
 
-    for entity in ("prebrew_off_time", "prebrew_on_time", "preinfusion_off_time"):
+    for entity in (
+        "prebrew_off_time",
+        "prebrew_on_time",
+        "preinfusion_off_time",
+        "set_dose",
+    ):
         state = hass.states.get(f"number.{serial_number}_{entity}")
         assert state is None
-        for key in range(1, NUMBER_KEYS_GS3_AV + 1):
-            state = hass.states.get(f"number.{serial_number}_{entity}_key_{key}")
-            assert state is None
 
 
 @pytest.mark.parametrize("device_fixture", [LaMarzoccoModel.LINEA_MICRA])

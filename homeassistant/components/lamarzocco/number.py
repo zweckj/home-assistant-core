@@ -15,6 +15,7 @@ from homeassistant.components.number import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PRECISION_TENTHS,
+    PRECISION_WHOLE,
     EntityCategory,
     UnitOfTemperature,
     UnitOfTime,
@@ -50,8 +51,8 @@ class LaMarzoccoKeyNumberEntityDescription(
     set_value_fn: Callable[
         [LaMarzoccoClient, float | int, int], Coroutine[Any, Any, bool]
     ]
-    enabled_fn: Callable[[LaMarzoccoClient], bool]
-    not_settable_reason: str
+    enabled_fn: Callable[[LaMarzoccoClient], bool] = lambda _: True
+    not_settable_reason: str = ""
 
 
 ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
@@ -73,11 +74,27 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         icon="mdi:kettle-steam",
         device_class=NumberDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        native_step=PRECISION_TENTHS,
+        native_step=PRECISION_WHOLE,
         native_min_value=126,
         native_max_value=131,
-        set_value_fn=lambda lm, temp: lm.set_steam_temp(round(temp)),
+        set_value_fn=lambda lm, temp: lm.set_steam_temp(int(temp)),
         native_value_fn=lambda lm: lm.current_status.get("steam_set_temp", 0),
+        supported_models=(
+            LaMarzoccoModel.GS3_AV,
+            LaMarzoccoModel.GS3_MP,
+        ),
+    ),
+    LaMarzoccoNumberEntityDescription(
+        key="dose_hot_water",
+        translation_key="dose_hot_water",
+        icon="mdi:water-percent",
+        device_class=NumberDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        native_step=PRECISION_WHOLE,
+        native_min_value=0,
+        native_max_value=30,
+        set_value_fn=lambda lm, value: lm.set_dose_hot_water(value=int(value)),
+        native_value_fn=lambda lm: lm.current_status.get("dose_k5", 0),
         supported_models=(
             LaMarzoccoModel.GS3_AV,
             LaMarzoccoModel.GS3_MP,
@@ -159,6 +176,19 @@ KEY_ENTITIES: tuple[LaMarzoccoKeyNumberEntityDescription, ...] = (
             LaMarzoccoModel.LINEA_MINI,
             LaMarzoccoModel.GS3_AV,
         ),
+    ),
+    LaMarzoccoKeyNumberEntityDescription(
+        key="dose",
+        translation_key="dose",
+        icon="mdi:cup-water",
+        native_unit_of_measurement="ticks",
+        native_step=PRECISION_WHOLE,
+        native_min_value=0,
+        native_max_value=999,
+        entity_category=EntityCategory.CONFIG,
+        set_value_fn=lambda lm, ticks, key: lm.set_dose(key=key, value=int(ticks)),
+        native_value_fn=lambda lm, key: lm.current_status.get(f"dose_k{key}", 500),
+        supported_models=(LaMarzoccoModel.GS3_AV,),
     ),
 )
 

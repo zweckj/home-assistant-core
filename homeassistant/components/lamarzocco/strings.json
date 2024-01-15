@@ -60,6 +60,12 @@
       },
       "preinfusion_off_key": {
         "name": "Preinfusion off time Key {key}"
+      },
+      "dose_key": {
+        "name": "Dose Key {key}"
+      },
+      "dose_hot_water": {
+        "name": "Dose hot water"
       }
     },
     "switch": {
