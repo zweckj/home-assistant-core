@@ -1,5 +1,29 @@
 # serializer version: 1
-# name: test_update_entites[gateway_firmware-entry]
+# name: test_update_entites[gateway_firmware-gateway]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'auto_update': False,
+      'device_class': 'firmware',
+      'entity_picture': 'https://brands.home-assistant.io/_/lamarzocco/icon.png',
+      'friendly_name': 'GS01234 Gateway firmware',
+      'icon': 'mdi:cloud-download',
+      'in_progress': False,
+      'installed_version': 'v2.2-rc0',
+      'latest_version': 'v3.1-rc4',
+      'release_summary': None,
+      'release_url': None,
+      'skipped_version': None,
+      'supported_features': <UpdateEntityFeature: 1>,
+      'title': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'update.gs01234_gateway_firmware',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'on',
+  })
+# ---
+# name: test_update_entites[gateway_firmware-gateway].1
   EntityRegistryEntrySnapshot({
     'aliases': set({
     }),
@@ -24,37 +48,37 @@
     'original_name': 'Gateway firmware',
     'platform': 'lamarzocco',
     'previous_unique_id': None,
-    'supported_features': 0,
+    'supported_features': <UpdateEntityFeature: 1>,
     'translation_key': 'gateway_firmware',
     'unique_id': 'GS01234_gateway_firmware',
     'unit_of_measurement': None,
   })
 # ---
-# name: test_update_entites[gateway_firmware-state]
+# name: test_update_entites[machine_firmware-machine]
   StateSnapshot({
     'attributes': ReadOnlyDict({
       'auto_update': False,
       'device_class': 'firmware',
       'entity_picture': 'https://brands.home-assistant.io/_/lamarzocco/icon.png',
-      'friendly_name': 'GS01234 Gateway firmware',
+      'friendly_name': 'GS01234 Machine firmware',
       'icon': 'mdi:cloud-download',
       'in_progress': False,
-      'installed_version': 'v2.2-rc0',
-      'latest_version': 'v3.1-rc4',
+      'installed_version': '1.1',
+      'latest_version': '1.2',
       'release_summary': None,
       'release_url': None,
       'skipped_version': None,
-      'supported_features': <UpdateEntityFeature: 0>,
+      'supported_features': <UpdateEntityFeature: 1>,
       'title': None,
     }),
     'context': <ANY>,
-    'entity_id': 'update.gs01234_gateway_firmware',
+    'entity_id': 'update.gs01234_machine_firmware',
     'last_changed': <ANY>,
     'last_updated': <ANY>,
     'state': 'on',
   })
 # ---
-# name: test_update_entites[machine_firmware-entry]
+# name: test_update_entites[machine_firmware-machine].1
   EntityRegistryEntrySnapshot({
     'aliases': set({
     }),
@@ -79,33 +103,9 @@
     'original_name': 'Machine firmware',
     'platform': 'lamarzocco',
     'previous_unique_id': None,
-    'supported_features': 0,
+    'supported_features': <UpdateEntityFeature: 1>,
     'translation_key': 'machine_firmware',
     'unique_id': 'GS01234_machine_firmware',
     'unit_of_measurement': None,
-  })
-# ---
-# name: test_update_entites[machine_firmware-state]
-  StateSnapshot({
-    'attributes': ReadOnlyDict({
-      'auto_update': False,
-      'device_class': 'firmware',
-      'entity_picture': 'https://brands.home-assistant.io/_/lamarzocco/icon.png',
-      'friendly_name': 'GS01234 Machine firmware',
-      'icon': 'mdi:cloud-download',
-      'in_progress': False,
-      'installed_version': '1.1',
-      'latest_version': '1.1',
-      'release_summary': None,
-      'release_url': None,
-      'skipped_version': None,
-      'supported_features': <UpdateEntityFeature: 0>,
-      'title': None,
-    }),
-    'context': <ANY>,
-    'entity_id': 'update.gs01234_machine_firmware',
-    'last_changed': <ANY>,
-    'last_updated': <ANY>,
-    'state': 'off',
   })
 # ---

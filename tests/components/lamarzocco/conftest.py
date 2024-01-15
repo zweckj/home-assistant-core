@@ -85,7 +85,7 @@ def mock_lamarzocco(
         lamarzocco.serial_number = serial_number
 
         lamarzocco.firmware_version = "1.1"
-        lamarzocco.latest_firmware_version = "1.1"
+        lamarzocco.latest_firmware_version = "1.2"
         lamarzocco.gateway_version = "v2.2-rc0"
         lamarzocco.latest_gateway_version = "v3.1-rc4"
 
@@ -100,5 +100,7 @@ def mock_lamarzocco(
         ]
         lamarzocco.check_local_connection.return_value = True
         lamarzocco.initialized = False
+
+        lamarzocco.update_firmware.return_value = True
 
         yield lamarzocco
