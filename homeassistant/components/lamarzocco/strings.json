@@ -43,6 +43,24 @@
     }
   },
   "entity": {
+    "select": {
+      "prebrew_infusion_select": {
+        "name": "Prebrew/-infusion mode",
+        "state": {
+          "disabled": "Disabled",
+          "prebrew": "Prebrew",
+          "preinfusion": "Preinfusion"
+        }
+      },
+      "steam_temp_select": {
+        "name": "Steam level",
+        "state": {
+          "1": "1",
+          "2": "2",
+          "3": "3"
+        }
+      }
+    },
     "switch": {
       "auto_on_off": {
         "name": "Auto on/off"
