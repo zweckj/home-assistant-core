@@ -1,4 +1,5 @@
 """Config flow for Tedee integration."""
+
 from collections.abc import Mapping
 from typing import Any
 

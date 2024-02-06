@@ -1,4 +1,5 @@
 """Coordinator for Tedee locks."""
+
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 import logging
@@ -111,9 +112,11 @@ class TedeeApiCoordinator(DataUpdateCoordinator[dict[int, TedeeLock]]):
         self.tedee_client.parse_webhook_message(message)
         self.async_set_updated_data(self.tedee_client.locks_dict)
 
-    async def async_register_webhook(self, webhook_url: str) -> None:
+    async def async_register_webhook(self, webhook_url: str, headers: list) -> None:
         """Register the webhook at the Tedee bridge."""
-        self.tedee_webhook_id = await self.tedee_client.register_webhook(webhook_url)
+        self.tedee_webhook_id = await self.tedee_client.register_webhook(
+            webhook_url, headers
+        )
 
     async def async_unregister_webhook(self) -> None:
         """Unregister the webhook at the Tedee bridge."""
