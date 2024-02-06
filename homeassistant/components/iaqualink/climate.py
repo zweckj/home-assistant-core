@@ -42,12 +42,7 @@ class HassAqualinkThermostat(AqualinkEntity, ClimateEntity):
     """Representation of a thermostat."""
 
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
-    _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
-    )
-    _enable_turn_on_off_backwards_compatibility = False
+    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
 
     def __init__(self, dev: AqualinkThermostat) -> None:
         """Initialize AquaLink thermostat."""

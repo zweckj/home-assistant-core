@@ -62,14 +62,10 @@ async def get_data_from_library(
     return output
 
 
-@pytest.fixture(name="load_json")
-def load_json_from_fixture(load_data: str) -> SensiboData:
+@pytest.fixture(name="load_json", scope="session")
+def load_json_from_fixture() -> SensiboData:
     """Load fixture with json data and return."""
-    json_data: dict[str, Any] = json.loads(load_data)
+
+    data_fixture = load_fixture("data.json", "sensibo")
+    json_data: dict[str, Any] = json.loads(data_fixture)
     return json_data
-
-
-@pytest.fixture(name="load_data", scope="session")
-def load_data_from_fixture() -> str:
-    """Load fixture with fixture data and return."""
-    return load_fixture("data.json", "sensibo")

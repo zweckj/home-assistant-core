@@ -1,9 +1,7 @@
 """Test for the default agent."""
-
 from collections import defaultdict
 from unittest.mock import AsyncMock, patch
 
-from hassil.recognize import Intent, IntentData, MatchEntity, RecognizeResult
 import pytest
 
 from homeassistant.components import conversation
@@ -86,10 +84,8 @@ async def test_exposed_areas(
     entity_registry: er.EntityRegistry,
 ) -> None:
     """Test that all areas are exposed."""
-    area_kitchen = area_registry.async_get_or_create("kitchen_id")
-    area_kitchen = area_registry.async_update(area_kitchen.id, name="kitchen")
-    area_bedroom = area_registry.async_get_or_create("bedroom_id")
-    area_bedroom = area_registry.async_update(area_bedroom.id, name="bedroom")
+    area_kitchen = area_registry.async_get_or_create("kitchen")
+    area_bedroom = area_registry.async_get_or_create("bedroom")
 
     entry = MockConfigEntry()
     entry.add_to_hass(hass)
@@ -125,9 +121,6 @@ async def test_exposed_areas(
 
     # All is well for the exposed kitchen light
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
-    assert result.response.intent is not None
-    assert result.response.intent.slots["area"]["value"] == area_kitchen.id
-    assert result.response.intent.slots["area"]["text"] == area_kitchen.normalized_name
 
     # Bedroom has no exposed entities
     result = await conversation.async_converse(
@@ -154,8 +147,8 @@ async def test_conversation_agent(
         conversation.HOME_ASSISTANT_AGENT
     )
     with patch(
-        "homeassistant.components.conversation.default_agent.get_languages",
-        return_value=["dwarvish", "elvish", "entish"],
+        "homeassistant.components.conversation.default_agent.get_domains_and_languages",
+        return_value={"homeassistant": ["dwarvish", "elvish", "entish"]},
     ):
         assert agent.supported_languages == ["dwarvish", "elvish", "entish"]
 
@@ -201,8 +194,7 @@ async def test_unexposed_entities_skipped(
     entity_registry: er.EntityRegistry,
 ) -> None:
     """Test that unexposed entities are skipped in exposed areas."""
-    area_kitchen = area_registry.async_get_or_create("kitchen_id")
-    area_kitchen = area_registry.async_update(area_kitchen.id, name="kitchen")
+    area_kitchen = area_registry.async_get_or_create("kitchen")
 
     # Both lights are in the kitchen
     exposed_light = entity_registry.async_get_or_create("light", "demo", "1234")
@@ -231,9 +223,6 @@ async def test_unexposed_entities_skipped(
 
     assert len(calls) == 1
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
-    assert result.response.intent is not None
-    assert result.response.intent.slots["area"]["value"] == area_kitchen.id
-    assert result.response.intent.slots["area"]["text"] == area_kitchen.normalized_name
 
     # Only one light should be returned
     hass.states.async_set(exposed_light.entity_id, "on")
@@ -324,10 +313,8 @@ async def test_device_area_context(
     turn_on_calls = async_mock_service(hass, "light", "turn_on")
     turn_off_calls = async_mock_service(hass, "light", "turn_off")
 
-    area_kitchen = area_registry.async_get_or_create("kitchen_id")
-    area_kitchen = area_registry.async_update(area_kitchen.id, name="kitchen")
-    area_bedroom = area_registry.async_get_or_create("bedroom_id")
-    area_bedroom = area_registry.async_update(area_bedroom.id, name="bedroom")
+    area_kitchen = area_registry.async_get_or_create("Kitchen")
+    area_bedroom = area_registry.async_get_or_create("Bedroom")
 
     # Create 2 lights in each area
     area_lights = defaultdict(list)
@@ -375,14 +362,13 @@ async def test_device_area_context(
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
     assert result.response.intent is not None
     assert result.response.intent.slots["area"]["value"] == area_kitchen.id
-    assert result.response.intent.slots["area"]["text"] == area_kitchen.normalized_name
 
     # Verify only kitchen lights were targeted
     assert {s.entity_id for s in result.response.matched_states} == {
-        e.entity_id for e in area_lights[area_kitchen.id]
+        e.entity_id for e in area_lights["kitchen"]
     }
     assert {c.data["entity_id"][0] for c in turn_on_calls} == {
-        e.entity_id for e in area_lights[area_kitchen.id]
+        e.entity_id for e in area_lights["kitchen"]
     }
     turn_on_calls.clear()
 
@@ -399,14 +385,13 @@ async def test_device_area_context(
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
     assert result.response.intent is not None
     assert result.response.intent.slots["area"]["value"] == area_bedroom.id
-    assert result.response.intent.slots["area"]["text"] == area_bedroom.normalized_name
 
     # Verify only bedroom lights were targeted
     assert {s.entity_id for s in result.response.matched_states} == {
-        e.entity_id for e in area_lights[area_bedroom.id]
+        e.entity_id for e in area_lights["bedroom"]
     }
     assert {c.data["entity_id"][0] for c in turn_on_calls} == {
-        e.entity_id for e in area_lights[area_bedroom.id]
+        e.entity_id for e in area_lights["bedroom"]
     }
     turn_on_calls.clear()
 
@@ -423,14 +408,13 @@ async def test_device_area_context(
     assert result.response.response_type == intent.IntentResponseType.ACTION_DONE
     assert result.response.intent is not None
     assert result.response.intent.slots["area"]["value"] == area_bedroom.id
-    assert result.response.intent.slots["area"]["text"] == area_bedroom.normalized_name
 
     # Verify only bedroom lights were targeted
     assert {s.entity_id for s in result.response.matched_states} == {
-        e.entity_id for e in area_lights[area_bedroom.id]
+        e.entity_id for e in area_lights["bedroom"]
     }
     assert {c.data["entity_id"][0] for c in turn_off_calls} == {
-        e.entity_id for e in area_lights[area_bedroom.id]
+        e.entity_id for e in area_lights["bedroom"]
     }
     turn_off_calls.clear()
 
@@ -446,8 +430,8 @@ async def test_device_area_context(
         )
 
 
-async def test_error_no_device(hass: HomeAssistant, init_components) -> None:
-    """Test error message when device/entity is missing."""
+async def test_error_missing_entity(hass: HomeAssistant, init_components) -> None:
+    """Test error message when entity is missing."""
     result = await conversation.async_converse(
         hass, "turn on missing entity", None, Context(), None
     )
@@ -456,11 +440,11 @@ async def test_error_no_device(hass: HomeAssistant, init_components) -> None:
     assert result.response.error_code == intent.IntentResponseErrorCode.NO_VALID_TARGETS
     assert (
         result.response.speech["plain"]["speech"]
-        == "Sorry, I am not aware of any device called missing entity"
+        == "No device or entity named missing entity"
     )
 
 
-async def test_error_no_area(hass: HomeAssistant, init_components) -> None:
+async def test_error_missing_area(hass: HomeAssistant, init_components) -> None:
     """Test error message when area is missing."""
     result = await conversation.async_converse(
         hass, "turn on the lights in missing area", None, Context(), None
@@ -468,69 +452,14 @@ async def test_error_no_area(hass: HomeAssistant, init_components) -> None:
 
     assert result.response.response_type == intent.IntentResponseType.ERROR
     assert result.response.error_code == intent.IntentResponseErrorCode.NO_VALID_TARGETS
-    assert (
-        result.response.speech["plain"]["speech"]
-        == "Sorry, I am not aware of any area called missing area"
-    )
+    assert result.response.speech["plain"]["speech"] == "No area named missing area"
 
 
-async def test_error_no_device_in_area(
+async def test_error_no_exposed_for_domain(
     hass: HomeAssistant, init_components, area_registry: ar.AreaRegistry
 ) -> None:
-    """Test error message when area is missing a device/entity."""
-    area_kitchen = area_registry.async_get_or_create("kitchen_id")
-    area_kitchen = area_registry.async_update(area_kitchen.id, name="kitchen")
-    result = await conversation.async_converse(
-        hass, "turn on missing entity in the kitchen", None, Context(), None
-    )
-
-    assert result.response.response_type == intent.IntentResponseType.ERROR
-    assert result.response.error_code == intent.IntentResponseErrorCode.NO_VALID_TARGETS
-    assert (
-        result.response.speech["plain"]["speech"]
-        == "Sorry, I am not aware of any device called missing entity in the kitchen area"
-    )
-
-
-async def test_error_no_domain(
-    hass: HomeAssistant, init_components, area_registry: ar.AreaRegistry
-) -> None:
-    """Test error message when no devices/entities exist for a domain."""
-
-    # We don't have a sentence for turning on all fans
-    fan_domain = MatchEntity(name="domain", value="fan", text="fans")
-    recognize_result = RecognizeResult(
-        intent=Intent("HassTurnOn"),
-        intent_data=IntentData([]),
-        entities={"domain": fan_domain},
-        entities_list=[fan_domain],
-    )
-
-    with patch(
-        "homeassistant.components.conversation.default_agent.recognize_all",
-        return_value=[recognize_result],
-    ):
-        result = await conversation.async_converse(
-            hass, "turn on the fans", None, Context(), None
-        )
-
-        assert result.response.response_type == intent.IntentResponseType.ERROR
-        assert (
-            result.response.error_code
-            == intent.IntentResponseErrorCode.NO_VALID_TARGETS
-        )
-        assert (
-            result.response.speech["plain"]["speech"]
-            == "Sorry, I am not aware of any fan"
-        )
-
-
-async def test_error_no_domain_in_area(
-    hass: HomeAssistant, init_components, area_registry: ar.AreaRegistry
-) -> None:
-    """Test error message when no devices/entities for a domain exist in an area."""
-    area_kitchen = area_registry.async_get_or_create("kitchen_id")
-    area_kitchen = area_registry.async_update(area_kitchen.id, name="kitchen")
+    """Test error message when no entities for a domain are exposed in an area."""
+    area_registry.async_get_or_create("kitchen")
     result = await conversation.async_converse(
         hass, "turn on the lights in the kitchen", None, Context(), None
     )
@@ -538,48 +467,15 @@ async def test_error_no_domain_in_area(
     assert result.response.response_type == intent.IntentResponseType.ERROR
     assert result.response.error_code == intent.IntentResponseErrorCode.NO_VALID_TARGETS
     assert (
-        result.response.speech["plain"]["speech"]
-        == "Sorry, I am not aware of any light in the kitchen area"
+        result.response.speech["plain"]["speech"] == "kitchen does not contain a light"
     )
 
 
-async def test_error_no_device_class(hass: HomeAssistant, init_components) -> None:
-    """Test error message when no entities of a device class exist."""
-
-    # We don't have a sentence for opening all windows
-    window_class = MatchEntity(name="device_class", value="window", text="windows")
-    recognize_result = RecognizeResult(
-        intent=Intent("HassTurnOn"),
-        intent_data=IntentData([]),
-        entities={"device_class": window_class},
-        entities_list=[window_class],
-    )
-
-    with patch(
-        "homeassistant.components.conversation.default_agent.recognize_all",
-        return_value=[recognize_result],
-    ):
-        result = await conversation.async_converse(
-            hass, "open the windows", None, Context(), None
-        )
-
-        assert result.response.response_type == intent.IntentResponseType.ERROR
-        assert (
-            result.response.error_code
-            == intent.IntentResponseErrorCode.NO_VALID_TARGETS
-        )
-        assert (
-            result.response.speech["plain"]["speech"]
-            == "Sorry, I am not aware of any window"
-        )
-
-
-async def test_error_no_device_class_in_area(
+async def test_error_no_exposed_for_device_class(
     hass: HomeAssistant, init_components, area_registry: ar.AreaRegistry
 ) -> None:
-    """Test error message when no entities of a device class exist in an area."""
-    area_bedroom = area_registry.async_get_or_create("bedroom_id")
-    area_bedroom = area_registry.async_update(area_bedroom.id, name="bedroom")
+    """Test error message when no entities of a device class are exposed in an area."""
+    area_registry.async_get_or_create("bedroom")
     result = await conversation.async_converse(
         hass, "open bedroom windows", None, Context(), None
     )
@@ -587,13 +483,12 @@ async def test_error_no_device_class_in_area(
     assert result.response.response_type == intent.IntentResponseType.ERROR
     assert result.response.error_code == intent.IntentResponseErrorCode.NO_VALID_TARGETS
     assert (
-        result.response.speech["plain"]["speech"]
-        == "Sorry, I am not aware of any window in the bedroom area"
+        result.response.speech["plain"]["speech"] == "bedroom does not contain a window"
     )
 
 
-async def test_error_no_intent(hass: HomeAssistant, init_components) -> None:
-    """Test response with an intent match failure."""
+async def test_error_match_failure(hass: HomeAssistant, init_components) -> None:
+    """Test response with complete match failure."""
     with patch(
         "homeassistant.components.conversation.default_agent.recognize_all",
         return_value=[],
@@ -606,18 +501,13 @@ async def test_error_no_intent(hass: HomeAssistant, init_components) -> None:
         assert (
             result.response.error_code == intent.IntentResponseErrorCode.NO_INTENT_MATCH
         )
-        assert (
-            result.response.speech["plain"]["speech"]
-            == "Sorry, I couldn't understand that"
-        )
 
 
 async def test_no_states_matched_default_error(
     hass: HomeAssistant, init_components, area_registry: ar.AreaRegistry
 ) -> None:
     """Test default response when no states match and slots are missing."""
-    area_kitchen = area_registry.async_get_or_create("kitchen_id")
-    area_kitchen = area_registry.async_update(area_kitchen.id, name="kitchen")
+    area_registry.async_get_or_create("kitchen")
 
     with patch(
         "homeassistant.components.conversation.default_agent.intent.async_handle",
@@ -646,9 +536,9 @@ async def test_empty_aliases(
     entity_registry: er.EntityRegistry,
 ) -> None:
     """Test that empty aliases are not added to slot lists."""
-    area_kitchen = area_registry.async_get_or_create("kitchen_id")
-    area_kitchen = area_registry.async_update(area_kitchen.id, name="kitchen")
-    area_kitchen = area_registry.async_update(area_kitchen.id, aliases={" "})
+    area_kitchen = area_registry.async_get_or_create("kitchen")
+    assert area_kitchen.id is not None
+    area_registry.async_update(area_kitchen.id, aliases={" "})
 
     entry = MockConfigEntry()
     entry.add_to_hass(hass)
@@ -660,16 +550,11 @@ async def test_empty_aliases(
     device_registry.async_update_device(kitchen_device.id, area_id=area_kitchen.id)
 
     kitchen_light = entity_registry.async_get_or_create("light", "demo", "1234")
-    kitchen_light = entity_registry.async_update_entity(
-        kitchen_light.entity_id,
-        device_id=kitchen_device.id,
-        name="kitchen light",
-        aliases={" "},
+    entity_registry.async_update_entity(
+        kitchen_light.entity_id, device_id=kitchen_device.id, aliases={" "}
     )
     hass.states.async_set(
-        kitchen_light.entity_id,
-        "on",
-        attributes={ATTR_FRIENDLY_NAME: kitchen_light.name},
+        kitchen_light.entity_id, "on", attributes={ATTR_FRIENDLY_NAME: "kitchen light"}
     )
 
     with patch(
@@ -687,29 +572,8 @@ async def test_empty_aliases(
         assert slot_lists.keys() == {"area", "name"}
         areas = slot_lists["area"]
         assert len(areas.values) == 1
-        assert areas.values[0].value_out == area_kitchen.id
-        assert areas.values[0].text_in.text == area_kitchen.normalized_name
+        assert areas.values[0].value_out == "kitchen"
 
         names = slot_lists["name"]
         assert len(names.values) == 1
-        assert names.values[0].value_out == kitchen_light.entity_id
-        assert names.values[0].text_in.text == kitchen_light.name
-
-
-async def test_all_domains_loaded(hass: HomeAssistant, init_components) -> None:
-    """Test that sentences for all domains are always loaded."""
-
-    # light domain is not loaded
-    assert "light" not in hass.config.components
-
-    result = await conversation.async_converse(
-        hass, "set brightness of test light to 100%", None, Context(), None
-    )
-
-    # Invalid target vs. no intent recognized
-    assert result.response.response_type == intent.IntentResponseType.ERROR
-    assert result.response.error_code == intent.IntentResponseErrorCode.NO_VALID_TARGETS
-    assert (
-        result.response.speech["plain"]["speech"]
-        == "Sorry, I am not aware of any device called test light"
-    )
+        assert names.values[0].value_out == "kitchen light"

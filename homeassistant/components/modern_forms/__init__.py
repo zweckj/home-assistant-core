@@ -34,8 +34,8 @@ _P = ParamSpec("_P")
 SCAN_INTERVAL = timedelta(seconds=5)
 PLATFORMS = [
     Platform.BINARY_SENSOR,
-    Platform.FAN,
     Platform.LIGHT,
+    Platform.FAN,
     Platform.SENSOR,
     Platform.SWITCH,
 ]
@@ -98,7 +98,7 @@ def modernforms_exception_handler(
     return handler
 
 
-class ModernFormsDataUpdateCoordinator(DataUpdateCoordinator[ModernFormsDeviceState]):  # pylint: disable=hass-enforce-coordinator-module
+class ModernFormsDataUpdateCoordinator(DataUpdateCoordinator[ModernFormsDeviceState]):
     """Class to manage fetching Modern Forms data from single endpoint."""
 
     def __init__(

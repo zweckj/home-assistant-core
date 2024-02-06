@@ -96,7 +96,7 @@ async def _update_freedns(hass, session, url, auth_token):
     except aiohttp.ClientError:
         _LOGGER.warning("Can't connect to FreeDNS API")
 
-    except TimeoutError:
+    except asyncio.TimeoutError:
         _LOGGER.warning("Timeout from FreeDNS API at %s", url)
 
     return False

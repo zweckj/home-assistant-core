@@ -71,7 +71,7 @@ class BlockShellyCover(ShellyBlockEntity, CoverEntity):
     """Entity that controls a cover on block based Shelly devices."""
 
     _attr_device_class = CoverDeviceClass.SHUTTER
-    _attr_supported_features: CoverEntityFeature = (
+    _attr_supported_features = (
         CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
     )
 
@@ -147,7 +147,7 @@ class RpcShellyCover(ShellyRpcEntity, CoverEntity):
     """Entity that controls a cover on RPC based Shelly devices."""
 
     _attr_device_class = CoverDeviceClass.SHUTTER
-    _attr_supported_features: CoverEntityFeature = (
+    _attr_supported_features = (
         CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
     )
 

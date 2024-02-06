@@ -2794,7 +2794,6 @@ async def test_set_config_parameter(
 
     msg = await ws_client.receive_json()
     assert msg["success"]
-    assert msg["result"]["status"] == "queued"
 
     assert len(client.async_send_command_no_wait.call_args_list) == 1
     args = client.async_send_command_no_wait.call_args[0][0]
@@ -2827,7 +2826,6 @@ async def test_set_config_parameter(
 
     msg = await ws_client.receive_json()
     assert msg["success"]
-    assert msg["result"]["status"] == "queued"
 
     assert len(client.async_send_command_no_wait.call_args_list) == 1
     args = client.async_send_command_no_wait.call_args[0][0]
@@ -2859,7 +2857,6 @@ async def test_set_config_parameter(
 
     msg = await ws_client.receive_json()
     assert msg["success"]
-    assert msg["result"]["status"] == "queued"
 
     assert len(client.async_send_command_no_wait.call_args_list) == 1
     args = client.async_send_command_no_wait.call_args[0][0]

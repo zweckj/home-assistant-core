@@ -76,10 +76,6 @@ class SonosEntity(Entity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return information about the device."""
-        suggested_area: str | None = None
-        if not self.speaker.battery_info:
-            # Only set suggested area for non-portable devices
-            suggested_area = self.speaker.zone_name
         return DeviceInfo(
             identifiers={(DOMAIN, self.soco.uid)},
             name=self.speaker.zone_name,
@@ -90,7 +86,7 @@ class SonosEntity(Entity):
                 (dr.CONNECTION_UPNP, f"uuid:{self.speaker.uid}"),
             },
             manufacturer="Sonos",
-            suggested_area=suggested_area,
+            suggested_area=self.speaker.zone_name,
             configuration_url=f"http://{self.soco.ip_address}:1400/support/review",
         )
 

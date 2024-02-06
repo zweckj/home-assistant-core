@@ -89,10 +89,7 @@ async def test_setup_thermostat(
     assert state.attributes.get(ATTR_PRESET_MODE) == PRESET_NONE
     assert (
         state.attributes.get(ATTR_SUPPORTED_FEATURES)
-        == ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.PRESET_MODE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
+        == ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     )
     assert state.attributes.get(ATTR_MAX_TEMP) == MAX_TEMPERATURE
     assert state.attributes.get(ATTR_MIN_TEMP) == 5.0

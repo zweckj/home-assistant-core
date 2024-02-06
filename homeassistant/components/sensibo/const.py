@@ -1,5 +1,6 @@
 """Constants for Sensibo."""
 
+import asyncio
 import logging
 
 from aiohttp.client_exceptions import ClientConnectionError
@@ -26,7 +27,7 @@ TIMEOUT = 8
 
 SENSIBO_ERRORS = (
     ClientConnectionError,
-    TimeoutError,
+    asyncio.TimeoutError,
     AuthenticationError,
     SensiboError,
 )

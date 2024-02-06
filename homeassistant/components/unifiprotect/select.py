@@ -92,7 +92,7 @@ DEVICE_RECORDING_MODES = [
 DEVICE_CLASS_LCD_MESSAGE: Final = "unifiprotect__lcd_message"
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True)
 class ProtectSelectEntityDescription(
     ProtectSetableKeysMixin[T], SelectEntityDescription
 ):
@@ -403,11 +403,32 @@ class ProtectSelects(ProtectDeviceEntity, SelectEntity):
         await self.entity_description.ufp_set(self.device, unifi_value)
 
     @callback
-    def _async_get_state_attrs(self) -> tuple[Any, ...]:
-        """Retrieve data that goes into the current state of the entity.
+    def _async_updated_event(self, device: ProtectModelWithId) -> None:
+        """Call back for incoming data that only writes when state has changed.
 
-        Called before and after updating entity and state is only written if there
-        is a change.
+        Only the options, option, and available are ever updated for these
+        entities, and since the websocket update for the device will trigger
+        an update for all entities connected to the device, we want to avoid
+        writing state unless something has actually changed.
         """
-
-        return (self._attr_available, self._attr_options, self._attr_current_option)
+        previous_option = self._attr_current_option
+        previous_options = self._attr_options
+        previous_available = self._attr_available
+        self._async_update_device_from_protect(device)
+        if (
+            self._attr_current_option != previous_option
+            or self._attr_options != previous_options
+            or self._attr_available != previous_available
+        ):
+            _LOGGER.debug(
+                "Updating state [%s (%s)] %s (%s, %s) -> %s (%s, %s)",
+                device.name,
+                device.mac,
+                previous_option,
+                previous_available,
+                previous_options,
+                self._attr_current_option,
+                self._attr_available,
+                self._attr_options,
+            )
+            self.async_write_ha_state()

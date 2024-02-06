@@ -23,7 +23,7 @@ from .const import (
     WEBHOOK_PUSH_TYPE,
 )
 from .data_handler import HOME, SIGNAL_NAME, NetatmoDevice
-from .entity import NetatmoBaseEntity
+from .netatmo_entity_base import NetatmoBase
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,12 +61,10 @@ async def async_setup_entry(
     )
 
 
-class NetatmoCameraLight(NetatmoBaseEntity, LightEntity):
+class NetatmoCameraLight(NetatmoBase, LightEntity):
     """Representation of a Netatmo Presence camera light."""
 
-    _attr_color_mode = ColorMode.ONOFF
     _attr_has_entity_name = True
-    _attr_supported_color_modes = {ColorMode.ONOFF}
 
     def __init__(
         self,
@@ -152,7 +150,7 @@ class NetatmoCameraLight(NetatmoBaseEntity, LightEntity):
         self._is_on = bool(self._camera.floodlight == "on")
 
 
-class NetatmoLight(NetatmoBaseEntity, LightEntity):
+class NetatmoLight(NetatmoBase, LightEntity):
     """Representation of a dimmable light by Legrand/BTicino."""
 
     def __init__(
@@ -172,11 +170,10 @@ class NetatmoLight(NetatmoBaseEntity, LightEntity):
         self._attr_brightness = 0
         self._attr_unique_id = f"{self._id}-light"
 
-        if self._dimmer.brightness is not None:
-            self._attr_color_mode = ColorMode.BRIGHTNESS
-        else:
-            self._attr_color_mode = ColorMode.ONOFF
-        self._attr_supported_color_modes = {self._attr_color_mode}
+        self._attr_supported_color_modes: set[str] = set()
+
+        if not self._attr_supported_color_modes and self._dimmer.brightness is not None:
+            self._attr_supported_color_modes.add(ColorMode.BRIGHTNESS)
 
         self._signal_name = f"{HOME}-{self._home_id}"
         self._publishers.extend(

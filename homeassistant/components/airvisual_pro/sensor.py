@@ -26,13 +26,20 @@ from . import AirVisualProData, AirVisualProEntity
 from .const import DOMAIN
 
 
-@dataclass(frozen=True, kw_only=True)
-class AirVisualProMeasurementDescription(SensorEntityDescription):
-    """Describe an AirVisual Pro sensor."""
+@dataclass(frozen=True)
+class AirVisualProMeasurementKeyMixin:
+    """Define an entity description mixin to include a measurement key."""
 
     value_fn: Callable[
         [dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]], float | int
     ]
+
+
+@dataclass(frozen=True)
+class AirVisualProMeasurementDescription(
+    SensorEntityDescription, AirVisualProMeasurementKeyMixin
+):
+    """Describe an AirVisual Pro sensor."""
 
 
 SENSOR_DESCRIPTIONS = (

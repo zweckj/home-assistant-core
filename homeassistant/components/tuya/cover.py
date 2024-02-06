@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from tuya_sharing import CustomerDevice, Manager
+from tuya_iot import TuyaDevice, TuyaDeviceManager
 
 from homeassistant.components.cover import (
     ATTR_POSITION,
@@ -152,7 +152,7 @@ async def async_setup_entry(
         """Discover and add a discovered tuya cover."""
         entities: list[TuyaCoverEntity] = []
         for device_id in device_ids:
-            device = hass_data.manager.device_map[device_id]
+            device = hass_data.device_manager.device_map[device_id]
             if descriptions := COVERS.get(device.category):
                 for description in descriptions:
                     if (
@@ -160,12 +160,14 @@ async def async_setup_entry(
                         or description.key in device.status_range
                     ):
                         entities.append(
-                            TuyaCoverEntity(device, hass_data.manager, description)
+                            TuyaCoverEntity(
+                                device, hass_data.device_manager, description
+                            )
                         )
 
         async_add_entities(entities)
 
-    async_discover_device([*hass_data.manager.device_map])
+    async_discover_device([*hass_data.device_manager.device_map])
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, TUYA_DISCOVERY_NEW, async_discover_device)
@@ -182,8 +184,8 @@ class TuyaCoverEntity(TuyaEntity, CoverEntity):
 
     def __init__(
         self,
-        device: CustomerDevice,
-        device_manager: Manager,
+        device: TuyaDevice,
+        device_manager: TuyaDeviceManager,
         description: TuyaCoverEntityDescription,
     ) -> None:
         """Init Tuya Cover."""

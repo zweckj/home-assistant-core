@@ -2,31 +2,30 @@
 from unittest.mock import patch
 
 import pytest
-from syrupy import SnapshotAssertion
 
 from homeassistant.components.select import (
     DOMAIN as SELECT_DOMAIN,
     SERVICE_SELECT_OPTION,
 )
 from homeassistant.components.tessie.const import TessieSeatHeaterOptions
-from homeassistant.const import ATTR_ENTITY_ID, ATTR_OPTION, Platform
+from homeassistant.const import ATTR_ENTITY_ID, ATTR_OPTION, STATE_OFF
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
 
-from .common import ERROR_UNKNOWN, TEST_RESPONSE, assert_entities, setup_platform
+from .common import ERROR_UNKNOWN, TEST_RESPONSE, setup_platform
 
 
-async def test_select(
-    hass: HomeAssistant, snapshot: SnapshotAssertion, entity_registry: er.EntityRegistry
-) -> None:
+async def test_select(hass: HomeAssistant) -> None:
     """Tests that the select entities are correct."""
 
-    entry = await setup_platform(hass, [Platform.SELECT])
+    assert len(hass.states.async_all(SELECT_DOMAIN)) == 0
 
-    assert_entities(hass, entry.entry_id, entity_registry, snapshot)
+    await setup_platform(hass)
+
+    assert len(hass.states.async_all(SELECT_DOMAIN)) == 5
 
     entity_id = "select.test_seat_heater_left"
+    assert hass.states.get(entity_id).state == STATE_OFF
 
     # Test changing select
     with patch(
@@ -40,15 +39,15 @@ async def test_select(
             blocking=True,
         )
         mock_set.assert_called_once()
-    assert mock_set.call_args[1]["seat"] == "front_left"
-    assert mock_set.call_args[1]["level"] == 1
-    assert hass.states.get(entity_id) == snapshot(name=SERVICE_SELECT_OPTION)
+        assert mock_set.call_args[1]["seat"] == "front_left"
+        assert mock_set.call_args[1]["level"] == 1
+        assert hass.states.get(entity_id).state == TessieSeatHeaterOptions.LOW
 
 
 async def test_errors(hass: HomeAssistant) -> None:
     """Tests unknown error is handled."""
 
-    await setup_platform(hass, [Platform.SELECT])
+    await setup_platform(hass)
     entity_id = "select.test_seat_heater_left"
 
     # Test setting cover open with unknown error

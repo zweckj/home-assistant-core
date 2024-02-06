@@ -248,11 +248,6 @@ ZEROCONF = {
             "domain": "volumio",
         },
     ],
-    "_aicu-http._tcp.local.": [
-        {
-            "domain": "romy",
-        },
-    ],
     "_airplay._tcp.local.": [
         {
             "domain": "apple_tv",
@@ -347,11 +342,6 @@ ZEROCONF = {
             "properties": {
                 "macaddress": "1ccae3*",
             },
-        },
-    ],
-    "_bangolufsen._tcp.local.": [
-        {
-            "domain": "bang_olufsen",
         },
     ],
     "_bbxsrv._tcp.local.": [
@@ -713,11 +703,6 @@ ZEROCONF = {
     "_system-bridge._tcp.local.": [
         {
             "domain": "system_bridge",
-        },
-    ],
-    "_technove-stations._tcp.local.": [
-        {
-            "domain": "technove",
         },
     ],
     "_touch-able._tcp.local.": [

@@ -1,6 +1,7 @@
 """Config flow to configure the honeywell integration."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -60,18 +61,20 @@ class HoneywellConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except (
                 aiosomecomfort.ConnectionError,
                 aiosomecomfort.ConnectionTimeout,
-                TimeoutError,
+                asyncio.TimeoutError,
             ):
                 errors["base"] = "cannot_connect"
 
             else:
-                return self.async_update_reload_and_abort(
+                self.hass.config_entries.async_update_entry(
                     self.entry,
                     data={
                         **self.entry.data,
                         **user_input,
                     },
                 )
+                await self.hass.config_entries.async_reload(self.entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -92,7 +95,7 @@ class HoneywellConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except (
                 aiosomecomfort.ConnectionError,
                 aiosomecomfort.ConnectionTimeout,
-                TimeoutError,
+                asyncio.TimeoutError,
             ):
                 errors["base"] = "cannot_connect"
 

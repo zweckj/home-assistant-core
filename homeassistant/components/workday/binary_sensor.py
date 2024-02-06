@@ -1,5 +1,4 @@
 """Sensor to indicate whether the current day is a workday."""
-
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -54,7 +53,7 @@ def validate_dates(holiday_list: list[str]) -> list[str]:
                 continue
             _range: timedelta = d2 - d1
             for i in range(_range.days + 1):
-                day: date = d1 + timedelta(days=i)
+                day = d1 + timedelta(days=i)
                 calc_holidays.append(day.strftime("%Y-%m-%d"))
             continue
         calc_holidays.append(add_date)
@@ -124,46 +123,25 @@ async def async_setup_entry(
                     LOGGER.debug("Removed %s by name '%s'", holiday, remove_holiday)
         except KeyError as unmatched:
             LOGGER.warning("No holiday found matching %s", unmatched)
-            if dt_util.parse_date(remove_holiday):
-                async_create_issue(
-                    hass,
-                    DOMAIN,
-                    f"bad_date_holiday-{entry.entry_id}-{slugify(remove_holiday)}",
-                    is_fixable=True,
-                    is_persistent=False,
-                    severity=IssueSeverity.WARNING,
-                    translation_key="bad_date_holiday",
-                    translation_placeholders={
-                        CONF_COUNTRY: country if country else "-",
-                        "title": entry.title,
-                        CONF_REMOVE_HOLIDAYS: remove_holiday,
-                    },
-                    data={
-                        "entry_id": entry.entry_id,
-                        "country": country,
-                        "named_holiday": remove_holiday,
-                    },
-                )
-            else:
-                async_create_issue(
-                    hass,
-                    DOMAIN,
-                    f"bad_named_holiday-{entry.entry_id}-{slugify(remove_holiday)}",
-                    is_fixable=True,
-                    is_persistent=False,
-                    severity=IssueSeverity.WARNING,
-                    translation_key="bad_named_holiday",
-                    translation_placeholders={
-                        CONF_COUNTRY: country if country else "-",
-                        "title": entry.title,
-                        CONF_REMOVE_HOLIDAYS: remove_holiday,
-                    },
-                    data={
-                        "entry_id": entry.entry_id,
-                        "country": country,
-                        "named_holiday": remove_holiday,
-                    },
-                )
+            async_create_issue(
+                hass,
+                DOMAIN,
+                f"bad_named_holiday-{entry.entry_id}-{slugify(remove_holiday)}",
+                is_fixable=True,
+                is_persistent=False,
+                severity=IssueSeverity.WARNING,
+                translation_key="bad_named_holiday",
+                translation_placeholders={
+                    CONF_COUNTRY: country if country else "-",
+                    "title": entry.title,
+                    CONF_REMOVE_HOLIDAYS: remove_holiday,
+                },
+                data={
+                    "entry_id": entry.entry_id,
+                    "country": country,
+                    "named_holiday": remove_holiday,
+                },
+            )
 
     LOGGER.debug("Found the following holidays for your configuration:")
     for holiday_date, name in sorted(obj_holidays.items()):

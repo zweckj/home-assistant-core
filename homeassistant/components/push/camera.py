@@ -75,7 +75,7 @@ async def handle_webhook(hass, webhook_id, request):
     try:
         async with asyncio.timeout(5):
             data = dict(await request.post())
-    except (TimeoutError, aiohttp.web.HTTPException) as error:
+    except (asyncio.TimeoutError, aiohttp.web.HTTPException) as error:
         _LOGGER.error("Could not get information from POST <%s>", error)
         return
 

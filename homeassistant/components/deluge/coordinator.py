@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import socket
 from ssl import SSLError
 from typing import Any
 
@@ -51,7 +52,7 @@ class DelugeDataUpdateCoordinator(
             )
         except (
             ConnectionRefusedError,
-            TimeoutError,
+            socket.timeout,
             SSLError,
             FailedToReconnectException,
         ) as ex:

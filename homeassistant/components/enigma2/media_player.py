@@ -5,7 +5,6 @@ from aiohttp.client_exceptions import ClientConnectorError
 from openwebif.api import OpenWebIfDevice
 from openwebif.enums import RemoteControlCodes, SetVolumeOption
 import voluptuous as vol
-from yarl import URL
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
@@ -23,7 +22,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import PlatformNotReady
-from homeassistant.helpers.aiohttp_client import async_create_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.config_validation import PLATFORM_SCHEMA
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -90,18 +88,12 @@ async def async_setup_platform(
         config[CONF_DEEP_STANDBY] = DEFAULT_DEEP_STANDBY
         config[CONF_SOURCE_BOUQUET] = DEFAULT_SOURCE_BOUQUET
 
-    base_url = URL.build(
-        scheme="https" if config[CONF_SSL] else "http",
+    device = OpenWebIfDevice(
         host=config[CONF_HOST],
         port=config.get(CONF_PORT),
-        user=config.get(CONF_USERNAME),
+        username=config.get(CONF_USERNAME),
         password=config.get(CONF_PASSWORD),
-    )
-
-    session = async_create_clientsession(hass, verify_ssl=False, base_url=base_url)
-
-    device = OpenWebIfDevice(
-        host=session,
+        is_https=config[CONF_SSL],
         turn_off_to_deep=config.get(CONF_DEEP_STANDBY),
         source_bouquet=config.get(CONF_SOURCE_BOUQUET),
     )
@@ -109,6 +101,7 @@ async def async_setup_platform(
     try:
         about = await device.get_about()
     except ClientConnectorError as err:
+        await device.close()
         raise PlatformNotReady from err
 
     async_add_entities([Enigma2Device(config[CONF_NAME], device, about)])

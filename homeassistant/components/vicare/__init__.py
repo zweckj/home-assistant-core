@@ -10,7 +10,6 @@ from typing import Any
 
 from PyViCare.PyViCare import PyViCare
 from PyViCare.PyViCareDevice import Device
-from PyViCare.PyViCareDeviceConfig import PyViCareDeviceConfig
 from PyViCare.PyViCareUtils import (
     PyViCareInvalidConfigurationError,
     PyViCareInvalidCredentialsError,
@@ -86,16 +85,15 @@ def setup_vicare_api(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Set up PyVicare API."""
     vicare_api = vicare_login(hass, entry.data)
 
-    device_config_list = get_supported_devices(vicare_api.devices)
-
-    for device in device_config_list:
-        _LOGGER.debug(
+    for device in vicare_api.devices:
+        _LOGGER.info(
             "Found device: %s (online: %s)", device.getModel(), str(device.isOnline())
         )
 
     # Currently we only support a single device
-    device = device_config_list[0]
-    hass.data[DOMAIN][entry.entry_id][VICARE_DEVICE_CONFIG_LIST] = device_config_list
+    device_list = vicare_api.devices
+    device = device_list[0]
+    hass.data[DOMAIN][entry.entry_id][VICARE_DEVICE_CONFIG_LIST] = device_list
     hass.data[DOMAIN][entry.entry_id][VICARE_DEVICE_CONFIG] = device
     hass.data[DOMAIN][entry.entry_id][VICARE_API] = getattr(
         device,
@@ -115,14 +113,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     return unload_ok
-
-
-def get_supported_devices(
-    devices: list[PyViCareDeviceConfig],
-) -> list[PyViCareDeviceConfig]:
-    """Remove unsupported devices from the list."""
-    return [
-        device_config
-        for device_config in devices
-        if device_config.getModel() not in ["Heatbox1", "Heatbox2_SRC"]
-    ]

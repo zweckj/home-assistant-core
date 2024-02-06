@@ -1,4 +1,5 @@
 """Constants for the homekit_controller component."""
+import asyncio
 
 from aiohomekit.exceptions import (
     AccessoryDisconnectedError,
@@ -107,7 +108,7 @@ CHARACTERISTIC_PLATFORMS = {
 }
 
 STARTUP_EXCEPTIONS = (
-    TimeoutError,
+    asyncio.TimeoutError,
     AccessoryNotFoundError,
     EncryptionError,
     AccessoryDisconnectedError,

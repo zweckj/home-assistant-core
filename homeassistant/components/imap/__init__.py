@@ -1,6 +1,8 @@
 """The imap integration."""
 from __future__ import annotations
 
+import asyncio
+
 from aioimaplib import IMAP4_SSL, AioImapException
 
 from homeassistant.config_entries import ConfigEntry
@@ -31,7 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryAuthFailed from err
     except InvalidFolder as err:
         raise ConfigEntryError("Selected mailbox folder is invalid.") from err
-    except (TimeoutError, AioImapException) as err:
+    except (asyncio.TimeoutError, AioImapException) as err:
         raise ConfigEntryNotReady from err
 
     coordinator_class: type[

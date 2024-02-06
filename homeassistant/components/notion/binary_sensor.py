@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from aionotion.listener.models import ListenerKind
+from aionotion.sensor.models import ListenerKind
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -30,16 +30,23 @@ from .const import (
     SENSOR_SMOKE_CO,
     SENSOR_WINDOW_HINGED,
 )
-from .model import NotionEntityDescription
+from .model import NotionEntityDescriptionMixin
 
 
-@dataclass(frozen=True, kw_only=True)
-class NotionBinarySensorDescription(
-    BinarySensorEntityDescription, NotionEntityDescription
-):
-    """Describe a Notion binary sensor."""
+@dataclass(frozen=True)
+class NotionBinarySensorDescriptionMixin:
+    """Define an entity description mixin for binary and regular sensors."""
 
     on_state: Literal["alarm", "leak", "low", "not_missing", "open"]
+
+
+@dataclass(frozen=True)
+class NotionBinarySensorDescription(
+    BinarySensorEntityDescription,
+    NotionBinarySensorDescriptionMixin,
+    NotionEntityDescriptionMixin,
+):
+    """Describe a Notion binary sensor."""
 
 
 BINARY_SENSOR_DESCRIPTIONS = (
@@ -123,7 +130,7 @@ async def async_setup_entry(
             )
             for listener_id, listener in coordinator.data.listeners.items()
             for description in BINARY_SENSOR_DESCRIPTIONS
-            if description.listener_kind.value == listener.definition_id
+            if description.listener_kind == listener.listener_kind
             and (sensor := coordinator.data.sensors[listener.sensor_id])
         ]
     )
@@ -138,6 +145,6 @@ class NotionBinarySensor(NotionEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         """Return true if the binary sensor is on."""
         if not self.listener.insights.primary.value:
-            LOGGER.warning("Unknown listener structure: %s", self.listener)
+            LOGGER.warning("Unknown listener structure: %s", self.listener.dict())
             return False
         return self.listener.insights.primary.value == self.entity_description.on_state

@@ -1,6 +1,7 @@
 """Support for iammeter via local API."""
 from __future__ import annotations
 
+import asyncio
 from asyncio import timeout
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -116,7 +117,7 @@ async def async_setup_platform(
         api = await hass.async_add_executor_job(
             IamMeter, config_host, config_port, config_name
         )
-    except TimeoutError as err:
+    except asyncio.TimeoutError as err:
         _LOGGER.error("Device is not ready")
         raise PlatformNotReady from err
 
@@ -124,7 +125,7 @@ async def async_setup_platform(
         try:
             async with timeout(PLATFORM_TIMEOUT):
                 return await hass.async_add_executor_job(api.client.get_data)
-        except TimeoutError as err:
+        except asyncio.TimeoutError as err:
             raise UpdateFailed from err
 
     coordinator = DataUpdateCoordinator(

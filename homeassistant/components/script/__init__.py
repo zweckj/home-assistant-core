@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from dataclasses import dataclass
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import voluptuous as vol
 
@@ -71,12 +71,6 @@ from .const import (
 )
 from .helpers import async_get_blueprints
 from .trace import trace_script
-
-if TYPE_CHECKING:
-    from functools import cached_property
-else:
-    from homeassistant.backports.functools import cached_property
-
 
 SCRIPT_SERVICE_SCHEMA = vol.Schema(dict)
 SCRIPT_TURN_ONOFF_SCHEMA = make_entity_service_schema(
@@ -387,7 +381,7 @@ class BaseScriptEntity(ToggleEntity, ABC):
 
     raw_config: ConfigType | None
 
-    @cached_property
+    @property
     @abstractmethod
     def referenced_areas(self) -> set[str]:
         """Return a set of referenced areas."""
@@ -397,12 +391,12 @@ class BaseScriptEntity(ToggleEntity, ABC):
     def referenced_blueprint(self) -> str | None:
         """Return referenced blueprint or None."""
 
-    @cached_property
+    @property
     @abstractmethod
     def referenced_devices(self) -> set[str]:
         """Return a set of referenced devices."""
 
-    @cached_property
+    @property
     @abstractmethod
     def referenced_entities(self) -> set[str]:
         """Return a set of referenced entities."""
@@ -432,7 +426,7 @@ class UnavailableScriptEntity(BaseScriptEntity):
         """Return the name of the entity."""
         return self._name
 
-    @cached_property
+    @property
     def referenced_areas(self) -> set[str]:
         """Return a set of referenced areas."""
         return set()
@@ -442,12 +436,12 @@ class UnavailableScriptEntity(BaseScriptEntity):
         """Return referenced blueprint or None."""
         return None
 
-    @cached_property
+    @property
     def referenced_devices(self) -> set[str]:
         """Return a set of referenced devices."""
         return set()
 
-    @cached_property
+    @property
     def referenced_entities(self) -> set[str]:
         """Return a set of referenced entities."""
         return set()
@@ -515,7 +509,7 @@ class ScriptEntity(BaseScriptEntity, RestoreEntity):
         """Return true if script is on."""
         return self.script.is_running
 
-    @cached_property
+    @property
     def referenced_areas(self) -> set[str]:
         """Return a set of referenced areas."""
         return self.script.referenced_areas
@@ -527,12 +521,12 @@ class ScriptEntity(BaseScriptEntity, RestoreEntity):
             return None
         return self._blueprint_inputs[CONF_USE_BLUEPRINT][CONF_PATH]
 
-    @cached_property
+    @property
     def referenced_devices(self) -> set[str]:
         """Return a set of referenced devices."""
         return self.script.referenced_devices
 
-    @cached_property
+    @property
     def referenced_entities(self) -> set[str]:
         """Return a set of referenced entities."""
         return self.script.referenced_entities

@@ -1,6 +1,7 @@
 """Config flow for Yeelight integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import urlparse
 
@@ -267,7 +268,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await bulb.async_listen(lambda _: True)
             await bulb.async_get_properties()
             await bulb.async_stop_listening()
-        except (TimeoutError, yeelight.BulbException) as err:
+        except (asyncio.TimeoutError, yeelight.BulbException) as err:
             _LOGGER.debug("Failed to get properties from %s: %s", host, err)
             raise CannotConnect from err
         _LOGGER.debug("Get properties: %s", bulb.last_properties)

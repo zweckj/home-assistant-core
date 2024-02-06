@@ -64,7 +64,7 @@ class YardianUpdateCoordinator(DataUpdateCoordinator[YardianDeviceState]):
             async with asyncio.timeout(10):
                 return await self.controller.fetch_device_state()
 
-        except TimeoutError as e:
+        except asyncio.TimeoutError as e:
             raise UpdateFailed("Communication with Device was time out") from e
         except NotAuthorizedException as e:
             raise UpdateFailed("Invalid access token") from e

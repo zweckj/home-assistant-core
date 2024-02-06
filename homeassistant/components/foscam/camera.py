@@ -10,7 +10,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, entity_platform
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_RTSP_PORT,
@@ -21,7 +23,6 @@ from .const import (
     SERVICE_PTZ_PRESET,
 )
 from .coordinator import FoscamCoordinator
-from .entity import FoscamEntity
 
 DIR_UP = "up"
 DIR_DOWN = "down"
@@ -93,7 +94,7 @@ async def async_setup_entry(
     async_add_entities([HassFoscamCamera(coordinator, config_entry)])
 
 
-class HassFoscamCamera(FoscamEntity, Camera):
+class HassFoscamCamera(CoordinatorEntity[FoscamCoordinator], Camera):
     """An implementation of a Foscam IP camera."""
 
     _attr_has_entity_name = True
@@ -105,7 +106,7 @@ class HassFoscamCamera(FoscamEntity, Camera):
         config_entry: ConfigEntry,
     ) -> None:
         """Initialize a Foscam camera."""
-        super().__init__(coordinator, config_entry.entry_id)
+        super().__init__(coordinator)
         Camera.__init__(self)
 
         self._foscam_session = coordinator.session
@@ -116,6 +117,10 @@ class HassFoscamCamera(FoscamEntity, Camera):
         self._rtsp_port = config_entry.data[CONF_RTSP_PORT]
         if self._rtsp_port:
             self._attr_supported_features = CameraEntityFeature.STREAM
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, config_entry.entry_id)},
+            manufacturer="Foscam",
+        )
 
     async def async_added_to_hass(self) -> None:
         """Handle entity addition to hass."""

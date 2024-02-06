@@ -93,7 +93,7 @@ class TraceElement:
         if self._variables:
             result["changed_variables"] = self._variables
         if self._error is not None:
-            result["error"] = str(self._error) or self._error.__class__.__name__
+            result["error"] = str(self._error)
         if self._result is not None:
             result["result"] = self._result
         return result

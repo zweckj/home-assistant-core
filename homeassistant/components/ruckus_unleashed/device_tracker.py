@@ -18,7 +18,6 @@ from .const import (
     KEY_SYS_CLIENTS,
     UNDO_UPDATE_LISTENERS,
 )
-from .coordinator import RuckusUnleashedDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -66,19 +65,14 @@ def add_new_entities(coordinator, async_add_entities, tracked):
 
 
 @callback
-def restore_entities(
-    registry: er.EntityRegistry,
-    coordinator: RuckusUnleashedDataUpdateCoordinator,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-    tracked: set[str],
-) -> None:
+def restore_entities(registry, coordinator, entry, async_add_entities, tracked):
     """Restore clients that are not a part of active clients list."""
-    missing: list[RuckusUnleashedDevice] = []
+    missing = []
 
-    for entity in registry.entities.get_entries_for_config_entry_id(entry.entry_id):
+    for entity in registry.entities.values():
         if (
-            entity.platform == DOMAIN
+            entity.config_entry_id == entry.entry_id
+            and entity.platform == DOMAIN
             and entity.unique_id not in coordinator.data[KEY_SYS_CLIENTS]
         ):
             missing.append(

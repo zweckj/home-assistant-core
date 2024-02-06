@@ -1,6 +1,7 @@
 """Support for Xiaomi Yeelight WiFi color bulb."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -175,7 +176,7 @@ class YeelightDevice:
             self._available = True
             if not self._initialized:
                 self._initialized = True
-        except TimeoutError as ex:
+        except asyncio.TimeoutError as ex:
             _LOGGER.debug(
                 "timed out while trying to update device %s, %s: %s",
                 self._host,

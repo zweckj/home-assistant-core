@@ -1,4 +1,5 @@
 """Test Yeelight."""
+import asyncio
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -570,7 +571,7 @@ async def test_oserror_on_first_update_results_in_unavailable(
     assert hass.states.get("light.test_name").state == STATE_UNAVAILABLE
 
 
-@pytest.mark.parametrize("exception", [BulbException, TimeoutError])
+@pytest.mark.parametrize("exception", [BulbException, asyncio.TimeoutError])
 async def test_non_oserror_exception_on_first_update(
     hass: HomeAssistant, exception: Exception
 ) -> None:

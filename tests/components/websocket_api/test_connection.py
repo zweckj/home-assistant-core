@@ -1,4 +1,5 @@
 """Test WebSocket Connection class."""
+import asyncio
 import logging
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -31,7 +32,7 @@ from tests.common import MockUser
             "Error handling message: Invalid something. Got {'id': 5} (invalid_format) Mock User from 127.0.0.42 (Browser)",
         ),
         (
-            TimeoutError(),
+            asyncio.TimeoutError(),
             websocket_api.ERR_TIMEOUT,
             "Timeout",
             "Error handling message: Timeout (timeout) Mock User from 127.0.0.42 (Browser)",

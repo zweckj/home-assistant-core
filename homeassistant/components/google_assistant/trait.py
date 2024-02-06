@@ -484,11 +484,6 @@ class OnOffTrait(_Trait):
         if domain == water_heater.DOMAIN and features & WaterHeaterEntityFeature.ON_OFF:
             return True
 
-        if domain == climate.DOMAIN and features & (
-            ClimateEntityFeature.TURN_OFF | ClimateEntityFeature.TURN_ON
-        ):
-            return True
-
         return domain in (
             group.DOMAIN,
             input_boolean.DOMAIN,
@@ -1157,12 +1152,12 @@ class TemperatureSettingTrait(_Trait):
         modes = []
         attrs = self.state.attributes
 
-        for mode in attrs.get(climate.ATTR_HVAC_MODES) or []:
+        for mode in attrs.get(climate.ATTR_HVAC_MODES, []):
             google_mode = self.hvac_to_google.get(mode)
             if google_mode and google_mode not in modes:
                 modes.append(google_mode)
 
-        for preset in attrs.get(climate.ATTR_PRESET_MODES) or []:
+        for preset in attrs.get(climate.ATTR_PRESET_MODES, []):
             google_mode = self.preset_to_google.get(preset)
             if google_mode and google_mode not in modes:
                 modes.append(google_mode)
@@ -2099,10 +2094,9 @@ class InputSelectorTrait(_Trait):
     def sync_attributes(self):
         """Return mode attributes for a sync request."""
         attrs = self.state.attributes
-        sourcelist: list[str] = attrs.get(media_player.ATTR_INPUT_SOURCE_LIST) or []
         inputs = [
             {"key": source, "names": [{"name_synonym": [source], "lang": "en"}]}
-            for source in sourcelist
+            for source in attrs.get(media_player.ATTR_INPUT_SOURCE_LIST, [])
         ]
 
         payload = {"availableInputs": inputs, "orderedInputs": True}

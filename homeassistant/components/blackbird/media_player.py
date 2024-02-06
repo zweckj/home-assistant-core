@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import socket
 
 from pyblackbird import get_blackbird
 from serial import SerialException
@@ -92,7 +93,7 @@ def setup_platform(
         try:
             blackbird = get_blackbird(host, False)
             connection = host
-        except TimeoutError:
+        except socket.timeout:
             _LOGGER.error("Error connecting to the Blackbird controller")
             return
 

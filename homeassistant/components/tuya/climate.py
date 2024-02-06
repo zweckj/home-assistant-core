@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from tuya_sharing import CustomerDevice, Manager
+from tuya_iot import TuyaDevice, TuyaDeviceManager
 
 from homeassistant.components.climate import (
     SWING_BOTH,
@@ -98,19 +98,18 @@ async def async_setup_entry(
         """Discover and add a discovered Tuya climate."""
         entities: list[TuyaClimateEntity] = []
         for device_id in device_ids:
-            device = hass_data.manager.device_map[device_id]
+            device = hass_data.device_manager.device_map[device_id]
             if device and device.category in CLIMATE_DESCRIPTIONS:
                 entities.append(
                     TuyaClimateEntity(
                         device,
-                        hass_data.manager,
+                        hass_data.device_manager,
                         CLIMATE_DESCRIPTIONS[device.category],
-                        hass.config.units.temperature_unit,
                     )
                 )
         async_add_entities(entities)
 
-    async_discover_device([*hass_data.manager.device_map])
+    async_discover_device([*hass_data.device_manager.device_map])
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, TUYA_DISCOVERY_NEW, async_discover_device)
@@ -127,14 +126,12 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
     _set_temperature: IntegerTypeData | None = None
     entity_description: TuyaClimateEntityDescription
     _attr_name = None
-    _enable_turn_on_off_backwards_compatibility = False
 
     def __init__(
         self,
-        device: CustomerDevice,
-        device_manager: Manager,
+        device: TuyaDevice,
+        device_manager: TuyaDeviceManager,
         description: TuyaClimateEntityDescription,
-        system_temperature_unit: UnitOfTemperature,
     ) -> None:
         """Determine which values to use."""
         self._attr_target_temperature_step = 1.0
@@ -159,8 +156,8 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
             ):
                 prefered_temperature_unit = UnitOfTemperature.FAHRENHEIT
 
-        # Default to System Temperature Unit
-        self._attr_temperature_unit = system_temperature_unit
+        # Default to Celsius
+        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
 
         # Figure out current temperature, use preferred unit or what is available
         celsius_type = self.find_dpcode(
@@ -277,11 +274,6 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
             if self.find_dpcode(DPCode.SWITCH_VERTICAL, prefer_function=True):
                 self._attr_swing_modes.append(SWING_VERTICAL)
-
-        if DPCode.SWITCH in self.device.function:
-            self._attr_supported_features |= (
-                ClimateEntityFeature.TURN_OFF | ClimateEntityFeature.TURN_ON
-            )
 
     async def async_added_to_hass(self) -> None:
         """Call when entity is added to hass."""
@@ -482,8 +474,23 @@ class TuyaClimateEntity(TuyaEntity, ClimateEntity):
 
     def turn_on(self) -> None:
         """Turn the device on, retaining current HVAC (if supported)."""
-        self._send_command([{"code": DPCode.SWITCH, "value": True}])
+        if DPCode.SWITCH in self.device.function:
+            self._send_command([{"code": DPCode.SWITCH, "value": True}])
+            return
+
+        # Fake turn on
+        for mode in (HVACMode.HEAT_COOL, HVACMode.HEAT, HVACMode.COOL):
+            if mode not in self.hvac_modes:
+                continue
+            self.set_hvac_mode(mode)
+            break
 
     def turn_off(self) -> None:
         """Turn the device on, retaining current HVAC (if supported)."""
-        self._send_command([{"code": DPCode.SWITCH, "value": False}])
+        if DPCode.SWITCH in self.device.function:
+            self._send_command([{"code": DPCode.SWITCH, "value": False}])
+            return
+
+        # Fake turn off
+        if HVACMode.OFF in self.hvac_modes:
+            self.set_hvac_mode(HVACMode.OFF)

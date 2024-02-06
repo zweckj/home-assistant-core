@@ -102,7 +102,6 @@ async def test_demo_statistics_growth(
     assert statistics[statistic_id][0]["sum"] <= (2**20 + 24)
 
 
-@pytest.mark.freeze_time("2023-10-21")
 async def test_issues_created(
     mock_history,
     hass: HomeAssistant,
@@ -126,7 +125,7 @@ async def test_issues_created(
         "issues": [
             {
                 "breaks_in_ha_version": "2023.1.1",
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "ignored": False,
@@ -140,7 +139,7 @@ async def test_issues_created(
             },
             {
                 "breaks_in_ha_version": "2023.1.1",
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "ignored": False,
@@ -154,7 +153,7 @@ async def test_issues_created(
             },
             {
                 "breaks_in_ha_version": None,
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "ignored": False,
@@ -168,7 +167,7 @@ async def test_issues_created(
             },
             {
                 "breaks_in_ha_version": None,
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "ignored": False,
@@ -182,7 +181,7 @@ async def test_issues_created(
             },
             {
                 "breaks_in_ha_version": None,
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "is_fixable": True,
@@ -191,20 +190,6 @@ async def test_issues_created(
                 "learn_more_url": None,
                 "severity": "warning",
                 "translation_key": "cold_tea",
-                "translation_placeholders": None,
-                "ignored": False,
-            },
-            {
-                "breaks_in_ha_version": None,
-                "created": "2023-10-21T00:00:00+00:00",
-                "dismissed_version": None,
-                "domain": "homeassistant",
-                "is_fixable": False,
-                "issue_domain": DOMAIN,
-                "issue_id": ANY,
-                "learn_more_url": None,
-                "severity": "error",
-                "translation_key": "config_entry_reauth",
                 "translation_placeholders": None,
                 "ignored": False,
             },
@@ -257,7 +242,7 @@ async def test_issues_created(
         "issues": [
             {
                 "breaks_in_ha_version": "2023.1.1",
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "ignored": False,
@@ -271,7 +256,7 @@ async def test_issues_created(
             },
             {
                 "breaks_in_ha_version": None,
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "ignored": False,
@@ -285,7 +270,7 @@ async def test_issues_created(
             },
             {
                 "breaks_in_ha_version": None,
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "ignored": False,
@@ -299,7 +284,7 @@ async def test_issues_created(
             },
             {
                 "breaks_in_ha_version": None,
-                "created": "2023-10-21T00:00:00+00:00",
+                "created": ANY,
                 "dismissed_version": None,
                 "domain": DOMAIN,
                 "is_fixable": True,
@@ -308,20 +293,6 @@ async def test_issues_created(
                 "learn_more_url": None,
                 "severity": "warning",
                 "translation_key": "cold_tea",
-                "translation_placeholders": None,
-                "ignored": False,
-            },
-            {
-                "breaks_in_ha_version": None,
-                "created": "2023-10-21T00:00:00+00:00",
-                "dismissed_version": None,
-                "domain": "homeassistant",
-                "is_fixable": False,
-                "issue_domain": DOMAIN,
-                "issue_id": ANY,
-                "learn_more_url": None,
-                "severity": "error",
-                "translation_key": "config_entry_reauth",
                 "translation_placeholders": None,
                 "ignored": False,
             },

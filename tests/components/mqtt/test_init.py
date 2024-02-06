@@ -804,7 +804,6 @@ def test_entity_device_info_schema() -> None:
             "manufacturer": "Whatever",
             "name": "Beer",
             "model": "Glass",
-            "serial_number": "1234deadbeef",
             "sw_version": "0.1-beta",
             "configuration_url": "http://example.com",
         }
@@ -820,7 +819,6 @@ def test_entity_device_info_schema() -> None:
             "manufacturer": "Whatever",
             "name": "Beer",
             "model": "Glass",
-            "serial_number": "1234deadbeef",
             "sw_version": "0.1-beta",
             "via_device": "test-hub",
             "configuration_url": "http://example.com",
@@ -2452,7 +2450,7 @@ async def test_delayed_birth_message(
     """Test sending birth message does not happen until Home Assistant starts."""
     mqtt_mock = await mqtt_mock_entry()
 
-    hass.set_state(CoreState.starting)
+    hass.state = CoreState.starting
     birth = asyncio.Event()
 
     await hass.async_block_till_done()
@@ -2480,7 +2478,7 @@ async def test_delayed_birth_message(
         await mqtt.async_subscribe(hass, "homeassistant/status", wait_birth)
         mqtt_client_mock.on_connect(None, None, 0, 0)
         await hass.async_block_till_done()
-        with pytest.raises(TimeoutError):
+        with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(birth.wait(), 0.2)
         assert not mqtt_client_mock.publish.called
         assert not birth.is_set()

@@ -140,7 +140,6 @@ def get_gas_price(data: EnergyZeroData, hours: int) -> float | None:
 
     Returns:
         The gas market price value.
-
     """
     if data.gas_today is None:
         return None

@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Iterable
 import dataclasses
 from enum import Enum
-from functools import cache, partial
+from functools import cache, partial, wraps
 import logging
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, TypedDict, TypeGuard, TypeVar, cast
@@ -487,11 +487,9 @@ def async_extract_referenced_entity_ids(
 
     # Find devices for targeted areas
     selected.referenced_devices.update(selector.device_ids)
-
-    if selector.area_ids:
-        for device_entry in dev_reg.devices.values():
-            if device_entry.area_id in selector.area_ids:
-                selected.referenced_devices.add(device_entry.id)
+    for device_entry in dev_reg.devices.values():
+        if device_entry.area_id in selector.area_ids:
+            selected.referenced_devices.add(device_entry.id)
 
     if not selector.area_ids and not selected.referenced_devices:
         return selected
@@ -583,41 +581,31 @@ async def async_get_all_descriptions(
     descriptions_cache: dict[
         tuple[str, str], dict[str, Any] | None
     ] = hass.data.setdefault(SERVICE_DESCRIPTION_CACHE, {})
-
-    # We don't mutate services here so we avoid calling
-    # async_services which makes a copy of every services
-    # dict.
-    services = hass.services.async_services_internal()
+    services = hass.services.async_services()
 
     # See if there are new services not seen before.
     # Any service that we saw before already has an entry in description_cache.
-    domains_with_missing_services: set[str] = set()
-    all_services: set[tuple[str, str]] = set()
-    for domain, services_by_domain in services.items():
-        for service_name in services_by_domain:
+    missing = set()
+    all_services = []
+    for domain in services:
+        for service_name in services[domain]:
             cache_key = (domain, service_name)
-            all_services.add(cache_key)
+            all_services.append(cache_key)
             if cache_key not in descriptions_cache:
-                domains_with_missing_services.add(domain)
+                missing.add(domain)
 
     # If we have a complete cache, check if it is still valid
-    all_cache: tuple[set[tuple[str, str]], dict[str, dict[str, Any]]] | None
     if all_cache := hass.data.get(ALL_SERVICE_DESCRIPTIONS_CACHE):
         previous_all_services, previous_descriptions_cache = all_cache
         # If the services are the same, we can return the cache
         if previous_all_services == all_services:
-            return previous_descriptions_cache  # type: ignore[no-any-return]
+            return cast(dict[str, dict[str, Any]], previous_descriptions_cache)
 
     # Files we loaded for missing descriptions
     loaded: dict[str, JSON_TYPE] = {}
-    # We try to avoid making a copy in the event the cache is good,
-    # but now we must make a copy in case new services get added
-    # while we are loading the missing ones so we do not
-    # add the new ones to the cache without their descriptions
-    services = {domain: service.copy() for domain, service in services.items()}
 
-    if domains_with_missing_services:
-        ints_or_excs = await async_get_integrations(hass, domains_with_missing_services)
+    if missing:
+        ints_or_excs = await async_get_integrations(hass, missing)
         integrations: list[Integration] = []
         for domain, int_or_exc in ints_or_excs.items():
             if type(int_or_exc) is Integration:  # noqa: E721
@@ -629,11 +617,11 @@ async def async_get_all_descriptions(
         contents = await hass.async_add_executor_job(
             _load_services_files, hass, integrations
         )
-        loaded = dict(zip(domains_with_missing_services, contents))
+        loaded = dict(zip(missing, contents))
 
     # Load translations for all service domains
     translations = await translation.async_get_translations(
-        hass, "en", "services", services
+        hass, "en", "services", list(services)
     )
 
     # Build response
@@ -642,7 +630,7 @@ async def async_get_all_descriptions(
         descriptions[domain] = {}
         domain_descriptions = descriptions[domain]
 
-        for service_name, service in services_map.items():
+        for service_name in services_map:
             cache_key = (domain, service_name)
             description = descriptions_cache.get(cache_key)
             if description is not None:
@@ -697,10 +685,11 @@ async def async_get_all_descriptions(
             if "target" in yaml_description:
                 description["target"] = yaml_description["target"]
 
-            response = service.supports_response
-            if response is not SupportsResponse.NONE:
+            if (
+                response := hass.services.supports_response(domain, service_name)
+            ) != SupportsResponse.NONE:
                 description["response"] = {
-                    "optional": response is SupportsResponse.OPTIONAL,
+                    "optional": response == SupportsResponse.OPTIONAL,
                 }
 
             descriptions_cache[cache_key] = description
@@ -976,24 +965,6 @@ async def _handle_entity_call(
     return result
 
 
-async def _async_admin_handler(
-    hass: HomeAssistant,
-    service_job: HassJob[[None], Callable[[ServiceCall], Awaitable[None] | None]],
-    call: ServiceCall,
-) -> None:
-    """Run an admin service."""
-    if call.context.user_id:
-        user = await hass.auth.async_get_user(call.context.user_id)
-        if user is None:
-            raise UnknownUser(context=call.context)
-        if not user.is_admin:
-            raise Unauthorized(context=call.context)
-
-    result = hass.async_run_hass_job(service_job, call)
-    if result is not None:
-        await result
-
-
 @bind_hass
 @callback
 def async_register_admin_service(
@@ -1004,16 +975,21 @@ def async_register_admin_service(
     schema: vol.Schema = vol.Schema({}, extra=vol.PREVENT_EXTRA),
 ) -> None:
     """Register a service that requires admin access."""
-    hass.services.async_register(
-        domain,
-        service,
-        partial(
-            _async_admin_handler,
-            hass,
-            HassJob(service_func, f"admin service {domain}.{service}"),
-        ),
-        schema,
-    )
+
+    @wraps(service_func)
+    async def admin_handler(call: ServiceCall) -> None:
+        if call.context.user_id:
+            user = await hass.auth.async_get_user(call.context.user_id)
+            if user is None:
+                raise UnknownUser(context=call.context)
+            if not user.is_admin:
+                raise Unauthorized(context=call.context)
+
+        result = hass.async_run_job(service_func, call)
+        if result is not None:
+            await result
+
+    hass.services.async_register(domain, service, admin_handler, schema)
 
 
 @bind_hass

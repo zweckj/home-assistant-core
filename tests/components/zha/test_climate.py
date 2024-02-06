@@ -400,9 +400,7 @@ async def test_climate_hvac_action_running_state_zen(
 
     thrm_cluster = device_climate_zen.device.endpoints[1].thermostat
     entity_id = find_entity_id(Platform.CLIMATE, device_climate_zen, hass)
-    sensor_entity_id = find_entity_id(
-        Platform.SENSOR, device_climate_zen, hass, "hvac_action"
-    )
+    sensor_entity_id = find_entity_id(Platform.SENSOR, device_climate_zen, hass)
 
     state = hass.states.get(entity_id)
     assert ATTR_HVAC_ACTION not in state.attributes

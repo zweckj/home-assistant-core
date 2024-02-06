@@ -288,13 +288,13 @@ async def _websocket_forward(
     """Handle websocket message directly."""
     try:
         async for msg in ws_from:
-            if msg.type is aiohttp.WSMsgType.TEXT:
+            if msg.type == aiohttp.WSMsgType.TEXT:
                 await ws_to.send_str(msg.data)
-            elif msg.type is aiohttp.WSMsgType.BINARY:
+            elif msg.type == aiohttp.WSMsgType.BINARY:
                 await ws_to.send_bytes(msg.data)
-            elif msg.type is aiohttp.WSMsgType.PING:
+            elif msg.type == aiohttp.WSMsgType.PING:
                 await ws_to.ping()
-            elif msg.type is aiohttp.WSMsgType.PONG:
+            elif msg.type == aiohttp.WSMsgType.PONG:
                 await ws_to.pong()
             elif ws_to.closed:
                 await ws_to.close(code=ws_to.close_code, message=msg.extra)  # type: ignore[arg-type]

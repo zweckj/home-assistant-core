@@ -1,5 +1,6 @@
 """The openhome component."""
 
+import asyncio
 import logging
 
 import aiohttp
@@ -42,7 +43,7 @@ async def async_setup_entry(
 
     try:
         await device.init()
-    except (TimeoutError, aiohttp.ClientError, UpnpError) as exc:
+    except (asyncio.TimeoutError, aiohttp.ClientError, UpnpError) as exc:
         raise ConfigEntryNotReady from exc
 
     _LOGGER.debug("Initialised device: %s", device.uuid())

@@ -1,4 +1,5 @@
 """Config flow for Kostal Plenticore Solar Inverter integration."""
+import asyncio
 import logging
 
 from aiohttp.client_exceptions import ClientError
@@ -56,7 +57,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except AuthenticationException as ex:
                 errors[CONF_PASSWORD] = "invalid_auth"
                 _LOGGER.error("Error response: %s", ex)
-            except (ClientError, TimeoutError):
+            except (ClientError, asyncio.TimeoutError):
                 errors[CONF_HOST] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")

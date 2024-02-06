@@ -16,6 +16,7 @@ from homeassistant.components.recorder.models import (
 )
 from homeassistant.const import ATTR_ICON, EVENT_STATE_CHANGED
 from homeassistant.core import Context, Event, State, callback
+import homeassistant.util.dt as dt_util
 from homeassistant.util.json import json_loads
 from homeassistant.util.ulid import ulid_to_bytes
 
@@ -130,7 +131,7 @@ def async_event_to_row(event: Event) -> EventAsRow:
             context_id_bin=ulid_to_bytes(context.id),
             context_user_id_bin=uuid_hex_to_bytes_or_none(context.user_id),
             context_parent_id_bin=ulid_to_bytes_or_none(context.parent_id),
-            time_fired_ts=event.time_fired_timestamp,
+            time_fired_ts=dt_util.utc_to_timestamp(event.time_fired),
             row_id=hash(event),
         )
     # States are prefiltered so we never get states
@@ -146,7 +147,7 @@ def async_event_to_row(event: Event) -> EventAsRow:
         context_id_bin=ulid_to_bytes(context.id),
         context_user_id_bin=uuid_hex_to_bytes_or_none(context.user_id),
         context_parent_id_bin=ulid_to_bytes_or_none(context.parent_id),
-        time_fired_ts=new_state.last_updated_timestamp,
+        time_fired_ts=dt_util.utc_to_timestamp(new_state.last_updated),
         row_id=hash(event),
         icon=new_state.attributes.get(ATTR_ICON),
     )

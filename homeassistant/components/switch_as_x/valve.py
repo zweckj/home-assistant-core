@@ -23,8 +23,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import EventStateChangedData
 from homeassistant.helpers.typing import EventType
 
-from .const import CONF_INVERT
-from .entity import BaseInvertableEntity
+from .entity import BaseEntity
 
 
 async def async_setup_entry(
@@ -44,7 +43,6 @@ async def async_setup_entry(
                 hass,
                 config_entry.title,
                 VALVE_DOMAIN,
-                config_entry.options[CONF_INVERT],
                 entity_id,
                 config_entry.entry_id,
             )
@@ -52,7 +50,7 @@ async def async_setup_entry(
     )
 
 
-class ValveSwitch(BaseInvertableEntity, ValveEntity):
+class ValveSwitch(BaseEntity, ValveEntity):
     """Represents a Switch as a Valve."""
 
     _attr_supported_features = ValveEntityFeature.OPEN | ValveEntityFeature.CLOSE
@@ -62,7 +60,7 @@ class ValveSwitch(BaseInvertableEntity, ValveEntity):
         """Open the valve."""
         await self.hass.services.async_call(
             SWITCH_DOMAIN,
-            SERVICE_TURN_OFF if self._invert_state else SERVICE_TURN_ON,
+            SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: self._switch_entity_id},
             blocking=True,
             context=self._context,
@@ -72,7 +70,7 @@ class ValveSwitch(BaseInvertableEntity, ValveEntity):
         """Close valve."""
         await self.hass.services.async_call(
             SWITCH_DOMAIN,
-            SERVICE_TURN_ON if self._invert_state else SERVICE_TURN_OFF,
+            SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: self._switch_entity_id},
             blocking=True,
             context=self._context,
@@ -90,7 +88,4 @@ class ValveSwitch(BaseInvertableEntity, ValveEntity):
         ):
             return
 
-        if self._invert_state:
-            self._attr_is_closed = state.state == STATE_ON
-        else:
-            self._attr_is_closed = state.state != STATE_ON
+        self._attr_is_closed = state.state != STATE_ON

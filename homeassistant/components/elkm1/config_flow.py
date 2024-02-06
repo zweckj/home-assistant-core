@@ -1,6 +1,7 @@
 """Config flow for Elk-M1 Control integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -243,7 +244,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             info = await validate_input(user_input, self.unique_id)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return {"base": "cannot_connect"}, None
         except InvalidAuth:
             return {CONF_PASSWORD: "invalid_auth"}, None

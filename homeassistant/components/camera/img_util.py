@@ -98,6 +98,6 @@ class TurboJPEGSingleton:
             TurboJPEGSingleton.__instance = TurboJPEG()
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception(
-                "Error loading libturbojpeg; Camera snapshot performance will be sub-optimal"
+                "Error loading libturbojpeg; Cameras may impact HomeKit performance"
             )
             TurboJPEGSingleton.__instance = False

@@ -1,4 +1,5 @@
 """Tests for the Somfy config flow."""
+import asyncio
 from http import HTTPStatus
 import logging
 import time
@@ -142,7 +143,7 @@ async def test_abort_if_authorization_timeout(
 
     with patch(
         "homeassistant.helpers.config_entry_oauth2_flow.asyncio.timeout",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ):
         result = await flow.async_step_user()
 
@@ -335,7 +336,7 @@ async def test_abort_on_oauth_timeout_error(
 
     with patch(
         "homeassistant.helpers.config_entry_oauth2_flow.asyncio.timeout",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ):
         result = await hass.config_entries.flow.async_configure(result["flow_id"])
 

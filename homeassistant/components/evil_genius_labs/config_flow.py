@@ -63,7 +63,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             info = await validate_input(self.hass, user_input)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             errors["base"] = "timeout"
         except CannotConnect:
             errors["base"] = "cannot_connect"

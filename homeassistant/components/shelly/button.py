@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from functools import partial
 from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar
 
 from aioshelly.const import RPC_GENERATIONS
@@ -84,8 +83,8 @@ BUTTONS: Final[list[ShellyButtonDescription[Any]]] = [
 
 @callback
 def async_migrate_unique_ids(
-    coordinator: ShellyRpcCoordinator | ShellyBlockCoordinator,
     entity_entry: er.RegistryEntry,
+    coordinator: ShellyRpcCoordinator | ShellyBlockCoordinator,
 ) -> dict[str, Any] | None:
     """Migrate button unique IDs."""
     if not entity_entry.entity_id.startswith("button"):
@@ -118,25 +117,35 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set buttons for device."""
-    entry_data = get_entry_data(hass)[config_entry.entry_id]
-    coordinator: ShellyRpcCoordinator | ShellyBlockCoordinator | None
+
+    @callback
+    def _async_migrate_unique_ids(
+        entity_entry: er.RegistryEntry,
+    ) -> dict[str, Any] | None:
+        """Migrate button unique IDs."""
+        if TYPE_CHECKING:
+            assert coordinator is not None
+        return async_migrate_unique_ids(entity_entry, coordinator)
+
+    coordinator: ShellyRpcCoordinator | ShellyBlockCoordinator | None = None
     if get_device_entry_gen(config_entry) in RPC_GENERATIONS:
-        coordinator = entry_data.rpc
+        coordinator = get_entry_data(hass)[config_entry.entry_id].rpc
     else:
-        coordinator = entry_data.block
+        coordinator = get_entry_data(hass)[config_entry.entry_id].block
 
-    if TYPE_CHECKING:
-        assert coordinator is not None
+    if coordinator is not None:
+        await er.async_migrate_entries(
+            hass, config_entry.entry_id, _async_migrate_unique_ids
+        )
 
-    await er.async_migrate_entries(
-        hass, config_entry.entry_id, partial(async_migrate_unique_ids, coordinator)
-    )
+        entities: list[ShellyButton] = []
 
-    async_add_entities(
-        ShellyButton(coordinator, button)
-        for button in BUTTONS
-        if button.supported(coordinator)
-    )
+        for button in BUTTONS:
+            if not button.supported(coordinator):
+                continue
+            entities.append(ShellyButton(coordinator, button))
+
+        async_add_entities(entities)
 
 
 class ShellyButton(

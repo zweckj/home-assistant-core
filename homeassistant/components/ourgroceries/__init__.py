@@ -1,6 +1,8 @@
 """The OurGroceries integration."""
 from __future__ import annotations
 
+from asyncio import TimeoutError as AsyncIOTimeoutError
+
 from aiohttp import ClientError
 from ourgroceries import OurGroceries
 from ourgroceries.exceptions import InvalidLoginException
@@ -24,7 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     og = OurGroceries(data[CONF_USERNAME], data[CONF_PASSWORD])
     try:
         await og.login()
-    except (TimeoutError, ClientError) as error:
+    except (AsyncIOTimeoutError, ClientError) as error:
         raise ConfigEntryNotReady from error
     except InvalidLoginException:
         return False

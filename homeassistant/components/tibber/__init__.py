@@ -1,4 +1,5 @@
 """Support for Tibber."""
+import asyncio
 import logging
 
 import aiohttp
@@ -54,7 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await tibber_connection.update_info()
 
     except (
-        TimeoutError,
+        asyncio.TimeoutError,
         aiohttp.ClientError,
         tibber.RetryableHttpException,
     ) as err:

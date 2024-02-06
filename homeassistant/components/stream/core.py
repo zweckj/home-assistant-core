@@ -333,7 +333,7 @@ class StreamOutput:
         try:
             async with asyncio.timeout(timeout):
                 await self._part_event.wait()
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return False
         return True
 

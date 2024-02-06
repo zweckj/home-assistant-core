@@ -28,8 +28,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if not client.check_credentials():
                 raise ConfigEntryError
             return client
-        except PySuezError as ex:
-            raise ConfigEntryNotReady from ex
+        except PySuezError:
+            raise ConfigEntryNotReady
 
     hass.data.setdefault(DOMAIN, {})[
         entry.entry_id

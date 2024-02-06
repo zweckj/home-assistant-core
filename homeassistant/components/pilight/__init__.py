@@ -5,6 +5,7 @@ from collections.abc import Callable
 from datetime import timedelta
 import functools
 import logging
+import socket
 import threading
 from typing import Any, ParamSpec
 
@@ -74,7 +75,7 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     try:
         pilight_client = pilight.Client(host=host, port=port)
-    except (OSError, TimeoutError) as err:
+    except (OSError, socket.timeout) as err:
         _LOGGER.error("Unable to connect to %s on port %s: %s", host, port, err)
         return False
 

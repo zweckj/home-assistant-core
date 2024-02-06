@@ -45,10 +45,7 @@ class TessieClimateEntity(TessieEntity, ClimateEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT_COOL, HVACMode.OFF]
     _attr_supported_features = (
-        ClimateEntityFeature.TURN_ON
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.PRESET_MODE
+        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     )
     _attr_preset_modes: list = [
         TessieClimateKeeper.OFF,
@@ -56,7 +53,6 @@ class TessieClimateEntity(TessieEntity, ClimateEntity):
         TessieClimateKeeper.DOG,
         TessieClimateKeeper.CAMP,
     ]
-    _enable_turn_on_off_backwards_compatibility = False
 
     def __init__(
         self,

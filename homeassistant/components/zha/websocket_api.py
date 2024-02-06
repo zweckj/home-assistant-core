@@ -9,7 +9,7 @@ import voluptuous as vol
 import zigpy.backups
 from zigpy.config import CONF_DEVICE
 from zigpy.config.validators import cv_boolean
-from zigpy.types.named import EUI64, KeyData
+from zigpy.types.named import EUI64
 from zigpy.zcl.clusters.security import IasAce
 import zigpy.zdo.types as zdo_types
 
@@ -161,9 +161,7 @@ SERVICE_SCHEMAS = {
             vol.Optional(ATTR_CLUSTER_TYPE, default=CLUSTER_TYPE_IN): cv.string,
             vol.Required(ATTR_ATTRIBUTE): vol.Any(cv.positive_int, str),
             vol.Required(ATTR_VALUE): vol.Any(int, cv.boolean, cv.string),
-            vol.Optional(ATTR_MANUFACTURER): vol.All(
-                vol.Coerce(int), vol.Range(min=-1)
-            ),
+            vol.Optional(ATTR_MANUFACTURER): cv.positive_int,
         }
     ),
     SERVICE_WARNING_DEVICE_SQUAWK: vol.Schema(
@@ -212,9 +210,7 @@ SERVICE_SCHEMAS = {
                 vol.Required(ATTR_COMMAND_TYPE): cv.string,
                 vol.Exclusive(ATTR_ARGS, "attrs_params"): _ensure_list_if_present,
                 vol.Exclusive(ATTR_PARAMS, "attrs_params"): dict,
-                vol.Optional(ATTR_MANUFACTURER): vol.All(
-                    vol.Coerce(int), vol.Range(min=-1)
-                ),
+                vol.Optional(ATTR_MANUFACTURER): cv.positive_int,
             }
         ),
         cv.deprecated(ATTR_ARGS),
@@ -227,9 +223,7 @@ SERVICE_SCHEMAS = {
             vol.Optional(ATTR_CLUSTER_TYPE, default=CLUSTER_TYPE_IN): cv.string,
             vol.Required(ATTR_COMMAND): cv.positive_int,
             vol.Optional(ATTR_ARGS, default=[]): cv.ensure_list,
-            vol.Optional(ATTR_MANUFACTURER): vol.All(
-                vol.Coerce(int), vol.Range(min=-1)
-            ),
+            vol.Optional(ATTR_MANUFACTURER): cv.positive_int,
         }
     ),
 }
@@ -328,19 +322,19 @@ async def websocket_permit_devices(
     connection.subscriptions[msg["id"]] = async_cleanup
     zha_gateway.async_enable_debug_mode()
     src_ieee: EUI64
-    link_key: KeyData
+    code: bytes
     if ATTR_SOURCE_IEEE in msg:
         src_ieee = msg[ATTR_SOURCE_IEEE]
-        link_key = msg[ATTR_INSTALL_CODE]
-        _LOGGER.debug("Allowing join for %s device with link key", src_ieee)
-        await zha_gateway.application_controller.permit_with_link_key(
-            time_s=duration, node=src_ieee, link_key=link_key
+        code = msg[ATTR_INSTALL_CODE]
+        _LOGGER.debug("Allowing join for %s device with install code", src_ieee)
+        await zha_gateway.application_controller.permit_with_key(
+            time_s=duration, node=src_ieee, code=code
         )
     elif ATTR_QR_CODE in msg:
-        src_ieee, link_key = msg[ATTR_QR_CODE]
-        _LOGGER.debug("Allowing join for %s device with link key", src_ieee)
-        await zha_gateway.application_controller.permit_with_link_key(
-            time_s=duration, node=src_ieee, link_key=link_key
+        src_ieee, code = msg[ATTR_QR_CODE]
+        _LOGGER.debug("Allowing join for %s device with install code", src_ieee)
+        await zha_gateway.application_controller.permit_with_key(
+            time_s=duration, node=src_ieee, code=code
         )
     else:
         await zha_gateway.application_controller.permit(time_s=duration, node=ieee)
@@ -825,6 +819,8 @@ async def websocket_read_zigbee_cluster_attributes(
     success = {}
     failure = {}
     if zha_device is not None:
+        if cluster_id >= MFG_CLUSTER_ID_START and manufacturer is None:
+            manufacturer = zha_device.manufacturer_code
         cluster = zha_device.async_get_cluster(
             endpoint_id, cluster_id, cluster_type=cluster_type
         )
@@ -1249,21 +1245,21 @@ def async_load_api(hass: HomeAssistant) -> None:
         duration: int = service.data[ATTR_DURATION]
         ieee: EUI64 | None = service.data.get(ATTR_IEEE)
         src_ieee: EUI64
-        link_key: KeyData
+        code: bytes
         if ATTR_SOURCE_IEEE in service.data:
             src_ieee = service.data[ATTR_SOURCE_IEEE]
-            link_key = service.data[ATTR_INSTALL_CODE]
-            _LOGGER.info("Allowing join for %s device with link key", src_ieee)
-            await application_controller.permit_with_link_key(
-                time_s=duration, node=src_ieee, link_key=link_key
+            code = service.data[ATTR_INSTALL_CODE]
+            _LOGGER.info("Allowing join for %s device with install code", src_ieee)
+            await application_controller.permit_with_key(
+                time_s=duration, node=src_ieee, code=code
             )
             return
 
         if ATTR_QR_CODE in service.data:
-            src_ieee, link_key = service.data[ATTR_QR_CODE]
-            _LOGGER.info("Allowing join for %s device with link key", src_ieee)
-            await application_controller.permit_with_link_key(
-                time_s=duration, node=src_ieee, link_key=link_key
+            src_ieee, code = service.data[ATTR_QR_CODE]
+            _LOGGER.info("Allowing join for %s device with install code", src_ieee)
+            await application_controller.permit_with_key(
+                time_s=duration, node=src_ieee, code=code
             )
             return
 
@@ -1304,6 +1300,8 @@ def async_load_api(hass: HomeAssistant) -> None:
         zha_device = zha_gateway.get_device(ieee)
         response = None
         if zha_device is not None:
+            if cluster_id >= MFG_CLUSTER_ID_START and manufacturer is None:
+                manufacturer = zha_device.manufacturer_code
             response = await zha_device.write_zigbee_attribute(
                 endpoint_id,
                 cluster_id,

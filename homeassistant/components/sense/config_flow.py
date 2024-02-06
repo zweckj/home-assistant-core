@@ -69,7 +69,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 title=self._auth_data[CONF_EMAIL], data=self._auth_data
             )
 
-        return self.async_update_reload_and_abort(existing_entry, data=self._auth_data)
+        self.hass.config_entries.async_update_entry(
+            existing_entry, data=self._auth_data
+        )
+        await self.hass.config_entries.async_reload(existing_entry.entry_id)
+        return self.async_abort(reason="reauth_successful")
 
     async def validate_input_and_create_entry(self, user_input, errors):
         """Validate the input and create the entry from the data."""

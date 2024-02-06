@@ -77,6 +77,7 @@ class VerisureDoorlock(CoordinatorEntity[VerisureDataUpdateCoordinator], LockEnt
         area = self.coordinator.data["locks"][self.serial_number]["device"]["area"]
         return DeviceInfo(
             name=area,
+            suggested_area=area,
             manufacturer="Verisure",
             model="Lockguard Smartlock",
             identifiers={(DOMAIN, self.serial_number)},

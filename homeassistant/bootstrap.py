@@ -39,6 +39,7 @@ from .helpers import (
 from .helpers.dispatcher import async_dispatcher_send
 from .helpers.typing import ConfigType
 from .setup import (
+    DATA_SETUP,
     DATA_SETUP_STARTED,
     DATA_SETUP_TIME,
     async_notify_setup_error,
@@ -105,52 +106,6 @@ STAGE_1_INTEGRATIONS = {
     # Ensure supervisor is available
     "hassio",
 }
-DEFAULT_INTEGRATIONS = {
-    # These integrations are set up unless recovery mode is activated.
-    #
-    # Integrations providing core functionality:
-    "application_credentials",
-    "frontend",
-    "hardware",
-    "logger",
-    "network",
-    "system_health",
-    #
-    # Key-feature:
-    "automation",
-    "person",
-    "scene",
-    "script",
-    "tag",
-    "zone",
-    #
-    # Built-in helpers:
-    "counter",
-    "input_boolean",
-    "input_button",
-    "input_datetime",
-    "input_number",
-    "input_select",
-    "input_text",
-    "schedule",
-    "timer",
-}
-DEFAULT_INTEGRATIONS_RECOVERY_MODE = {
-    # These integrations are set up if recovery mode is activated.
-    "frontend",
-}
-DEFAULT_INTEGRATIONS_SUPERVISOR = {
-    # These integrations are set up if using the Supervisor
-    "hassio",
-}
-DEFAULT_INTEGRATIONS_NON_SUPERVISOR = {
-    # These integrations are set up if not using the Supervisor
-    "backup",
-}
-CRITICAL_INTEGRATIONS = {
-    # Recovery mode is activated if these integrations fail to set up
-    "frontend",
-}
 
 
 async def async_setup_hass(
@@ -210,14 +165,14 @@ async def async_setup_hass(
         _LOGGER.warning("Unable to set up core integrations. Activating recovery mode")
         recovery_mode = True
 
-    elif any(domain not in hass.config.components for domain in CRITICAL_INTEGRATIONS):
-        _LOGGER.warning(
-            "Detected that %s did not load. Activating recovery mode",
-            ",".join(CRITICAL_INTEGRATIONS),
-        )
+    elif (
+        "frontend" in hass.data.get(DATA_SETUP, {})
+        and "frontend" not in hass.config.components
+    ):
+        _LOGGER.warning("Detected that frontend did not load. Activating recovery mode")
         # Ask integrations to shut down. It's messy but we can't
         # do a clean stop without knowing what is broken
-        with contextlib.suppress(TimeoutError):
+        with contextlib.suppress(asyncio.TimeoutError):
             async with hass.timeout.async_timeout(10):
                 await hass.async_stop()
 
@@ -523,18 +478,13 @@ def _get_domains(hass: core.HomeAssistant, config: dict[str, Any]) -> set[str]:
         domain for key in config if (domain := cv.domain_key(key)) != core.DOMAIN
     }
 
-    # Add config entry and default domains
+    # Add config entry domains
     if not hass.config.recovery_mode:
-        domains.update(DEFAULT_INTEGRATIONS)
         domains.update(hass.config_entries.async_domains())
-    else:
-        domains.update(DEFAULT_INTEGRATIONS_RECOVERY_MODE)
 
-    # Add domains depending on if the Supervisor is used or not
+    # Make sure the Hass.io component is loaded
     if "SUPERVISOR" in os.environ:
-        domains.update(DEFAULT_INTEGRATIONS_SUPERVISOR)
-    else:
-        domains.update(DEFAULT_INTEGRATIONS_NON_SUPERVISOR)
+        domains.add("hassio")
 
     return domains
 
@@ -738,7 +688,7 @@ async def _async_set_up_integrations(
                 STAGE_1_TIMEOUT, cool_down=COOLDOWN_TIME
             ):
                 await async_setup_multi_components(hass, stage_1_domains, config)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             _LOGGER.warning("Setup timed out for stage 1 - moving forward")
 
     # Add after dependencies when setting up stage 2 domains
@@ -751,7 +701,7 @@ async def _async_set_up_integrations(
                 STAGE_2_TIMEOUT, cool_down=COOLDOWN_TIME
             ):
                 await async_setup_multi_components(hass, stage_2_domains, config)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             _LOGGER.warning("Setup timed out for stage 2 - moving forward")
 
     # Wrap up startup
@@ -759,7 +709,7 @@ async def _async_set_up_integrations(
     try:
         async with hass.timeout.async_timeout(WRAP_UP_TIMEOUT, cool_down=COOLDOWN_TIME):
             await hass.async_block_till_done()
-    except TimeoutError:
+    except asyncio.TimeoutError:
         _LOGGER.warning("Setup timed out for bootstrap - moving forward")
 
     watch_task.cancel()

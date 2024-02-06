@@ -1,4 +1,5 @@
 """Test config flow."""
+import asyncio
 from ipaddress import ip_address
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -499,7 +500,7 @@ async def test_user_discovers_name_and_dashboard_is_unavailable(
 
     with patch(
         "esphome_dashboard_api.ESPHomeDashboardAPI.get_devices",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ):
         await dashboard.async_get_dashboard(hass).async_refresh()
         result = await hass.config_entries.flow.async_init(

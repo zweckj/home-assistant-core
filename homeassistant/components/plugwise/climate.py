@@ -45,7 +45,6 @@ class PlugwiseClimateEntity(PlugwiseEntity, ClimateEntity):
     _attr_name = None
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_translation_key = DOMAIN
-    _enable_turn_on_off_backwards_compatibility = False
 
     _previous_mode: str = "heating"
 
@@ -69,10 +68,6 @@ class PlugwiseClimateEntity(PlugwiseEntity, ClimateEntity):
         ):
             self._attr_supported_features = (
                 ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
-            )
-        if HVACMode.OFF in self.hvac_modes:
-            self._attr_supported_features |= (
-                ClimateEntityFeature.TURN_OFF | ClimateEntityFeature.TURN_ON
             )
         if presets := self.device.get("preset_modes"):
             self._attr_supported_features |= ClimateEntityFeature.PRESET_MODE

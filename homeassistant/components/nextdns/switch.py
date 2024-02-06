@@ -1,6 +1,7 @@
 """Support for the NextDNS service."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Generic
@@ -646,7 +647,7 @@ class NextDnsSwitch(CoordinatorEntity[NextDnsSettingsUpdateCoordinator], SwitchE
         except (
             ApiError,
             ClientConnectorError,
-            TimeoutError,
+            asyncio.TimeoutError,
             ClientError,
         ) as err:
             raise HomeAssistantError(

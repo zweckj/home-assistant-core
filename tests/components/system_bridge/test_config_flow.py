@@ -1,4 +1,5 @@
 """Test the System Bridge config flow."""
+import asyncio
 from ipaddress import ip_address
 from unittest.mock import patch
 
@@ -230,7 +231,7 @@ async def test_form_timeout_cannot_connect(hass: HomeAssistant) -> None:
         "homeassistant.components.system_bridge.config_flow.WebSocketClient.connect"
     ), patch(
         "systembridgeconnector.websocket_client.WebSocketClient.get_data",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ), patch(
         "systembridgeconnector.websocket_client.WebSocketClient.listen",
     ):

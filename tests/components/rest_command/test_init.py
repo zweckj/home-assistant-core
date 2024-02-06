@@ -1,4 +1,5 @@
 """The tests for the rest command platform."""
+import asyncio
 import base64
 from http import HTTPStatus
 from unittest.mock import patch
@@ -63,7 +64,7 @@ async def test_rest_command_timeout(
     """Call a rest command with timeout."""
     await setup_component()
 
-    aioclient_mock.get(TEST_URL, exc=TimeoutError())
+    aioclient_mock.get(TEST_URL, exc=asyncio.TimeoutError())
 
     with pytest.raises(
         HomeAssistantError,

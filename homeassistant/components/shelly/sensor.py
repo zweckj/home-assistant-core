@@ -1,6 +1,7 @@
 """Sensor for Shelly."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, cast
 
@@ -35,6 +36,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity_registry import RegistryEntry
 from homeassistant.helpers.typing import StateType
+from homeassistant.util.enum import try_parse_enum
 
 from .const import CONF_SLEEP_PERIOD, SHAIR_MAX_WORK_HOURS
 from .coordinator import ShellyBlockCoordinator, ShellyRpcCoordinator
@@ -69,7 +71,7 @@ class RestSensorDescription(RestEntityDescription, SensorEntityDescription):
     """Class to describe a REST sensor."""
 
 
-SENSORS: dict[tuple[str, str], BlockSensorDescription] = {
+SENSORS: Final = {
     ("device", "battery"): BlockSensorDescription(
         key="device|battery",
         name="Battery",
@@ -907,9 +909,6 @@ RPC_SENSORS: Final = {
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
         entity_registry_enabled_default=False,
-        removal_condition=lambda config, _status, key: (
-            config[key]["sta"]["enable"] is False
-        ),
         entity_category=EntityCategory.DIAGNOSTIC,
         use_polling_coordinator=True,
     ),
@@ -958,9 +957,21 @@ RPC_SENSORS: Final = {
         sub_key="percent",
         name="Analog input",
         native_unit_of_measurement=PERCENTAGE,
+        device_class=SensorDeviceClass.BATTERY,
         state_class=SensorStateClass.MEASUREMENT,
     ),
 }
+
+
+def _build_block_description(entry: RegistryEntry) -> BlockSensorDescription:
+    """Build description when restoring block attribute entities."""
+    return BlockSensorDescription(
+        key="",
+        name="",
+        icon=entry.original_icon,
+        native_unit_of_measurement=entry.unit_of_measurement,
+        device_class=try_parse_enum(SensorDeviceClass, entry.original_device_class),
+    )
 
 
 async def async_setup_entry(
@@ -991,6 +1002,7 @@ async def async_setup_entry(
             async_add_entities,
             SENSORS,
             BlockSleepingSensor,
+            _build_block_description,
         )
     else:
         async_setup_entry_attribute_entities(
@@ -999,6 +1011,7 @@ async def async_setup_entry(
             async_add_entities,
             SENSORS,
             BlockSensor,
+            _build_block_description,
         )
         async_setup_entry_rest(
             hass, config_entry, async_add_entities, REST_SENSORS, RestSensor
@@ -1062,9 +1075,10 @@ class BlockSleepingSensor(ShellySleepingBlockAttributeEntity, RestoreSensor):
         attribute: str,
         description: BlockSensorDescription,
         entry: RegistryEntry | None = None,
+        sensors: Mapping[tuple[str, str], BlockSensorDescription] | None = None,
     ) -> None:
         """Initialize the sleeping sensor."""
-        super().__init__(coordinator, block, attribute, description, entry)
+        super().__init__(coordinator, block, attribute, description, entry, sensors)
         self.restored_data: SensorExtraStoredData | None = None
 
     async def async_added_to_hass(self) -> None:

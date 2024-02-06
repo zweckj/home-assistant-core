@@ -1,4 +1,5 @@
 """Test the Lutron Caseta config flow."""
+import asyncio
 from ipaddress import ip_address
 from pathlib import Path
 import ssl
@@ -113,7 +114,7 @@ async def test_bridge_cannot_connect_unknown_error(hass: HomeAssistant) -> None:
 
     with patch.object(Smartbridge, "create_tls") as create_tls:
         mock_bridge = MockBridge()
-        mock_bridge.connect = AsyncMock(side_effect=TimeoutError)
+        mock_bridge.connect = AsyncMock(side_effect=asyncio.TimeoutError)
         create_tls.return_value = mock_bridge
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -269,7 +270,7 @@ async def test_form_user_pairing_fails(hass: HomeAssistant, tmp_path: Path) -> N
 
     with patch(
         "homeassistant.components.lutron_caseta.config_flow.async_pair",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ), patch(
         "homeassistant.components.lutron_caseta.async_setup", return_value=True
     ) as mock_setup, patch(

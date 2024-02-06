@@ -1,4 +1,5 @@
 """Shared utilities for different supported platforms."""
+import asyncio
 from asyncio import timeout
 from datetime import datetime, timedelta
 from http import HTTPStatus
@@ -103,7 +104,7 @@ class BrData:
                     result[MESSAGE] = "Got http statuscode: %d" % (resp.status)
 
                 return result
-        except (TimeoutError, aiohttp.ClientError) as err:
+        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             result[MESSAGE] = str(err)
             return result
         finally:

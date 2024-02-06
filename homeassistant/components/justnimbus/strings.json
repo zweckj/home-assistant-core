@@ -3,8 +3,7 @@
     "step": {
       "user": {
         "data": {
-          "client_id": "Client ID",
-          "zip_code": "ZIP code"
+          "client_id": "Client ID"
         }
       }
     },
@@ -14,32 +13,46 @@
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
     }
   },
   "entity": {
     "sensor": {
+      "pump_flow": {
+        "name": "Pump flow"
+      },
+      "drink_flow": {
+        "name": "Drink flow"
+      },
       "pump_pressure": {
         "name": "Pump pressure"
       },
-      "pump_type": {
-        "name": "Pump type"
+      "pump_starts": {
+        "name": "Pump starts"
       },
-      "reservoir_capacity": {
-        "name": "Reservoir capacity"
-      },
-      "reservoir_content": {
-        "name": "Reservoir content"
+      "pump_hours": {
+        "name": "Pump hours"
       },
       "reservoir_temperature": {
         "name": "Reservoir temperature"
       },
-      "water_used": {
+      "reservoir_content": {
+        "name": "Reservoir content"
+      },
+      "total_saved": {
+        "name": "Total saved"
+      },
+      "total_replenished": {
+        "name": "Total replenished"
+      },
+      "error_code": {
+        "name": "Error code"
+      },
+      "total_use": {
         "name": "Total use"
       },
-      "water_saved": {
-        "name": "Total saved"
+      "reservoir_content_max": {
+        "name": "Maximum reservoir content"
       }
     }
   }

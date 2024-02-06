@@ -106,7 +106,7 @@ class BaseEntity(Entity):
             registry.async_update_entity_options(
                 self.entity_id,
                 SWITCH_AS_X_DOMAIN,
-                self.async_generate_entity_options(),
+                {"entity_id": self._switch_entity_id},
             )
 
         if not self._is_new_entity or not (
@@ -140,11 +140,6 @@ class BaseEntity(Entity):
 
         copy_custom_name(wrapped_switch)
         copy_expose_settings()
-
-    @callback
-    def async_generate_entity_options(self) -> dict[str, Any]:
-        """Generate entity options."""
-        return {"entity_id": self._switch_entity_id, "invert": False}
 
 
 class BaseToggleEntity(BaseEntity, ToggleEntity):
@@ -183,25 +178,3 @@ class BaseToggleEntity(BaseEntity, ToggleEntity):
             return
 
         self._attr_is_on = state.state == STATE_ON
-
-
-class BaseInvertableEntity(BaseEntity):
-    """Represents a Switch as an X."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        config_entry_title: str,
-        domain: str,
-        invert: bool,
-        switch_entity_id: str,
-        unique_id: str,
-    ) -> None:
-        """Initialize Switch as an X."""
-        super().__init__(hass, config_entry_title, domain, switch_entity_id, unique_id)
-        self._invert_state = invert
-
-    @callback
-    def async_generate_entity_options(self) -> dict[str, Any]:
-        """Generate entity options."""
-        return super().async_generate_entity_options() | {"invert": self._invert_state}

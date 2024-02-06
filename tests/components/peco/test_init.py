@@ -1,4 +1,5 @@
 """Test the PECO Outage Counter init file."""
+import asyncio
 from unittest.mock import patch
 
 from peco import (
@@ -71,7 +72,7 @@ async def test_update_timeout(hass: HomeAssistant, sensor) -> None:
 
     with patch(
         "peco.PecoOutageApi.get_outage_count",
-        side_effect=TimeoutError(),
+        side_effect=asyncio.TimeoutError(),
     ):
         assert not await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
@@ -96,7 +97,7 @@ async def test_total_update_timeout(hass: HomeAssistant, sensor) -> None:
     config_entry.add_to_hass(hass)
     with patch(
         "peco.PecoOutageApi.get_outage_totals",
-        side_effect=TimeoutError(),
+        side_effect=asyncio.TimeoutError(),
     ):
         assert not await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()
@@ -255,7 +256,7 @@ async def test_meter_timeout(hass: HomeAssistant) -> None:
 
     with patch(
         "peco.PecoOutageApi.meter_check",
-        side_effect=TimeoutError(),
+        side_effect=asyncio.TimeoutError(),
     ), patch(
         "peco.PecoOutageApi.get_outage_count",
         return_value=OutageResults(

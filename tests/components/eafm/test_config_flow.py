@@ -2,7 +2,7 @@
 from unittest.mock import patch
 
 import pytest
-from voluptuous.error import Invalid
+from voluptuous.error import MultipleInvalid
 
 from homeassistant import config_entries
 from homeassistant.components.eafm import const
@@ -32,7 +32,7 @@ async def test_flow_invalid_station(hass: HomeAssistant, mock_get_stations) -> N
     )
     assert result["type"] == "form"
 
-    with pytest.raises(Invalid):
+    with pytest.raises(MultipleInvalid):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], user_input={"station": "My other station"}
         )

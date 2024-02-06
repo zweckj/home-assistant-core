@@ -290,7 +290,7 @@ class BluesoundPlayer(MediaPlayerEntity):
             while True:
                 await self.async_update_status()
 
-        except (TimeoutError, ClientError, BluesoundPlayer._TimeoutException):
+        except (asyncio.TimeoutError, ClientError, BluesoundPlayer._TimeoutException):
             _LOGGER.info("Node %s:%s is offline, retrying later", self.name, self.port)
             await asyncio.sleep(NODE_OFFLINE_CHECK_TIMEOUT)
             self.start_polling()
@@ -317,7 +317,7 @@ class BluesoundPlayer(MediaPlayerEntity):
                 self._retry_remove = None
 
             await self.force_update_sync_status(self._init_callback, True)
-        except (TimeoutError, ClientError):
+        except (asyncio.TimeoutError, ClientError):
             _LOGGER.info("Node %s:%s is offline, retrying later", self.host, self.port)
             self._retry_remove = async_track_time_interval(
                 self._hass, self.async_init, NODE_RETRY_INITIATION
@@ -370,7 +370,7 @@ class BluesoundPlayer(MediaPlayerEntity):
                 _LOGGER.error("Error %s on %s", response.status, url)
                 return None
 
-        except (TimeoutError, aiohttp.ClientError):
+        except (asyncio.TimeoutError, aiohttp.ClientError):
             if raise_timeout:
                 _LOGGER.info("Timeout: %s:%s", self.host, self.port)
                 raise
@@ -437,7 +437,7 @@ class BluesoundPlayer(MediaPlayerEntity):
                     "Error %s on %s. Trying one more time", response.status, url
                 )
 
-        except (TimeoutError, ClientError):
+        except (asyncio.TimeoutError, ClientError):
             self._is_online = False
             self._last_status_update = None
             self._status = None

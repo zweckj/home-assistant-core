@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import datetime
 import logging
-from typing import TYPE_CHECKING
 
 from pyenphase import (
     EnvoyEncharge,
@@ -16,7 +15,6 @@ from pyenphase import (
     EnvoySystemConsumption,
     EnvoySystemProduction,
 )
-from pyenphase.const import PHASENAMES, PhaseNames
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -87,7 +85,6 @@ class EnvoyProductionRequiredKeysMixin:
     """Mixin for required keys."""
 
     value_fn: Callable[[EnvoySystemProduction], int]
-    on_phase: PhaseNames | None
 
 
 @dataclass(frozen=True)
@@ -107,7 +104,6 @@ PRODUCTION_SENSORS = (
         suggested_unit_of_measurement=UnitOfPower.KILO_WATT,
         suggested_display_precision=3,
         value_fn=lambda production: production.watts_now,
-        on_phase=None,
     ),
     EnvoyProductionSensorEntityDescription(
         key="daily_production",
@@ -118,7 +114,6 @@ PRODUCTION_SENSORS = (
         suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=2,
         value_fn=lambda production: production.watt_hours_today,
-        on_phase=None,
     ),
     EnvoyProductionSensorEntityDescription(
         key="seven_days_production",
@@ -128,7 +123,6 @@ PRODUCTION_SENSORS = (
         suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=1,
         value_fn=lambda production: production.watt_hours_last_7_days,
-        on_phase=None,
     ),
     EnvoyProductionSensorEntityDescription(
         key="lifetime_production",
@@ -139,24 +133,8 @@ PRODUCTION_SENSORS = (
         suggested_unit_of_measurement=UnitOfEnergy.MEGA_WATT_HOUR,
         suggested_display_precision=3,
         value_fn=lambda production: production.watt_hours_lifetime,
-        on_phase=None,
     ),
 )
-
-
-PRODUCTION_PHASE_SENSORS = {
-    (on_phase := PhaseNames(PHASENAMES[phase])): [
-        replace(
-            sensor,
-            key=f"{sensor.key}_l{phase + 1}",
-            translation_key=f"{sensor.translation_key}_phase",
-            on_phase=on_phase,
-            translation_placeholders={"phase_name": f"l{phase + 1}"},
-        )
-        for sensor in list(PRODUCTION_SENSORS)
-    ]
-    for phase in range(0, 3)
-}
 
 
 @dataclass(frozen=True)
@@ -164,7 +142,6 @@ class EnvoyConsumptionRequiredKeysMixin:
     """Mixin for required keys."""
 
     value_fn: Callable[[EnvoySystemConsumption], int]
-    on_phase: PhaseNames | None
 
 
 @dataclass(frozen=True)
@@ -184,7 +161,6 @@ CONSUMPTION_SENSORS = (
         suggested_unit_of_measurement=UnitOfPower.KILO_WATT,
         suggested_display_precision=3,
         value_fn=lambda consumption: consumption.watts_now,
-        on_phase=None,
     ),
     EnvoyConsumptionSensorEntityDescription(
         key="daily_consumption",
@@ -195,7 +171,6 @@ CONSUMPTION_SENSORS = (
         suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=2,
         value_fn=lambda consumption: consumption.watt_hours_today,
-        on_phase=None,
     ),
     EnvoyConsumptionSensorEntityDescription(
         key="seven_days_consumption",
@@ -205,7 +180,6 @@ CONSUMPTION_SENSORS = (
         suggested_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=1,
         value_fn=lambda consumption: consumption.watt_hours_last_7_days,
-        on_phase=None,
     ),
     EnvoyConsumptionSensorEntityDescription(
         key="lifetime_consumption",
@@ -216,24 +190,8 @@ CONSUMPTION_SENSORS = (
         suggested_unit_of_measurement=UnitOfEnergy.MEGA_WATT_HOUR,
         suggested_display_precision=3,
         value_fn=lambda consumption: consumption.watt_hours_lifetime,
-        on_phase=None,
     ),
 )
-
-
-CONSUMPTION_PHASE_SENSORS = {
-    (on_phase := PhaseNames(PHASENAMES[phase])): [
-        replace(
-            sensor,
-            key=f"{sensor.key}_l{phase + 1}",
-            translation_key=f"{sensor.translation_key}_phase",
-            on_phase=on_phase,
-            translation_placeholders={"phase_name": f"l{phase + 1}"},
-        )
-        for sensor in list(CONSUMPTION_SENSORS)
-    ]
-    for phase in range(0, 3)
-}
 
 
 @dataclass(frozen=True)
@@ -403,23 +361,6 @@ async def async_setup_entry(
             EnvoyConsumptionEntity(coordinator, description)
             for description in CONSUMPTION_SENSORS
         )
-    # For each production phase reported add production entities
-    if envoy_data.system_production_phases:
-        entities.extend(
-            EnvoyProductionPhaseEntity(coordinator, description)
-            for use_phase, phase in envoy_data.system_production_phases.items()
-            for description in PRODUCTION_PHASE_SENSORS[PhaseNames(use_phase)]
-            if phase is not None
-        )
-    # For each consumption phase reported add consumption entities
-    if envoy_data.system_consumption_phases:
-        entities.extend(
-            EnvoyConsumptionPhaseEntity(coordinator, description)
-            for use_phase, phase in envoy_data.system_consumption_phases.items()
-            for description in CONSUMPTION_PHASE_SENSORS[PhaseNames(use_phase)]
-            if phase is not None
-        )
-
     if envoy_data.inverters:
         entities.extend(
             EnvoyInverterEntity(coordinator, description, inverter)
@@ -473,11 +414,9 @@ class EnvoySystemSensorEntity(EnvoySensorBaseEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self.envoy_serial_num)},
             manufacturer="Enphase",
-            model=coordinator.envoy.envoy_model,
+            model=coordinator.envoy.part_number or "Envoy",
             name=coordinator.name,
             sw_version=str(coordinator.envoy.firmware),
-            hw_version=coordinator.envoy.part_number,
-            serial_number=self.envoy_serial_num,
         )
 
 
@@ -504,48 +443,6 @@ class EnvoyConsumptionEntity(EnvoySystemSensorEntity):
         """Return the state of the sensor."""
         system_consumption = self.data.system_consumption
         assert system_consumption is not None
-        return self.entity_description.value_fn(system_consumption)
-
-
-class EnvoyProductionPhaseEntity(EnvoySystemSensorEntity):
-    """Envoy phase production entity."""
-
-    entity_description: EnvoyProductionSensorEntityDescription
-
-    @property
-    def native_value(self) -> int | None:
-        """Return the state of the sensor."""
-        if TYPE_CHECKING:
-            assert self.entity_description.on_phase
-            assert self.data.system_production_phases
-
-        if (
-            system_production := self.data.system_production_phases[
-                self.entity_description.on_phase
-            ]
-        ) is None:
-            return None
-        return self.entity_description.value_fn(system_production)
-
-
-class EnvoyConsumptionPhaseEntity(EnvoySystemSensorEntity):
-    """Envoy phase consumption entity."""
-
-    entity_description: EnvoyConsumptionSensorEntityDescription
-
-    @property
-    def native_value(self) -> int | None:
-        """Return the state of the sensor."""
-        if TYPE_CHECKING:
-            assert self.entity_description.on_phase
-            assert self.data.system_consumption_phases
-
-        if (
-            system_consumption := self.data.system_consumption_phases[
-                self.entity_description.on_phase
-            ]
-        ) is None:
-            return None
         return self.entity_description.value_fn(system_consumption)
 
 

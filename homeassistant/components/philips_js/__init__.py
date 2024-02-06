@@ -32,11 +32,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import CONF_ALLOW_NOTIFY, CONF_SYSTEM, DOMAIN
 
 PLATFORMS = [
-    Platform.BINARY_SENSOR,
-    Platform.LIGHT,
     Platform.MEDIA_PLAYER,
+    Platform.LIGHT,
     Platform.REMOTE,
     Platform.SWITCH,
+    Platform.BINARY_SENSOR,
 ]
 
 LOGGER = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-class PhilipsTVDataUpdateCoordinator(DataUpdateCoordinator[None]):  # pylint: disable=hass-enforce-coordinator-module
+class PhilipsTVDataUpdateCoordinator(DataUpdateCoordinator[None]):
     """Coordinator to update data."""
 
     config_entry: ConfigEntry

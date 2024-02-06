@@ -1,4 +1,5 @@
 """The tests for the Foobot sensor platform."""
+import asyncio
 from http import HTTPStatus
 import re
 from unittest.mock import MagicMock
@@ -64,7 +65,9 @@ async def test_setup_timeout_error(
     """Expected failures caused by a timeout in API response."""
     fake_async_add_entities = MagicMock()
 
-    aioclient_mock.get(re.compile("api.foobot.io/v2/owner/.*"), exc=TimeoutError())
+    aioclient_mock.get(
+        re.compile("api.foobot.io/v2/owner/.*"), exc=asyncio.TimeoutError()
+    )
     with pytest.raises(PlatformNotReady):
         await foobot.async_setup_platform(hass, VALID_CONFIG, fake_async_add_entities)
 

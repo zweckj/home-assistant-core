@@ -35,10 +35,8 @@ STT_INFO = Info(
                     installed=True,
                     attribution=TEST_ATTR,
                     languages=["en-US"],
-                    version=None,
                 )
             ],
-            version=None,
         )
     ]
 )
@@ -57,10 +55,8 @@ TTS_INFO = Info(
                     attribution=TEST_ATTR,
                     languages=["en-US"],
                     speakers=[TtsVoiceSpeaker(name="Test Speaker")],
-                    version=None,
                 )
             ],
-            version=None,
         )
     ]
 )
@@ -78,10 +74,8 @@ WAKE_WORD_INFO = Info(
                     installed=True,
                     attribution=TEST_ATTR,
                     languages=["en-US"],
-                    version=None,
                 )
             ],
-            version=None,
         )
     ]
 )
@@ -92,7 +86,6 @@ SATELLITE_INFO = Info(
         installed=True,
         attribution=TEST_ATTR,
         area="Office",
-        version=None,
     )
 )
 EMPTY_INFO = Info()

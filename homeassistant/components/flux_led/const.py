@@ -1,5 +1,6 @@
 """Constants of the FluxLed/MagicHome Integration."""
 
+import asyncio
 import socket
 from typing import Final
 
@@ -37,7 +38,7 @@ DEFAULT_EFFECT_SPEED: Final = 50
 FLUX_LED_DISCOVERY: Final = "flux_led_discovery"
 
 FLUX_LED_EXCEPTIONS: Final = (
-    TimeoutError,
+    asyncio.TimeoutError,
     socket.error,
     RuntimeError,
     BrokenPipeError,

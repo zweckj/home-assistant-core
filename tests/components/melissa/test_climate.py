@@ -223,10 +223,7 @@ async def test_supported_features(hass: HomeAssistant) -> None:
         device = (await api.async_fetch_devices())[_SERIAL]
         thermostat = MelissaClimate(api, _SERIAL, device)
         features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE
-            | ClimateEntityFeature.FAN_MODE
-            | ClimateEntityFeature.TURN_OFF
-            | ClimateEntityFeature.TURN_ON
+            ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.FAN_MODE
         )
         assert thermostat.supported_features == features
 

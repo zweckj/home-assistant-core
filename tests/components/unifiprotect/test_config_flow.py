@@ -226,10 +226,9 @@ async def test_form_reauth_auth(hass: HomeAssistant, nvr: NVR) -> None:
             result2["flow_id"],
             {
                 "username": "test-username",
-                "password": "new-password",
+                "password": "test-password",
             },
         )
-        await hass.async_block_till_done()
 
     assert result3["type"] == FlowResultType.ABORT
     assert result3["reason"] == "reauth_successful"

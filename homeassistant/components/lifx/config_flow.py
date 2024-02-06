@@ -1,6 +1,7 @@
 """Config flow flow LIFX."""
 from __future__ import annotations
 
+import asyncio
 import socket
 from typing import Any
 
@@ -241,7 +242,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 DEFAULT_ATTEMPTS,
                 OVERALL_TIMEOUT,
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return None
         finally:
             connection.async_stop()

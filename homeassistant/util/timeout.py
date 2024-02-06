@@ -179,7 +179,7 @@ class _GlobalTaskContext:
 
         # Timeout on exit
         if exc_type is asyncio.CancelledError and self.state == _State.TIMEOUT:
-            raise TimeoutError
+            raise asyncio.TimeoutError
 
         self._state = _State.EXIT
         self._wait_zone.set()
@@ -294,7 +294,7 @@ class _ZoneTaskContext:
 
         # Timeout on exit
         if exc_type is asyncio.CancelledError and self.state == _State.TIMEOUT:
-            raise TimeoutError
+            raise asyncio.TimeoutError
 
         self._state = _State.EXIT
         return None

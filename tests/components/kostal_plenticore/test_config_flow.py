@@ -1,4 +1,5 @@
 """Test the Kostal Plenticore Solar Inverter config flow."""
+import asyncio
 from collections.abc import Generator
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -211,7 +212,7 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
         # mock of the context manager instance
         mock_api_ctx = MagicMock()
         mock_api_ctx.login = AsyncMock(
-            side_effect=TimeoutError(),
+            side_effect=asyncio.TimeoutError(),
         )
 
         # mock of the return instance of ApiClient

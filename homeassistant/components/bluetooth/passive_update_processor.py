@@ -51,7 +51,6 @@ class PassiveBluetoothEntityKey:
     Example:
     key: temperature
     device_id: outdoor_sensor_1
-
     """
 
     key: str

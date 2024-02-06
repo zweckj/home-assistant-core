@@ -14,10 +14,8 @@ from homeassistant.helpers.device_registry import format_mac
 from .const import DOMAIN, EMPTY_MAC
 
 PLATFORMS: list[Platform] = [
-    Platform.BINARY_SENSOR,
     Platform.NUMBER,
     Platform.SELECT,
-    Platform.SENSOR,
 ]
 
 

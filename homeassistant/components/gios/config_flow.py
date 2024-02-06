@@ -45,7 +45,7 @@ class GiosFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     title=gios.station_name,
                     data=user_input,
                 )
-            except (ApiError, ClientConnectorError, TimeoutError):
+            except (ApiError, ClientConnectorError, asyncio.TimeoutError):
                 errors["base"] = "cannot_connect"
             except NoStationError:
                 errors[CONF_STATION_ID] = "wrong_station_id"

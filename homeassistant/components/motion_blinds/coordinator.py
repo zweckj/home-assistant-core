@@ -2,9 +2,10 @@
 import asyncio
 from datetime import timedelta
 import logging
+from socket import timeout
 from typing import Any
 
-from motionblinds import DEVICE_TYPES_WIFI, ParseException
+from motionblinds import ParseException
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -49,7 +50,7 @@ class DataUpdateCoordinatorMotionBlinds(DataUpdateCoordinator):
         """Fetch data from gateway."""
         try:
             self._gateway.Update()
-        except (TimeoutError, ParseException):
+        except (timeout, ParseException):
             # let the error be logged and handled by the motionblinds library
             return {ATTR_AVAILABLE: False}
 
@@ -58,13 +59,11 @@ class DataUpdateCoordinatorMotionBlinds(DataUpdateCoordinator):
     def update_blind(self, blind):
         """Fetch data from a blind."""
         try:
-            if blind.device_type in DEVICE_TYPES_WIFI:
-                blind.Update_from_cache()
-            elif self._wait_for_push:
+            if self._wait_for_push:
                 blind.Update()
             else:
                 blind.Update_trigger()
-        except (TimeoutError, ParseException):
+        except (timeout, ParseException):
             # let the error be logged and handled by the motionblinds library
             return {ATTR_AVAILABLE: False}
 

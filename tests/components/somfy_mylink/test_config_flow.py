@@ -1,4 +1,5 @@
 """Test the Somfy MyLink config flow."""
+import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -122,7 +123,7 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
 
     with patch(
         "homeassistant.components.somfy_mylink.config_flow.SomfyMyLinkSynergy.status_info",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ):
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],

@@ -162,7 +162,7 @@ class LogiCircleFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         except AuthorizationFailed:
             (self.hass.data[DATA_FLOW_IMPL][DOMAIN][EXTERNAL_ERRORS]) = "invalid_auth"
             return self.async_abort(reason="external_error")
-        except TimeoutError:
+        except asyncio.TimeoutError:
             (
                 self.hass.data[DATA_FLOW_IMPL][DOMAIN][EXTERNAL_ERRORS]
             ) = "authorize_url_timeout"

@@ -17,9 +17,7 @@ pytestmark = [
 ]
 
 
-@pytest.mark.parametrize(
-    "device_fixture", ["HWE-WTR", "SDM230", "SDM630", "HWE-KWH1", "HWE-KWH3"]
-)
+@pytest.mark.parametrize("device_fixture", ["HWE-WTR", "SDM230", "SDM630"])
 async def test_identify_button_entity_not_loaded_when_not_available(
     hass: HomeAssistant,
 ) -> None:

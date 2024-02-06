@@ -7,7 +7,6 @@ from homeassistant.helpers import trigger
 from homeassistant.setup import async_setup_component
 
 from tests.common import async_mock_service
-from tests.typing import WebSocketGenerator
 
 
 @pytest.fixture
@@ -45,16 +44,14 @@ async def test_if_fires_on_event(hass: HomeAssistant, calls, setup_comp) -> None
         },
     )
 
-    service_response = await hass.services.async_call(
+    await hass.services.async_call(
         "conversation",
         "process",
         {
             "text": "Ha ha ha",
         },
         blocking=True,
-        return_response=True,
     )
-    assert service_response["response"]["speech"]["plain"]["speech"] == "Done"
 
     await hass.async_block_till_done()
     assert len(calls) == 1
@@ -67,93 +64,6 @@ async def test_if_fires_on_event(hass: HomeAssistant, calls, setup_comp) -> None
         "slots": {},
         "details": {},
     }
-
-
-async def test_response(hass: HomeAssistant, setup_comp) -> None:
-    """Test the firing of events."""
-    response = "I'm sorry, Dave. I'm afraid I can't do that"
-    assert await async_setup_component(
-        hass,
-        "automation",
-        {
-            "automation": {
-                "trigger": {
-                    "platform": "conversation",
-                    "command": ["Open the pod bay door Hal"],
-                },
-                "action": {
-                    "set_conversation_response": response,
-                },
-            }
-        },
-    )
-
-    service_response = await hass.services.async_call(
-        "conversation",
-        "process",
-        {
-            "text": "Open the pod bay door Hal",
-        },
-        blocking=True,
-        return_response=True,
-    )
-    assert service_response["response"]["speech"]["plain"]["speech"] == response
-
-
-async def test_subscribe_trigger_does_not_interfere_with_responses(
-    hass: HomeAssistant, setup_comp, hass_ws_client: WebSocketGenerator
-) -> None:
-    """Test that subscribing to a trigger from the websocket API does not interfere with responses."""
-    websocket_client = await hass_ws_client()
-    await websocket_client.send_json_auto_id(
-        {
-            "type": "subscribe_trigger",
-            "trigger": {"platform": "conversation", "command": ["test sentence"]},
-        }
-    )
-
-    service_response = await hass.services.async_call(
-        "conversation",
-        "process",
-        {
-            "text": "test sentence",
-        },
-        blocking=True,
-        return_response=True,
-    )
-
-    # Default response, since no automations with responses are registered
-    assert service_response["response"]["speech"]["plain"]["speech"] == "Done"
-
-    # Now register a trigger with a response
-    assert await async_setup_component(
-        hass,
-        "automation",
-        {
-            "automation test1": {
-                "trigger": {
-                    "platform": "conversation",
-                    "command": ["test sentence"],
-                },
-                "action": {
-                    "set_conversation_response": "test response",
-                },
-            }
-        },
-    )
-
-    service_response = await hass.services.async_call(
-        "conversation",
-        "process",
-        {
-            "text": "test sentence",
-        },
-        blocking=True,
-        return_response=True,
-    )
-
-    # Response will now come through
-    assert service_response["response"]["speech"]["plain"]["speech"] == "test response"
 
 
 async def test_same_trigger_multiple_sentences(

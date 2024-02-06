@@ -34,7 +34,6 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
     UnitOfVolume,
-    UnitOfVolumeFlowRate,
     UnitOfVolumetricFlux,
 )
 from homeassistant.helpers.deprecation import (
@@ -43,11 +42,7 @@ from homeassistant.helpers.deprecation import (
     check_if_deprecated_constant,
     dir_with_deprecated_constants,
 )
-from homeassistant.util.unit_conversion import (
-    BaseUnitConverter,
-    TemperatureConverter,
-    VolumeFlowRateConverter,
-)
+from homeassistant.util.unit_conversion import BaseUnitConverter, TemperatureConverter
 
 ATTR_VALUE = "value"
 ATTR_MIN = "min"
@@ -377,14 +372,6 @@ class NumberDeviceClass(StrEnum):
     USCS/imperial units are currently assumed to be US volumes)
     """
 
-    VOLUME_FLOW_RATE = "volume_flow_rate"
-    """Generic flow rate
-
-    Unit of measurement: UnitOfVolumeFlowRate
-    - SI / metric: `m³/h`, `L/min`
-    - USCS / imperial: `ft³/min`, `gal/min`
-    """
-
     WATER = "water"
     """Water.
 
@@ -477,7 +464,6 @@ DEVICE_CLASS_UNITS: dict[NumberDeviceClass, set[type[StrEnum] | str | None]] = {
     NumberDeviceClass.VOLTAGE: set(UnitOfElectricPotential),
     NumberDeviceClass.VOLUME: set(UnitOfVolume),
     NumberDeviceClass.VOLUME_STORAGE: set(UnitOfVolume),
-    NumberDeviceClass.VOLUME_FLOW_RATE: set(UnitOfVolumeFlowRate),
     NumberDeviceClass.WATER: {
         UnitOfVolume.CENTUM_CUBIC_FEET,
         UnitOfVolume.CUBIC_FEET,
@@ -491,7 +477,6 @@ DEVICE_CLASS_UNITS: dict[NumberDeviceClass, set[type[StrEnum] | str | None]] = {
 
 UNIT_CONVERTERS: dict[NumberDeviceClass, type[BaseUnitConverter]] = {
     NumberDeviceClass.TEMPERATURE: TemperatureConverter,
-    NumberDeviceClass.VOLUME_FLOW_RATE: VolumeFlowRateConverter,
 }
 
 # These can be removed if no deprecated constant are in this module anymore

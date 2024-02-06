@@ -51,10 +51,7 @@ async def test_spa_defaults(
     assert state
     assert (
         state.attributes["supported_features"]
-        == ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.PRESET_MODE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
+        == ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     )
     assert state.state == HVACMode.HEAT
     assert state.attributes[ATTR_MIN_TEMP] == 10.0
@@ -74,10 +71,7 @@ async def test_spa_defaults_fake_tscale(
     assert state
     assert (
         state.attributes["supported_features"]
-        == ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.PRESET_MODE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
+        == ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     )
     assert state.state == HVACMode.HEAT
     assert state.attributes[ATTR_MIN_TEMP] == 10.0
@@ -180,8 +174,6 @@ async def test_spa_with_blower(hass: HomeAssistant, client: MagicMock) -> None:
         == ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.PRESET_MODE
         | ClimateEntityFeature.FAN_MODE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
     )
     assert state.state == HVACMode.HEAT
     assert state.attributes[ATTR_MIN_TEMP] == 10.0

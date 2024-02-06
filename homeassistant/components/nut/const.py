@@ -39,8 +39,6 @@ STATE_TYPES = {
     "BOOST": "Boosting Voltage",
     "FSD": "Forced Shutdown",
     "ALARM": "Alarm",
-    "HE": "ECO Mode",
-    "TEST": "Battery Testing",
 }
 
 COMMAND_BEEPER_DISABLE = "beeper.disable"

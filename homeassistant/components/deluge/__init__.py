@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import socket
 from ssl import SSLError
 
 from deluge_client.client import DelugeRPCClient
@@ -39,7 +40,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     api.web_port = entry.data[CONF_WEB_PORT]
     try:
         await hass.async_add_executor_job(api.connect)
-    except (ConnectionRefusedError, TimeoutError, SSLError) as ex:
+    except (
+        ConnectionRefusedError,
+        socket.timeout,
+        SSLError,
+    ) as ex:
         raise ConfigEntryNotReady("Connection to Deluge Daemon failed") from ex
     except Exception as ex:  # pylint:disable=broad-except
         if type(ex).__name__ == "BadLoginError":

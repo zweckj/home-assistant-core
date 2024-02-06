@@ -56,12 +56,13 @@ def _get_config_schema(
         vol.Required(CONF_API_KEY, default=input_dict.get(CONF_API_KEY)): str,
     }
 
-    default_location = input_dict.get(
-        CONF_LOCATION,
-        {
+    default_location = (
+        input_dict[CONF_LOCATION]
+        if CONF_LOCATION in input_dict
+        else {
             CONF_LATITUDE: hass.config.latitude,
             CONF_LONGITUDE: hass.config.longitude,
-        },
+        }
     )
     return vol.Schema(
         {

@@ -1,6 +1,7 @@
 """Update entities for Linn devices."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -92,7 +93,7 @@ class OpenhomeUpdateEntity(UpdateEntity):
         try:
             if self.latest_version:
                 await self._device.update_firmware()
-        except (TimeoutError, aiohttp.ClientError, UpnpError) as err:
+        except (asyncio.TimeoutError, aiohttp.ClientError, UpnpError) as err:
             raise HomeAssistantError(
                 f"Error updating {self._device.device.friendly_name}: {err}"
             ) from err

@@ -8,7 +8,7 @@ import functools
 import itertools
 import logging
 import random
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from zigpy.zcl.clusters.general import Identify, LevelControl, OnOff
 from zigpy.zcl.clusters.lighting import Color
@@ -1183,9 +1183,7 @@ class LightGroup(BaseLight, ZhaGroupEntity):
         if self._zha_config_group_members_assume_state:
             self._update_group_from_child_delay = ASSUME_UPDATE_GROUP_FROM_CHILD_DELAY
         self._zha_config_enhanced_light_transition = False
-
-        self._attr_color_mode = ColorMode.UNKNOWN
-        self._attr_supported_color_modes = set()
+        self._attr_color_mode = None
 
     # remove this when all ZHA platforms and base entities are updated
     @property
@@ -1285,6 +1283,7 @@ class LightGroup(BaseLight, ZhaGroupEntity):
             effects_count = Counter(itertools.chain(all_effects))
             self._attr_effect = effects_count.most_common(1)[0][0]
 
+        self._attr_color_mode = None
         all_color_modes = list(
             helpers.find_state_attributes(on_states, light.ATTR_COLOR_MODE)
         )
@@ -1302,13 +1301,14 @@ class LightGroup(BaseLight, ZhaGroupEntity):
             ):  # switch to XY if all members do not support HS
                 self._attr_color_mode = ColorMode.XY
 
-        all_supported_color_modes: list[set[ColorMode]] = list(
+        self._attr_supported_color_modes = None
+        all_supported_color_modes = list(
             helpers.find_state_attributes(states, light.ATTR_SUPPORTED_COLOR_MODES)
         )
         if all_supported_color_modes:
             # Merge all color modes.
-            self._attr_supported_color_modes = filter_supported_color_modes(
-                set().union(*all_supported_color_modes)
+            self._attr_supported_color_modes = cast(
+                set[str], set().union(*all_supported_color_modes)
             )
 
         self._attr_supported_features = LightEntityFeature(0)

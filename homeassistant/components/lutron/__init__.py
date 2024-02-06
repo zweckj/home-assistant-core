@@ -17,7 +17,6 @@ from homeassistant.const import (
 from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN, HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 import homeassistant.helpers.config_validation as cv
-import homeassistant.helpers.device_registry as dr
 from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import slugify
@@ -27,7 +26,6 @@ from .const import DOMAIN
 PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.COVER,
-    Platform.FAN,
     Platform.LIGHT,
     Platform.SCENE,
     Platform.SWITCH,
@@ -168,9 +166,8 @@ class LutronData:
     binary_sensors: list[tuple[str, OccupancyGroup]]
     buttons: list[LutronButton]
     covers: list[tuple[str, Output]]
-    fans: list[tuple[str, Output]]
     lights: list[tuple[str, Output]]
-    scenes: list[tuple[str, Keypad, Button, Led]]
+    scenes: list[tuple[str, str, Button, Led]]
     switches: list[tuple[str, Output]]
 
 
@@ -191,7 +188,6 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         binary_sensors=[],
         buttons=[],
         covers=[],
-        fans=[],
         lights=[],
         scenes=[],
         switches=[],
@@ -204,10 +200,6 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
             _LOGGER.debug("Working on output %s", output.type)
             if output.type == "SYSTEM_SHADE":
                 entry_data.covers.append((area.name, output))
-            elif output.type == "CEILING_FAN_TYPE":
-                entry_data.fans.append((area.name, output))
-                # Deprecated, should be removed in 2024.8
-                entry_data.lights.append((area.name, output))
             elif output.is_dimmable:
                 entry_data.lights.append((area.name, output))
             else:
@@ -226,20 +218,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
                         (led for led in keypad.leds if led.number == button.number),
                         None,
                     )
-                    entry_data.scenes.append((area.name, keypad, button, led))
+                    entry_data.scenes.append((area.name, keypad.name, button, led))
 
                 entry_data.buttons.append(LutronButton(hass, area.name, keypad, button))
         if area.occupancy_group is not None:
             entry_data.binary_sensors.append((area.name, area.occupancy_group))
-
-    device_registry = dr.async_get(hass)
-    device_registry.async_get_or_create(
-        config_entry_id=config_entry.entry_id,
-        identifiers={(DOMAIN, lutron_client.guid)},
-        manufacturer="Lutron",
-        name="Main repeater",
-    )
-
     hass.data.setdefault(DOMAIN, {})[config_entry.entry_id] = entry_data
 
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)

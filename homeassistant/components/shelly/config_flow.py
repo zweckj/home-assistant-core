@@ -201,18 +201,12 @@ class ShellyConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if get_info_gen(self.info) in RPC_GENERATIONS:
             schema = {
-                vol.Required(
-                    CONF_PASSWORD, default=user_input.get(CONF_PASSWORD, "")
-                ): str,
+                vol.Required(CONF_PASSWORD, default=user_input.get(CONF_PASSWORD)): str,
             }
         else:
             schema = {
-                vol.Required(
-                    CONF_USERNAME, default=user_input.get(CONF_USERNAME, "")
-                ): str,
-                vol.Required(
-                    CONF_PASSWORD, default=user_input.get(CONF_PASSWORD, "")
-                ): str,
+                vol.Required(CONF_USERNAME, default=user_input.get(CONF_USERNAME)): str,
+                vol.Required(CONF_PASSWORD, default=user_input.get(CONF_PASSWORD)): str,
             }
 
         return self.async_show_form(
@@ -336,9 +330,11 @@ class ShellyConfigFlow(ConfigFlow, domain=DOMAIN):
             except (DeviceConnectionError, InvalidAuthError, FirmwareUnsupported):
                 return self.async_abort(reason="reauth_unsuccessful")
 
-            return self.async_update_reload_and_abort(
+            self.hass.config_entries.async_update_entry(
                 self.entry, data={**self.entry.data, **user_input}
             )
+            await self.hass.config_entries.async_reload(self.entry.entry_id)
+            return self.async_abort(reason="reauth_successful")
 
         if get_device_entry_gen(self.entry) in BLOCK_GENERATIONS:
             schema = {

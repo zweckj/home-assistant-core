@@ -100,7 +100,6 @@ class ThermostatEntity(ClimateEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_name = None
-    _enable_turn_on_off_backwards_compatibility = False
 
     def __init__(self, device: Device) -> None:
         """Initialize ThermostatEntity."""
@@ -247,7 +246,7 @@ class ThermostatEntity(ClimateEntity):
 
     def _get_supported_features(self) -> ClimateEntityFeature:
         """Compute the bitmap of supported features from the current state."""
-        features = ClimateEntityFeature.TURN_OFF | ClimateEntityFeature.TURN_ON
+        features = ClimateEntityFeature(0)
         if HVACMode.HEAT_COOL in self.hvac_modes:
             features |= ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
         if HVACMode.HEAT in self.hvac_modes or HVACMode.COOL in self.hvac_modes:

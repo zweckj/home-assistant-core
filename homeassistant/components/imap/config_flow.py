@@ -1,6 +1,7 @@
 """Config flow for imap integration."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 import ssl
 from typing import Any
@@ -107,7 +108,7 @@ async def validate_input(
         # See https://github.com/bamthomas/aioimaplib/issues/91
         # This handler is added to be able to supply a better error message
         errors["base"] = "ssl_error"
-    except (TimeoutError, AioImapException, ConnectionRefusedError):
+    except (asyncio.TimeoutError, AioImapException, ConnectionRefusedError):
         errors["base"] = "cannot_connect"
     else:
         if result != "OK":
@@ -168,9 +169,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             user_input = {**self._reauth_entry.data, **user_input}
             if not (errors := await validate_input(self.hass, user_input)):
-                return self.async_update_reload_and_abort(
+                self.hass.config_entries.async_update_entry(
                     self._reauth_entry, data=user_input
                 )
+                await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
 
         return self.async_show_form(
             description_placeholders={

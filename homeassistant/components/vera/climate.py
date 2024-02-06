@@ -48,12 +48,8 @@ class VeraThermostat(VeraDevice[veraApi.VeraThermostat], ClimateEntity):
     _attr_hvac_modes = SUPPORT_HVAC
     _attr_fan_modes = FAN_OPERATION_LIST
     _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.FAN_MODE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
+        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.FAN_MODE
     )
-    _enable_turn_on_off_backwards_compatibility = False
 
     def __init__(
         self, vera_device: veraApi.VeraThermostat, controller_data: ControllerData

@@ -107,8 +107,6 @@ async def test_ecobee3_setup(hass: HomeAssistant) -> None:
                         ClimateEntityFeature.TARGET_TEMPERATURE
                         | ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
                         | ClimateEntityFeature.TARGET_HUMIDITY
-                        | ClimateEntityFeature.TURN_OFF
-                        | ClimateEntityFeature.TURN_ON
                     ),
                     capabilities={
                         "hvac_modes": ["off", "heat", "cool", "heat_cool"],

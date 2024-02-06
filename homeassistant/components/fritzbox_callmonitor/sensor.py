@@ -26,6 +26,7 @@ from .const import (
     CONF_PREFIXES,
     DOMAIN,
     FRITZBOX_PHONEBOOK,
+    ICON_PHONE,
     MANUFACTURER,
     SERIAL_NUMBER,
     FritzState,
@@ -78,6 +79,7 @@ async def async_setup_entry(
 class FritzBoxCallSensor(SensorEntity):
     """Implementation of a Fritz!Box call monitor."""
 
+    _attr_icon = ICON_PHONE
     _attr_has_entity_name = True
     _attr_translation_key = DOMAIN
     _attr_device_class = SensorDeviceClass.ENUM

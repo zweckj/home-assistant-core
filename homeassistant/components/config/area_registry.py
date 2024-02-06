@@ -1,16 +1,14 @@
 """HTTP views to interact with the area registry."""
-from __future__ import annotations
-
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.area_registry import AreaEntry, async_get
+from homeassistant.helpers.area_registry import async_get
 
 
-async def async_setup(hass: HomeAssistant) -> bool:
+async def async_setup(hass):
     """Enable the Area Registry views."""
     websocket_api.async_register_command(hass, websocket_list_areas)
     websocket_api.async_register_command(hass, websocket_create_area)
@@ -38,7 +36,6 @@ def websocket_list_areas(
     {
         vol.Required("type"): "config/area_registry/create",
         vol.Optional("aliases"): list,
-        vol.Optional("icon"): str,
         vol.Required("name"): str,
         vol.Optional("picture"): vol.Any(str, None),
     }
@@ -98,7 +95,6 @@ def websocket_delete_area(
         vol.Required("type"): "config/area_registry/update",
         vol.Optional("aliases"): list,
         vol.Required("area_id"): str,
-        vol.Optional("icon"): vol.Any(str, None),
         vol.Optional("name"): str,
         vol.Optional("picture"): vol.Any(str, None),
     }
@@ -130,12 +126,11 @@ def websocket_update_area(
 
 
 @callback
-def _entry_dict(entry: AreaEntry) -> dict[str, Any]:
+def _entry_dict(entry):
     """Convert entry to API format."""
     return {
-        "aliases": list(entry.aliases),
+        "aliases": entry.aliases,
         "area_id": entry.id,
-        "icon": entry.icon,
         "name": entry.name,
         "picture": entry.picture,
     }

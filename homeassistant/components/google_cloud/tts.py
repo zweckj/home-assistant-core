@@ -292,7 +292,7 @@ class GoogleCloudTTSProvider(Provider):
                 )
                 return _encoding, response.audio_content
 
-        except TimeoutError as ex:
+        except asyncio.TimeoutError as ex:
             _LOGGER.error("Timeout for Google Cloud TTS call: %s", ex)
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.exception("Error occurred during Google Cloud TTS call: %s", ex)

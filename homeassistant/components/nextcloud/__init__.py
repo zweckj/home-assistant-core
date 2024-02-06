@@ -24,7 +24,7 @@ from homeassistant.helpers import config_validation as cv, entity_registry as er
 from .const import DOMAIN
 from .coordinator import NextcloudDataUpdateCoordinator
 
-PLATFORMS = (Platform.SENSOR, Platform.BINARY_SENSOR, Platform.UPDATE)
+PLATFORMS = (Platform.SENSOR, Platform.BINARY_SENSOR)
 
 CONFIG_SCHEMA = cv.removed(DOMAIN, raise_if_present=False)
 
@@ -52,8 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.data[CONF_URL],
             entry.data[CONF_USERNAME],
             entry.data[CONF_PASSWORD],
-            verify_ssl=entry.data[CONF_VERIFY_SSL],
-            skip_update=False,
+            entry.data[CONF_VERIFY_SSL],
         )
 
     try:

@@ -1,6 +1,7 @@
 """Config flow for Aladdin Connect cover integration."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -41,7 +42,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     )
     try:
         await acc.login()
-    except (ClientError, TimeoutError, Aladdin.ConnectionError) as ex:
+    except (ClientError, asyncio.TimeoutError, Aladdin.ConnectionError) as ex:
         raise ex
 
     except Aladdin.InvalidPasswordError as ex:
@@ -80,7 +81,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
 
-            except (ClientError, TimeoutError, Aladdin.ConnectionError):
+            except (ClientError, asyncio.TimeoutError, Aladdin.ConnectionError):
                 errors["base"] = "cannot_connect"
 
             else:
@@ -116,7 +117,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except InvalidAuth:
             errors["base"] = "invalid_auth"
 
-        except (ClientError, TimeoutError, Aladdin.ConnectionError):
+        except (ClientError, asyncio.TimeoutError, Aladdin.ConnectionError):
             errors["base"] = "cannot_connect"
 
         else:

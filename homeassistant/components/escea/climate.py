@@ -82,14 +82,10 @@ class ControllerEntity(ClimateEntity):
     _attr_precision = PRECISION_WHOLE
     _attr_should_poll = False
     _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.FAN_MODE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
+        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.FAN_MODE
     )
     _attr_target_temperature_step = PRECISION_WHOLE
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _enable_turn_on_off_backwards_compatibility = False
 
     def __init__(self, controller: Controller) -> None:
         """Initialise ControllerDevice."""

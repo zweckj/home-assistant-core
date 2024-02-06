@@ -70,12 +70,11 @@ class MySensorsHVAC(mysensors.device.MySensorsChildEntity, ClimateEntity):
     """Representation of a MySensors HVAC."""
 
     _attr_hvac_modes = OPERATION_LIST
-    _enable_turn_on_off_backwards_compatibility = False
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
         """Return the list of supported features."""
-        features = ClimateEntityFeature.TURN_OFF | ClimateEntityFeature.TURN_ON
+        features = ClimateEntityFeature(0)
         set_req = self.gateway.const.SetReq
         if set_req.V_HVAC_SPEED in self._values:
             features = features | ClimateEntityFeature.FAN_MODE

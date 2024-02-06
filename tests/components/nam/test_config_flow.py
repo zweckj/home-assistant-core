@@ -1,4 +1,5 @@
 """Define tests for the Nettigo Air Monitor config flow."""
+import asyncio
 from ipaddress import ip_address
 from unittest.mock import patch
 
@@ -170,7 +171,7 @@ async def test_reauth_unsuccessful(hass: HomeAssistant) -> None:
     [
         (ApiError("API Error"), "cannot_connect"),
         (AuthFailedError("Auth Error"), "invalid_auth"),
-        (TimeoutError, "cannot_connect"),
+        (asyncio.TimeoutError, "cannot_connect"),
         (ValueError, "unknown"),
     ],
 )
@@ -209,7 +210,7 @@ async def test_form_with_auth_errors(hass: HomeAssistant, error) -> None:
     "error",
     [
         (ApiError("API Error"), "cannot_connect"),
-        (TimeoutError, "cannot_connect"),
+        (asyncio.TimeoutError, "cannot_connect"),
         (ValueError, "unknown"),
     ],
 )

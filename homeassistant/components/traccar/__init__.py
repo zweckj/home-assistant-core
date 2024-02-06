@@ -1,4 +1,4 @@
-"""Support for Traccar Client."""
+"""Support for Traccar."""
 from http import HTTPStatus
 
 from aiohttp import web
@@ -56,7 +56,7 @@ WEBHOOK_SCHEMA = vol.Schema(
 
 
 async def handle_webhook(hass, webhook_id, request):
-    """Handle incoming webhook with Traccar Client request."""
+    """Handle incoming webhook with Traccar request."""
     try:
         data = WEBHOOK_SCHEMA(dict(request.query))
     except vol.MultipleInvalid as error:

@@ -215,7 +215,7 @@ class SystemBridgeDataUpdateCoordinator(
             )
             self.last_update_success = False
             self.async_update_listeners()
-        except TimeoutError as exception:
+        except asyncio.TimeoutError as exception:
             self.logger.warning(
                 "Timed out waiting for %s. Will retry: %s",
                 self.title,

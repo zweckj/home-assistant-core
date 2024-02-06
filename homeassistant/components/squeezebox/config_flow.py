@@ -140,7 +140,7 @@ class SqueezeboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             async with asyncio.timeout(TIMEOUT):
                 await self._discover()
             return await self.async_step_edit()
-        except TimeoutError:
+        except asyncio.TimeoutError:
             errors["base"] = "no_server_found"
 
         # display the form

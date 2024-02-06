@@ -1,10 +1,8 @@
 """Support for exposing regular REST commands as services."""
-from __future__ import annotations
-
+import asyncio
 from http import HTTPStatus
 from json.decoder import JSONDecodeError
 import logging
-from typing import Any
 
 import aiohttp
 from aiohttp import hdrs
@@ -78,7 +76,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         if conf is None:
             return
 
-        existing = hass.services.async_services_for_domain(DOMAIN)
+        existing = hass.services.async_services().get(DOMAIN, {})
         for existing_service in existing:
             if existing_service == SERVICE_RELOAD:
                 continue
@@ -88,9 +86,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             async_register_rest_command(name, command_config)
 
     @callback
-    def async_register_rest_command(name: str, command_config: dict[str, Any]) -> None:
+    def async_register_rest_command(name, command_config):
         """Create service for rest command."""
-        websession = async_get_clientsession(hass, command_config[CONF_VERIFY_SSL])
+        websession = async_get_clientsession(hass, command_config.get(CONF_VERIFY_SSL))
         timeout = command_config[CONF_TIMEOUT]
         method = command_config[CONF_METHOD]
 
@@ -187,7 +185,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         ) from err
                     return {"content": _content, "status": response.status}
 
-            except TimeoutError as err:
+            except asyncio.TimeoutError as err:
                 raise HomeAssistantError(
                     f"Timeout when calling resource '{request_url}'",
                     translation_domain=DOMAIN,

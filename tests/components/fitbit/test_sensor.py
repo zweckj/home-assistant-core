@@ -6,7 +6,6 @@ from http import HTTPStatus
 from typing import Any
 
 import pytest
-from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests_mock.mocker import Mocker
 from syrupy.assertion import SnapshotAssertion
 
@@ -600,11 +599,10 @@ async def test_settings_scope_config_entry(
 
 
 @pytest.mark.parametrize(
-    ("scopes", "request_condition"),
+    ("scopes", "server_status"),
     [
-        (["heartrate"], {"status_code": HTTPStatus.INTERNAL_SERVER_ERROR}),
-        (["heartrate"], {"status_code": HTTPStatus.BAD_REQUEST}),
-        (["heartrate"], {"exc": RequestsConnectionError}),
+        (["heartrate"], HTTPStatus.INTERNAL_SERVER_ERROR),
+        (["heartrate"], HTTPStatus.BAD_REQUEST),
     ],
 )
 async def test_sensor_update_failed(
@@ -612,14 +610,14 @@ async def test_sensor_update_failed(
     setup_credentials: None,
     integration_setup: Callable[[], Awaitable[bool]],
     requests_mock: Mocker,
-    request_condition: dict[str, Any],
+    server_status: HTTPStatus,
 ) -> None:
     """Test a failed sensor update when talking to the API."""
 
     requests_mock.register_uri(
         "GET",
         TIMESERIES_API_URL_FORMAT.format(resource="activities/heart"),
-        **request_condition,
+        status_code=server_status,
     )
 
     assert await integration_setup()

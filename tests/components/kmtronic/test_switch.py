@@ -1,4 +1,5 @@
 """The tests for the KMtronic switch platform."""
+import asyncio
 from datetime import timedelta
 from http import HTTPStatus
 
@@ -155,7 +156,7 @@ async def test_failed_update(
     aioclient_mock.clear_requests()
     aioclient_mock.get(
         "http://1.1.1.1/status.xml",
-        exc=TimeoutError(),
+        exc=asyncio.TimeoutError(),
     )
     async_fire_time_changed(hass, future)
 

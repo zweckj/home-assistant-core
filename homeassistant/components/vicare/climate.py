@@ -20,8 +20,7 @@ import voluptuous as vol
 from homeassistant.components.climate import (
     PRESET_COMFORT,
     PRESET_ECO,
-    PRESET_HOME,
-    PRESET_SLEEP,
+    PRESET_NONE,
     ClimateEntity,
     ClimateEntityFeature,
     HVACAction,
@@ -86,15 +85,13 @@ VICARE_TO_HA_HVAC_HEATING: dict[str, HVACMode] = {
 VICARE_TO_HA_PRESET_HEATING = {
     VICARE_PROGRAM_COMFORT: PRESET_COMFORT,
     VICARE_PROGRAM_ECO: PRESET_ECO,
-    VICARE_PROGRAM_NORMAL: PRESET_HOME,
-    VICARE_PROGRAM_REDUCED: PRESET_SLEEP,
+    VICARE_PROGRAM_NORMAL: PRESET_NONE,
 }
 
 HA_TO_VICARE_PRESET_HEATING = {
     PRESET_COMFORT: VICARE_PROGRAM_COMFORT,
     PRESET_ECO: VICARE_PROGRAM_ECO,
-    PRESET_HOME: VICARE_PROGRAM_NORMAL,
-    PRESET_SLEEP: VICARE_PROGRAM_REDUCED,
+    PRESET_NONE: VICARE_PROGRAM_NORMAL,
 }
 
 
@@ -145,10 +142,7 @@ class ViCareClimate(ViCareEntity, ClimateEntity):
 
     _attr_precision = PRECISION_TENTHS
     _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE
-        | ClimateEntityFeature.PRESET_MODE
-        | ClimateEntityFeature.TURN_OFF
-        | ClimateEntityFeature.TURN_ON
+        ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE
     )
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_min_temp = VICARE_TEMP_HEATING_MIN
@@ -157,7 +151,6 @@ class ViCareClimate(ViCareEntity, ClimateEntity):
     _attr_preset_modes = list(HA_TO_VICARE_PRESET_HEATING)
     _current_action: bool | None = None
     _current_mode: str | None = None
-    _enable_turn_on_off_backwards_compatibility = False
 
     def __init__(
         self,

@@ -70,7 +70,7 @@ class OpenThermGwConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 async with asyncio.timeout(CONNECTION_TIMEOUT):
                     await test_connection()
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 return self._show_form({"base": "timeout_connect"})
             except (ConnectionError, SerialException):
                 return self._show_form({"base": "cannot_connect"})

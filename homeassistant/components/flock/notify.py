@@ -58,5 +58,5 @@ class FlockNotificationService(BaseNotificationService):
                     response.status,
                     result,
                 )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             _LOGGER.error("Timeout accessing Flock at %s", self._url)

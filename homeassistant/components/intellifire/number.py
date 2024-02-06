@@ -69,7 +69,7 @@ class IntellifireFlameControlEntity(IntellifireEntity, NumberEntity):
         value_to_send: int = int(value) - 1
         LOGGER.debug(
             "%s set flame height to %d with raw value %s",
-            self.name,
+            self._attr_name,
             value,
             value_to_send,
         )

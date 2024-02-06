@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import logging
 
-from aiotankerkoenig import PriceInfo, Station, Status
-
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -25,15 +23,21 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up the tankerkoenig binary sensors."""
+
     coordinator: TankerkoenigDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    async_add_entities(
-        StationOpenBinarySensorEntity(
+    stations = coordinator.stations.values()
+    entities = []
+    for station in stations:
+        sensor = StationOpenBinarySensorEntity(
             station,
             coordinator,
+            coordinator.show_on_map,
         )
-        for station in coordinator.stations.values()
-    )
+        entities.append(sensor)
+    _LOGGER.debug("Added sensors %s", entities)
+
+    async_add_entities(entities)
 
 
 class StationOpenBinarySensorEntity(TankerkoenigCoordinatorEntity, BinarySensorEntity):
@@ -44,21 +48,22 @@ class StationOpenBinarySensorEntity(TankerkoenigCoordinatorEntity, BinarySensorE
 
     def __init__(
         self,
-        station: Station,
+        station: dict,
         coordinator: TankerkoenigDataUpdateCoordinator,
+        show_on_map: bool,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, station)
-        self._station_id = station.id
-        self._attr_unique_id = f"{station.id}_status"
-        if coordinator.show_on_map:
+        self._station_id = station["id"]
+        self._attr_unique_id = f"{station['id']}_status"
+        if show_on_map:
             self._attr_extra_state_attributes = {
-                ATTR_LATITUDE: station.lat,
-                ATTR_LONGITUDE: station.lng,
+                ATTR_LATITUDE: station["lat"],
+                ATTR_LONGITUDE: station["lng"],
             }
 
     @property
     def is_on(self) -> bool | None:
         """Return true if the station is open."""
-        data: PriceInfo = self.coordinator.data[self._station_id]
-        return data is not None and data.status == Status.OPEN
+        data: dict = self.coordinator.data[self._station_id]
+        return data is not None and data.get("status") == "open"

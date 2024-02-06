@@ -1,4 +1,5 @@
 """Test the Evil Genius Labs config flow."""
+import asyncio
 from unittest.mock import patch
 
 import aiohttp
@@ -81,7 +82,7 @@ async def test_form_timeout(hass: HomeAssistant) -> None:
 
     with patch(
         "pyevilgenius.EvilGeniusDevice.get_all",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ):
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],

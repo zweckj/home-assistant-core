@@ -2,46 +2,43 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from functools import partial
 from typing import Any
 
 import lupupy.constants as CONST
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from . import DOMAIN
-from .entity import LupusecBaseSensor
+from . import DOMAIN as LUPUSEC_DOMAIN, LupusecDevice
 
 SCAN_INTERVAL = timedelta(seconds=2)
 
 
-async def async_setup_entry(
+def setup_platform(
     hass: HomeAssistant,
-    config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    config: ConfigType,
+    add_entities: AddEntitiesCallback,
+    discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up Lupusec switch devices."""
+    if discovery_info is None:
+        return
 
-    data = hass.data[DOMAIN][config_entry.entry_id]
+    data = hass.data[LUPUSEC_DOMAIN]
 
     device_types = CONST.TYPE_SWITCH
 
-    switches = []
-    partial_func = partial(data.get_devices, generic_type=device_types)
-    devices = await hass.async_add_executor_job(partial_func)
-    for device in devices:
-        switches.append(LupusecSwitch(device, config_entry.entry_id))
+    devices = []
+    for device in data.lupusec.get_devices(generic_type=device_types):
+        devices.append(LupusecSwitch(data, device))
 
-    async_add_entities(switches)
+    add_entities(devices)
 
 
-class LupusecSwitch(LupusecBaseSensor, SwitchEntity):
+class LupusecSwitch(LupusecDevice, SwitchEntity):
     """Representation of a Lupusec switch."""
-
-    _attr_name = None
 
     def turn_on(self, **kwargs: Any) -> None:
         """Turn on the device."""
@@ -52,6 +49,6 @@ class LupusecSwitch(LupusecBaseSensor, SwitchEntity):
         self._device.switch_off()
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self):
         """Return true if device is on."""
         return self._device.is_on

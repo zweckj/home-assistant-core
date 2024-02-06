@@ -1,5 +1,4 @@
 """ESPHome voice assistant support."""
-
 from __future__ import annotations
 
 import asyncio
@@ -68,7 +67,7 @@ class VoiceAssistantUDPServer(asyncio.DatagramProtocol):
     """Receive UDP packets and forward them to the voice assistant."""
 
     started = False
-    stop_requested = False
+    stopped = False
     transport: asyncio.DatagramTransport | None = None
     remote_addr: tuple[str, int] | None = None
 
@@ -93,11 +92,6 @@ class VoiceAssistantUDPServer(asyncio.DatagramProtocol):
         self._tts_done = asyncio.Event()
         self._tts_task: asyncio.Task | None = None
 
-    @property
-    def is_running(self) -> bool:
-        """True if the the UDP server is started and hasn't been asked to stop."""
-        return self.started and (not self.stop_requested)
-
     async def start_server(self) -> int:
         """Start accepting connections."""
 
@@ -105,7 +99,7 @@ class VoiceAssistantUDPServer(asyncio.DatagramProtocol):
             """Accept connection."""
             if self.started:
                 raise RuntimeError("Can only start once")
-            if self.stop_requested:
+            if self.stopped:
                 raise RuntimeError("No longer accepting connections")
 
             self.started = True
@@ -130,7 +124,7 @@ class VoiceAssistantUDPServer(asyncio.DatagramProtocol):
     @callback
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         """Handle incoming UDP packet."""
-        if not self.is_running:
+        if not self.started or self.stopped:
             return
         if self.remote_addr is None:
             self.remote_addr = addr
@@ -148,19 +142,19 @@ class VoiceAssistantUDPServer(asyncio.DatagramProtocol):
     def stop(self) -> None:
         """Stop the receiver."""
         self.queue.put_nowait(b"")
-        self.close()
+        self.started = False
+        self.stopped = True
 
     def close(self) -> None:
         """Close the receiver."""
         self.started = False
-        self.stop_requested = True
-
+        self.stopped = True
         if self.transport is not None:
             self.transport.close()
 
     async def _iterate_packets(self) -> AsyncIterable[bytes]:
         """Iterate over incoming packets."""
-        if not self.is_running:
+        if not self.started or self.stopped:
             raise RuntimeError("Not running")
 
         while data := await self.queue.get():
@@ -309,11 +303,8 @@ class VoiceAssistantUDPServer(asyncio.DatagramProtocol):
 
     async def _send_tts(self, media_id: str) -> None:
         """Send TTS audio to device via UDP."""
-        # Always send stream start/end events
-        self.handle_event(VoiceAssistantEventType.VOICE_ASSISTANT_TTS_STREAM_START, {})
-
         try:
-            if (not self.is_running) or (self.transport is None):
+            if self.transport is None:
                 return
 
             extension, data = await tts.async_get_media_source_audio(
@@ -346,11 +337,15 @@ class VoiceAssistantUDPServer(asyncio.DatagramProtocol):
 
             _LOGGER.debug("Sending %d bytes of audio", audio_bytes_size)
 
+            self.handle_event(
+                VoiceAssistantEventType.VOICE_ASSISTANT_TTS_STREAM_START, {}
+            )
+
             bytes_per_sample = stt.AudioBitRates.BITRATE_16 // 8
             sample_offset = 0
             samples_left = audio_bytes_size // bytes_per_sample
 
-            while (samples_left > 0) and self.is_running:
+            while samples_left > 0:
                 bytes_offset = sample_offset * bytes_per_sample
                 chunk: bytes = audio_bytes[bytes_offset : bytes_offset + 1024]
                 samples_in_chunk = len(chunk) // bytes_per_sample

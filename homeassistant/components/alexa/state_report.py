@@ -1,6 +1,7 @@
 """Alexa state report code."""
 from __future__ import annotations
 
+import asyncio
 from asyncio import timeout
 from http import HTTPStatus
 import json
@@ -374,7 +375,7 @@ async def async_send_changereport_message(
                 allow_redirects=True,
             )
 
-    except (TimeoutError, aiohttp.ClientError):
+    except (asyncio.TimeoutError, aiohttp.ClientError):
         _LOGGER.error("Timeout sending report to Alexa for %s", alexa_entity.entity_id)
         return
 
@@ -530,7 +531,7 @@ async def async_send_doorbell_event_message(
                 allow_redirects=True,
             )
 
-    except (TimeoutError, aiohttp.ClientError):
+    except (asyncio.TimeoutError, aiohttp.ClientError):
         _LOGGER.error("Timeout sending report to Alexa for %s", alexa_entity.entity_id)
         return
 

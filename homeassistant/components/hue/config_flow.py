@@ -111,7 +111,7 @@ class HueFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 bridges = await discover_nupnp(
                     websession=aiohttp_client.async_get_clientsession(self.hass)
                 )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return self.async_abort(reason="discover_timeout")
 
         if bridges:

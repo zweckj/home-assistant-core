@@ -40,12 +40,7 @@ async def test_create_area(
     area = area_registry.async_create("mock")
 
     assert area == ar.AreaEntry(
-        aliases=set(),
-        icon=None,
-        id=ANY,
-        name="mock",
-        normalized_name=ANY,
-        picture=None,
+        name="mock", normalized_name=ANY, aliases=set(), id=ANY, picture=None
     )
     assert len(area_registry.areas) == 1
 
@@ -61,11 +56,10 @@ async def test_create_area(
     )
 
     assert area == ar.AreaEntry(
-        aliases={"alias_1", "alias_2"},
-        icon=None,
-        id=ANY,
         name="mock 2",
         normalized_name=ANY,
+        aliases={"alias_1", "alias_2"},
+        id=ANY,
         picture="/image/example.png",
     )
     assert len(area_registry.areas) == 2
@@ -145,18 +139,16 @@ async def test_update_area(
     updated_area = area_registry.async_update(
         area.id,
         aliases={"alias_1", "alias_2"},
-        icon="mdi:garage",
         name="mock1",
         picture="/image/example.png",
     )
 
     assert updated_area != area
     assert updated_area == ar.AreaEntry(
-        aliases={"alias_1", "alias_2"},
-        icon="mdi:garage",
-        id=ANY,
         name="mock1",
         normalized_name=ANY,
+        aliases={"alias_1", "alias_2"},
+        id=ANY,
         picture="/image/example.png",
     )
     assert len(area_registry.areas) == 1
@@ -258,7 +250,6 @@ async def test_loading_area_from_storage(
                 {
                     "aliases": ["alias_1", "alias_2"],
                     "id": "12345A",
-                    "icon": "mdi:garage",
                     "name": "mock",
                     "picture": "blah",
                 }
@@ -296,15 +287,7 @@ async def test_migration_from_1_1(
         "minor_version": ar.STORAGE_VERSION_MINOR,
         "key": ar.STORAGE_KEY,
         "data": {
-            "areas": [
-                {
-                    "aliases": [],
-                    "icon": None,
-                    "id": "12345A",
-                    "name": "mock",
-                    "picture": None,
-                }
-            ]
+            "areas": [{"aliases": [], "id": "12345A", "name": "mock", "picture": None}]
         },
     }
 

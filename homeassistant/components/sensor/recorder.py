@@ -36,13 +36,7 @@ from homeassistant.loader import async_suggest_report_issue
 from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
-from .const import (
-    ATTR_LAST_RESET,
-    ATTR_STATE_CLASS,
-    DOMAIN,
-    SensorStateClass,
-    UnitOfVolumeFlowRate,
-)
+from .const import ATTR_LAST_RESET, ATTR_STATE_CLASS, DOMAIN, SensorStateClass
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +52,6 @@ EQUIVALENT_UNITS = {
     "RPM": REVOLUTIONS_PER_MINUTE,
     "ft3": UnitOfVolume.CUBIC_FEET,
     "m3": UnitOfVolume.CUBIC_METERS,
-    "ft³/m": UnitOfVolumeFlowRate.CUBIC_FEET_PER_MINUTE,
 }
 
 # Keep track of entities for which a warning about decreasing value has been logged
@@ -153,22 +146,31 @@ def _equivalent_units(units: set[str | None]) -> bool:
     return len(units) == 1
 
 
+def _parse_float(state: str) -> float:
+    """Parse a float string, throw on inf or nan."""
+    fstate = float(state)
+    if not math.isfinite(fstate):
+        raise ValueError
+    return fstate
+
+
+def _float_or_none(state: str) -> float | None:
+    """Return a float or None."""
+    try:
+        return _parse_float(state)
+    except (ValueError, TypeError):
+        return None
+
+
 def _entity_history_to_float_and_state(
     entity_history: Iterable[State],
 ) -> list[tuple[float, State]]:
     """Return a list of (float, state) tuples for the given entity."""
-    float_states: list[tuple[float, State]] = []
-    append = float_states.append
-    isfinite = math.isfinite
-    for state in entity_history:
-        try:
-            if (float_state := float(state.state)) is not None and isfinite(
-                float_state
-            ):
-                append((float_state, state))
-        except (ValueError, TypeError):
-            pass
-    return float_states
+    return [
+        (fstate, state)
+        for state in entity_history
+        if (fstate := _float_or_none(state.state)) is not None
+    ]
 
 
 def _normalize_states(
@@ -222,14 +224,13 @@ def _normalize_states(
 
     converter = statistics.STATISTIC_UNIT_TO_UNIT_CONVERTER[statistics_unit]
     valid_fstates: list[tuple[float, State]] = []
-    convert: Callable[[float], float] | None = None
+    convert: Callable[[float], float]
     last_unit: str | None | object = object()
-    valid_units = converter.VALID_UNITS
 
     for fstate, state in fstates:
         state_unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
         # Exclude states with unsupported unit from statistics
-        if state_unit not in valid_units:
+        if state_unit not in converter.VALID_UNITS:
             if WARN_UNSUPPORTED_UNIT not in hass.data:
                 hass.data[WARN_UNSUPPORTED_UNIT] = set()
             if entity_id not in hass.data[WARN_UNSUPPORTED_UNIT]:
@@ -248,20 +249,13 @@ def _normalize_states(
                     LINK_DEV_STATISTICS,
                 )
             continue
-
         if state_unit != last_unit:
             # The unit of measurement has changed since the last state change
             # recreate the converter factory
-            if state_unit == statistics_unit:
-                convert = None
-            else:
-                convert = converter.converter_factory(state_unit, statistics_unit)
+            convert = converter.converter_factory(state_unit, statistics_unit)
             last_unit = state_unit
 
-        if convert is not None:
-            fstate = convert(fstate)
-
-        valid_fstates.append((fstate, state))
+        valid_fstates.append((convert(fstate), state))
 
     return statistics_unit, valid_fstates
 

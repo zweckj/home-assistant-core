@@ -1,5 +1,6 @@
 """Constants for the Oncue integration."""
 
+import asyncio
 
 import aiohttp
 from aiooncue import ServiceFailedException
@@ -7,7 +8,7 @@ from aiooncue import ServiceFailedException
 DOMAIN = "oncue"
 
 CONNECTION_EXCEPTIONS = (
-    TimeoutError,
+    asyncio.TimeoutError,
     aiohttp.ClientError,
     ServiceFailedException,
 )

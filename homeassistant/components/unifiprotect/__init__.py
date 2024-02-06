@@ -1,6 +1,7 @@
 """UniFi Protect Platform."""
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import logging
 
@@ -63,7 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         nvr_info = await protect.get_nvr()
     except NotAuthorized as err:
         raise ConfigEntryAuthFailed(err) from err
-    except (TimeoutError, ClientError, ServerDisconnectedError) as err:
+    except (asyncio.TimeoutError, ClientError, ServerDisconnectedError) as err:
         raise ConfigEntryNotReady from err
 
     if nvr_info.version < MIN_REQUIRED_PROTECT_V:

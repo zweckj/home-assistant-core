@@ -4,7 +4,6 @@ reset:
   target:
     entity:
       domain: select
-      integration: utility_meter
 
 calibrate:
   target:

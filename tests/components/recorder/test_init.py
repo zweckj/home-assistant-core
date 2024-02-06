@@ -73,7 +73,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import Context, CoreState, Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er, recorder as recorder_helper
-from homeassistant.helpers.issue_registry import async_get as async_get_issue_registry
 from homeassistant.setup import async_setup_component, setup_component
 from homeassistant.util import dt as dt_util
 from homeassistant.util.json import json_loads
@@ -138,7 +137,7 @@ async def test_shutdown_before_startup_finishes(
         recorder.CONF_DB_URL: recorder_db_url,
         recorder.CONF_COMMIT_INTERVAL: 1,
     }
-    hass.set_state(CoreState.not_running)
+    hass.state = CoreState.not_running
 
     recorder_helper.async_initialize_recorder(hass)
     hass.create_task(async_setup_recorder_instance(hass, config))
@@ -169,7 +168,7 @@ async def test_canceled_before_startup_finishes(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test recorder shuts down when its startup future is canceled out from under it."""
-    hass.set_state(CoreState.not_running)
+    hass.state = CoreState.not_running
     recorder_helper.async_initialize_recorder(hass)
     hass.create_task(async_setup_recorder_instance(hass))
     await recorder_helper.async_wait_recorder(hass)
@@ -193,7 +192,7 @@ async def test_shutdown_closes_connections(
 ) -> None:
     """Test shutdown closes connections."""
 
-    hass.set_state(CoreState.not_running)
+    hass.state = CoreState.not_running
 
     instance = get_instance(hass)
     await instance.async_db_ready
@@ -220,7 +219,7 @@ async def test_state_gets_saved_when_set_before_start_event(
 ) -> None:
     """Test we can record an event when starting with not running."""
 
-    hass.set_state(CoreState.not_running)
+    hass.state = CoreState.not_running
 
     recorder_helper.async_initialize_recorder(hass)
     hass.create_task(async_setup_recorder_instance(hass))
@@ -1767,7 +1766,7 @@ async def test_database_lock_and_unlock(
     task = asyncio.create_task(async_wait_recording_done(hass))
 
     # Recording can't be finished while lock is held
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(asyncio.shield(task), timeout=0.25)
         db_events = await hass.async_add_executor_job(_get_db_events)
         assert len(db_events) == 0
@@ -1832,15 +1831,6 @@ async def test_database_lock_and_overflow(
 
         assert "Database queue backlog reached more than" in caplog.text
         assert not instance.unlock_database()
-
-    registry = async_get_issue_registry(hass)
-    issue = registry.async_get_issue(DOMAIN, "backup_failed_out_of_resources")
-    assert issue is not None
-    assert "start_time" in issue.translation_placeholders
-    start_time = issue.translation_placeholders["start_time"]
-    assert start_time is not None
-    # Should be in H:M:S format
-    assert start_time.count(":") == 2
 
 
 async def test_database_lock_and_overflow_checks_available_memory(
@@ -1919,15 +1909,6 @@ async def test_database_lock_and_overflow_checks_available_memory(
 
         db_events = await instance.async_add_executor_job(_get_db_events)
         assert len(db_events) >= 2
-
-    registry = async_get_issue_registry(hass)
-    issue = registry.async_get_issue(DOMAIN, "backup_failed_out_of_resources")
-    assert issue is not None
-    assert "start_time" in issue.translation_placeholders
-    start_time = issue.translation_placeholders["start_time"]
-    assert start_time is not None
-    # Should be in H:M:S format
-    assert start_time.count(":") == 2
 
 
 async def test_database_lock_timeout(

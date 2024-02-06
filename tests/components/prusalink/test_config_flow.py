@@ -1,4 +1,5 @@
 """Test the PrusaLink config flow."""
+import asyncio
 from unittest.mock import patch
 
 from homeassistant import config_entries
@@ -136,7 +137,7 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
 
     with patch(
         "homeassistant.components.prusalink.config_flow.PrusaLink.get_version",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ):
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],

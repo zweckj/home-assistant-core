@@ -74,7 +74,7 @@ def mutate_rpc_device_status(
 def inject_rpc_device_event(
     monkeypatch: pytest.MonkeyPatch,
     mock_rpc_device: Mock,
-    event: Mapping[str, list[dict[str, Any]] | float],
+    event: dict[str, dict[str, Any]],
 ) -> None:
     """Inject event for rpc device."""
     monkeypatch.setattr(mock_rpc_device, "event", event)
@@ -119,13 +119,6 @@ def register_entity(
         capabilities=capabilities,
     )
     return f"{domain}.{object_id}"
-
-
-def get_entity_state(hass: HomeAssistant, entity_id: str) -> str:
-    """Return entity state."""
-    entity = hass.states.get(entity_id)
-    assert entity
-    return entity.state
 
 
 def register_device(device_reg, config_entry: ConfigEntry):

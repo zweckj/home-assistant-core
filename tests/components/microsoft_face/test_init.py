@@ -1,4 +1,5 @@
 """The tests for the microsoft face platform."""
+import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -338,7 +339,7 @@ async def test_service_status_timeout(
     aioclient_mock.put(
         ENDPOINT_URL.format("persongroups/service_group"),
         status=400,
-        exc=TimeoutError(),
+        exc=asyncio.TimeoutError(),
     )
 
     with assert_setup_component(3, mf.DOMAIN):

@@ -1,4 +1,5 @@
 """Tests for iAqualink integration."""
+import asyncio
 import logging
 from unittest.mock import AsyncMock, patch
 
@@ -55,7 +56,7 @@ async def test_setup_login_timeout(hass: HomeAssistant, config_entry) -> None:
 
     with patch(
         "homeassistant.components.iaqualink.AqualinkClient.login",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ):
         await hass.config_entries.async_setup(config_entry.entry_id)
         await hass.async_block_till_done()

@@ -1,4 +1,5 @@
 """The Nightscout integration."""
+from asyncio import TimeoutError as AsyncIOTimeoutError
 
 from aiohttp import ClientError
 from py_nightscout import Api as NightscoutAPI
@@ -25,7 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     api = NightscoutAPI(server_url, session=session, api_secret=api_key)
     try:
         status = await api.get_server_status()
-    except (ClientError, TimeoutError, OSError) as error:
+    except (ClientError, AsyncIOTimeoutError, OSError) as error:
         raise ConfigEntryNotReady from error
 
     hass.data.setdefault(DOMAIN, {})

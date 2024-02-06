@@ -1,6 +1,7 @@
 """Support for Blink Motion detection switches."""
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from homeassistant.components.switch import (
@@ -73,7 +74,7 @@ class BlinkSwitch(CoordinatorEntity[BlinkUpdateCoordinator], SwitchEntity):
         try:
             await self._camera.async_arm(True)
 
-        except TimeoutError as er:
+        except asyncio.TimeoutError as er:
             raise HomeAssistantError(
                 "Blink failed to arm camera motion detection"
             ) from er
@@ -85,7 +86,7 @@ class BlinkSwitch(CoordinatorEntity[BlinkUpdateCoordinator], SwitchEntity):
         try:
             await self._camera.async_arm(False)
 
-        except TimeoutError as er:
+        except asyncio.TimeoutError as er:
             raise HomeAssistantError(
                 "Blink failed to dis-arm camera motion detection"
             ) from er

@@ -1,5 +1,6 @@
 """Tests for the Rain Bird config flow."""
 
+import asyncio
 from collections.abc import Generator
 from http import HTTPStatus
 from typing import Any
@@ -276,7 +277,7 @@ async def test_controller_timeout(
 
     with patch(
         "homeassistant.components.rainbird.config_flow.asyncio.timeout",
-        side_effect=TimeoutError,
+        side_effect=asyncio.TimeoutError,
     ):
         result = await complete_flow(hass)
         assert result.get("type") == FlowResultType.FORM

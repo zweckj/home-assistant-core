@@ -1,4 +1,5 @@
 """Tests for the Cast integration helpers."""
+import asyncio
 
 from aiohttp import client_exceptions
 import pytest
@@ -140,7 +141,7 @@ async def test_parse_bad_playlist(
 @pytest.mark.parametrize(
     ("url", "exc"),
     (
-        ("http://sverigesradio.se/164-hi-aac.pls", TimeoutError),
+        ("http://sverigesradio.se/164-hi-aac.pls", asyncio.TimeoutError),
         ("http://sverigesradio.se/164-hi-aac.pls", client_exceptions.ClientError),
     ),
 )

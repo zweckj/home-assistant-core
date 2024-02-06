@@ -1,5 +1,6 @@
 """Support for Powerview scenes from a Powerview hub."""
 
+import asyncio
 
 from aiohttp.client_exceptions import ServerDisconnectedError
 from aiopvapi.helpers.aiorequest import PvApiConnectionError, PvApiResponseStatusError
@@ -52,7 +53,7 @@ STATE_ATTRIBUTE_ROOM_NAME = "roomName"
 
 HUB_EXCEPTIONS = (
     ServerDisconnectedError,
-    TimeoutError,
+    asyncio.TimeoutError,
     PvApiConnectionError,
     PvApiResponseStatusError,
 )

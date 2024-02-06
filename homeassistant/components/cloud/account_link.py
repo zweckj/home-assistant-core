@@ -1,6 +1,7 @@
 """Account linking via the cloud."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import logging
 from typing import Any
@@ -68,7 +69,7 @@ async def _get_services(hass: HomeAssistant) -> list[dict[str, Any]]:
 
     try:
         services = await account_link.async_fetch_available_services(hass.data[DOMAIN])
-    except (aiohttp.ClientError, TimeoutError):
+    except (aiohttp.ClientError, asyncio.TimeoutError):
         return []
 
     hass.data[DATA_SERVICES] = services
@@ -113,7 +114,7 @@ class CloudOAuth2Implementation(config_entry_oauth2_flow.AbstractOAuth2Implement
             try:
                 tokens = await helper.async_get_tokens()
 
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 _LOGGER.info("Timeout fetching tokens for flow %s", flow_id)
             except account_link.AccountLinkException as err:
                 _LOGGER.info(

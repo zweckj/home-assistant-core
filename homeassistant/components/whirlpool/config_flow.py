@@ -1,6 +1,7 @@
 """Config flow for Whirlpool Appliances integration."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 import logging
 from typing import Any
@@ -47,7 +48,7 @@ async def validate_input(
     auth = Auth(backend_selector, data[CONF_USERNAME], data[CONF_PASSWORD], session)
     try:
         await auth.do_auth()
-    except (TimeoutError, ClientError) as exc:
+    except (asyncio.TimeoutError, ClientError) as exc:
         raise CannotConnect from exc
 
     if not auth.is_access_token_valid():
@@ -91,7 +92,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await validate_input(self.hass, data)
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
-            except (CannotConnect, TimeoutError):
+            except (CannotConnect, asyncio.TimeoutError):
                 errors["base"] = "cannot_connect"
             else:
                 self.hass.config_entries.async_update_entry(

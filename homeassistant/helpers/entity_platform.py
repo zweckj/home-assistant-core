@@ -145,6 +145,10 @@ class EntityPlatform:
         # which powers entity_component.add_entities
         self.parallel_updates_created = platform is None
 
+        hass.data.setdefault(DATA_ENTITY_PLATFORM, {}).setdefault(
+            self.platform_name, []
+        ).append(self)
+
         self.domain_entities: dict[str, Entity] = hass.data.setdefault(
             DATA_DOMAIN_ENTITIES, {}
         ).setdefault(domain, {})
@@ -306,8 +310,44 @@ class EntityPlatform:
         logger = self.logger
         hass = self.hass
         full_name = f"{self.platform_name}.{self.domain}"
+        object_id_language = (
+            hass.config.language
+            if hass.config.language in languages.NATIVE_ENTITY_IDS
+            else languages.DEFAULT_LANGUAGE
+        )
 
-        await self.async_load_translations()
+        async def get_translations(
+            language: str, category: str, integration: str
+        ) -> dict[str, Any]:
+            """Get entity translations."""
+            try:
+                return await translation.async_get_translations(
+                    hass, language, category, {integration}
+                )
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                _LOGGER.debug(
+                    "Could not load translations for %s",
+                    integration,
+                    exc_info=err,
+                )
+            return {}
+
+        self.component_translations = await get_translations(
+            hass.config.language, "entity_component", self.domain
+        )
+        self.platform_translations = await get_translations(
+            hass.config.language, "entity", self.platform_name
+        )
+        if object_id_language == hass.config.language:
+            self.object_id_component_translations = self.component_translations
+            self.object_id_platform_translations = self.platform_translations
+        else:
+            self.object_id_component_translations = await get_translations(
+                object_id_language, "entity_component", self.domain
+            )
+            self.object_id_platform_translations = await get_translations(
+                object_id_language, "entity", self.platform_name
+            )
 
         logger.info("Setting up %s", full_name)
         warn_task = hass.loop.call_at(
@@ -361,7 +401,7 @@ class EntityPlatform:
                     self._async_cancel_retry_setup = None
                     await self._async_setup_platform(async_create_setup_task, tries)
 
-                if hass.state is CoreState.running:
+                if hass.state == CoreState.running:
                     self._async_cancel_retry_setup = async_call_later(
                         hass, wait_time, setup_again
                     )
@@ -370,7 +410,7 @@ class EntityPlatform:
                         EVENT_HOMEASSISTANT_STARTED, setup_again
                     )
                 return False
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 logger.error(
                     (
                         "Setup of platform %s is taking longer than %s seconds."
@@ -389,48 +429,6 @@ class EntityPlatform:
                 return False
             finally:
                 warn_task.cancel()
-
-    async def _async_get_translations(
-        self, language: str, category: str, integration: str
-    ) -> dict[str, Any]:
-        """Get translations for a language, category, and integration."""
-        try:
-            return await translation.async_get_translations(
-                self.hass, language, category, {integration}
-            )
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            _LOGGER.debug(
-                "Could not load translations for %s",
-                integration,
-                exc_info=err,
-            )
-        return {}
-
-    async def async_load_translations(self) -> None:
-        """Load translations."""
-        hass = self.hass
-        object_id_language = (
-            hass.config.language
-            if hass.config.language in languages.NATIVE_ENTITY_IDS
-            else languages.DEFAULT_LANGUAGE
-        )
-        config_language = hass.config.language
-        self.component_translations = await self._async_get_translations(
-            config_language, "entity_component", self.domain
-        )
-        self.platform_translations = await self._async_get_translations(
-            config_language, "entity", self.platform_name
-        )
-        if object_id_language == config_language:
-            self.object_id_component_translations = self.component_translations
-            self.object_id_platform_translations = self.platform_translations
-        else:
-            self.object_id_component_translations = await self._async_get_translations(
-                object_id_language, "entity_component", self.domain
-            )
-            self.object_id_platform_translations = await self._async_get_translations(
-                object_id_language, "entity", self.platform_name
-            )
 
     def _schedule_add_entities(
         self, new_entities: Iterable[Entity], update_before_add: bool = False
@@ -513,7 +511,7 @@ class EntityPlatform:
         try:
             async with self.hass.timeout.async_timeout(timeout, self.domain):
                 await asyncio.gather(*tasks)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             self.logger.warning(
                 "Timed out adding entities for domain %s with platform %s after %ds",
                 self.domain,
@@ -784,13 +782,6 @@ class EntityPlatform:
         if self._async_unsub_polling is not None:
             self._async_unsub_polling()
             self._async_unsub_polling = None
-
-    @callback
-    def async_prepare(self) -> None:
-        """Register the entity platform in DATA_ENTITY_PLATFORM."""
-        self.hass.data.setdefault(DATA_ENTITY_PLATFORM, {}).setdefault(
-            self.platform_name, []
-        ).append(self)
 
     async def async_destroy(self) -> None:
         """Destroy an entity platform.

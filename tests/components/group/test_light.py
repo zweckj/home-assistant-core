@@ -28,6 +28,9 @@ from homeassistant.components.light import (
     SERVICE_TOGGLE,
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
+    SUPPORT_BRIGHTNESS,
+    SUPPORT_COLOR,
+    SUPPORT_COLOR_TEMP,
     ColorMode,
 )
 from homeassistant.const import (
@@ -275,8 +278,7 @@ async def test_brightness(
     entity0.brightness = 255
 
     entity1 = platform.ENTITIES[1]
-    entity1.supported_color_modes = {ColorMode.BRIGHTNESS}
-    entity1.color_mode = ColorMode.BRIGHTNESS
+    entity1.supported_features = SUPPORT_BRIGHTNESS
 
     assert await async_setup_component(
         hass,
@@ -347,8 +349,7 @@ async def test_color_hs(hass: HomeAssistant, enable_custom_integrations: None) -
     entity0.hs_color = (0, 100)
 
     entity1 = platform.ENTITIES[1]
-    entity1.supported_color_modes = {ColorMode.HS}
-    entity1.color_mode = ColorMode.HS
+    entity1.supported_features = SUPPORT_COLOR
 
     assert await async_setup_component(
         hass,
@@ -696,8 +697,7 @@ async def test_color_temp(
     entity0.color_temp_kelvin = 2
 
     entity1 = platform.ENTITIES[1]
-    entity1.supported_color_modes = {ColorMode.COLOR_TEMP}
-    entity1.color_mode = ColorMode.COLOR_TEMP
+    entity1.supported_features = SUPPORT_COLOR_TEMP
 
     assert await async_setup_component(
         hass,
@@ -837,8 +837,7 @@ async def test_min_max_mireds(
     entity0._attr_max_color_temp_kelvin = 5
 
     entity1 = platform.ENTITIES[1]
-    entity1.supported_color_modes = {ColorMode.COLOR_TEMP}
-    entity1.color_mode = ColorMode.COLOR_TEMP
+    entity1.supported_features = SUPPORT_COLOR_TEMP
     entity1._attr_min_color_temp_kelvin = 1
     entity1._attr_max_color_temp_kelvin = 1234567890
 
@@ -1010,15 +1009,12 @@ async def test_supported_color_modes(
 
     entity0 = platform.ENTITIES[0]
     entity0.supported_color_modes = {ColorMode.COLOR_TEMP, ColorMode.HS}
-    entity0.color_mode = ColorMode.UNKNOWN
 
     entity1 = platform.ENTITIES[1]
     entity1.supported_color_modes = {ColorMode.RGBW, ColorMode.RGBWW}
-    entity1.color_mode = ColorMode.UNKNOWN
 
     entity2 = platform.ENTITIES[2]
-    entity2.supported_color_modes = {ColorMode.BRIGHTNESS}
-    entity2.color_mode = ColorMode.UNKNOWN
+    entity2.supported_features = SUPPORT_BRIGHTNESS
 
     assert await async_setup_component(
         hass,
@@ -1040,6 +1036,7 @@ async def test_supported_color_modes(
 
     state = hass.states.get("light.light_group")
     assert set(state.attributes[ATTR_SUPPORTED_COLOR_MODES]) == {
+        "brightness",
         "color_temp",
         "hs",
         "rgbw",
@@ -1186,7 +1183,6 @@ async def test_color_mode2(
     await hass.async_block_till_done()
 
     state = hass.states.get("light.light_group")
-    assert state.attributes[ATTR_SUPPORTED_COLOR_MODES] == [ColorMode.COLOR_TEMP]
     assert state.attributes[ATTR_COLOR_MODE] == ColorMode.COLOR_TEMP
 
     await hass.services.async_call(
@@ -1197,8 +1193,7 @@ async def test_color_mode2(
     )
     await hass.async_block_till_done()
     state = hass.states.get("light.light_group")
-    assert state.attributes[ATTR_SUPPORTED_COLOR_MODES] == [ColorMode.COLOR_TEMP]
-    assert state.attributes[ATTR_COLOR_MODE] == ColorMode.COLOR_TEMP
+    assert state.attributes[ATTR_COLOR_MODE] == ColorMode.BRIGHTNESS
 
 
 async def test_supported_features(hass: HomeAssistant) -> None:
