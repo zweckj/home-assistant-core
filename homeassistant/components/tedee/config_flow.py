@@ -24,6 +24,9 @@ from .const import CONF_LOCAL_ACCESS_TOKEN, DOMAIN, NAME
 class TedeeConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Tedee."""
 
+    VERSION = 1
+    MINOR_VERSION = 1
+
     reauth_entry: ConfigEntry | None = None
 
     async def async_step_user(

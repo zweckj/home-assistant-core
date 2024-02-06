@@ -3,8 +3,6 @@
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 import logging
-import secrets
-import string
 from typing import Any
 
 from aiohttp.hdrs import METH_POST
@@ -13,6 +11,7 @@ from pytedee_async.exception import TedeeWebhookException
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.webhook import (
+    async_generate_id as webhook_generate_id,
     async_generate_path as webhook_generate_path,
     async_register as webhook_register,
     async_unregister as webhook_unregister,
@@ -54,41 +53,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-    def generate_api_key(length: int = 16) -> str:
-        characters = string.ascii_letters + string.digits
-        password = "".join(secrets.choice(characters) for _ in range(length))
-        return password
-
     async def unregister_webhook(_: Any) -> None:
         await coordinator.async_unregister_webhook()
         webhook_unregister(hass, entry.data[CONF_WEBHOOK_ID])
 
     async def register_webhook() -> None:
-        # webhook_url = webhook_generate_url(hass, entry.data[CONF_WEBHOOK_ID])
-        webhook_url = (
-            f"http://192.168.1.114:8123/api/webhook/{entry.data[CONF_WEBHOOK_ID]}"
-        )
         webhook_url = f"{get_url(hass, allow_external=False)}{webhook_generate_path(entry.data[CONF_WEBHOOK_ID])}"
         webhook_name = "Tedee"
         if entry.title != NAME:
             webhook_name = f"{NAME} {entry.title}"
-
-        api_key = generate_api_key()
 
         webhook_register(
             hass,
             DOMAIN,
             webhook_name,
             entry.data[CONF_WEBHOOK_ID],
-            get_webhook_handler(coordinator, api_key),
+            get_webhook_handler(coordinator),
             allowed_methods=[METH_POST],
         )
         _LOGGER.warning("Registered Tedee webhook at hass: %s", webhook_url)
 
         try:
-            await coordinator.async_register_webhook(
-                webhook_url, headers=[{"Authorization": api_key}]
-            )
+            await coordinator.async_register_webhook(webhook_url)
         except TedeeWebhookException as ex:
             _LOGGER.warning("Failed to register Tedee webhook from bridge: %s", ex)
         else:
@@ -115,7 +101,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 def get_webhook_handler(
     coordinator: TedeeApiCoordinator,
-    api_key: str,
 ) -> Callable[[HomeAssistant, str, Request], Awaitable[Response | None]]:
     """Return webhook handler."""
 
@@ -126,11 +111,6 @@ def get_webhook_handler(
         if not request.body_exists:
             return HomeAssistantView.json(
                 result="No Body", status_code=HTTPStatus.BAD_REQUEST
-            )
-
-        if request.headers.get("Authorization") != api_key:
-            return HomeAssistantView.json(
-                result="Unauthorized", status_code=HTTPStatus.UNAUTHORIZED
             )
 
         body = await request.json()
@@ -144,3 +124,19 @@ def get_webhook_handler(
         return HomeAssistantView.json(result="OK", status_code=HTTPStatus.OK)
 
     return async_webhook_handler
+
+
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old entry."""
+    version = config_entry.version
+    minor_version = config_entry.minor_version
+    _LOGGER.debug(
+        "Migrating Tedee config entry from version %s.%s", version, minor_version
+    )
+
+    if version == 1 and minor_version == 0:
+        config_entry.minor_version = 1
+        data = {**config_entry.data, CONF_WEBHOOK_ID: webhook_generate_id()}
+        hass.config_entries.async_update_entry(config_entry, data=data)
+        _LOGGER.debug("Migration to version 1.1 successful")
+    return True

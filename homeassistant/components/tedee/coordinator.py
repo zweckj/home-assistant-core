@@ -112,11 +112,9 @@ class TedeeApiCoordinator(DataUpdateCoordinator[dict[int, TedeeLock]]):
         self.tedee_client.parse_webhook_message(message)
         self.async_set_updated_data(self.tedee_client.locks_dict)
 
-    async def async_register_webhook(self, webhook_url: str, headers: list) -> None:
+    async def async_register_webhook(self, webhook_url: str) -> None:
         """Register the webhook at the Tedee bridge."""
-        self.tedee_webhook_id = await self.tedee_client.register_webhook(
-            webhook_url, headers
-        )
+        self.tedee_webhook_id = await self.tedee_client.register_webhook(webhook_url)
 
     async def async_unregister_webhook(self) -> None:
         """Unregister the webhook at the Tedee bridge."""
