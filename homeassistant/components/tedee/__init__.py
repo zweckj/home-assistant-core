@@ -58,7 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         webhook_unregister(hass, entry.data[CONF_WEBHOOK_ID])
 
     async def register_webhook() -> None:
-        webhook_url = f"{get_url(hass, allow_external=False)}{webhook_generate_path(entry.data[CONF_WEBHOOK_ID])}"
+        webhook_url = f"{get_url(hass, allow_ip=True, allow_external=False)}{webhook_generate_path(entry.data[CONF_WEBHOOK_ID])}"
         webhook_name = "Tedee"
         if entry.title != NAME:
             webhook_name = f"{NAME} {entry.title}"
