@@ -1,16 +1,27 @@
 """Config flow for La Marzocco integration."""
+
 from collections.abc import Mapping
 import logging
 from typing import Any
 
-from lmcloud import LMCloud as LaMarzoccoClient
+from lmcloud.client_cloud import LaMarzoccoCloudClient
+from lmcloud.client_local import LaMarzoccoLocalClient
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
+from lmcloud.models import LaMarzoccoDeviceInfo
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_MODEL,
+    CONF_NAME,
+    CONF_PASSWORD,
+    CONF_TOKEN,
+    CONF_USERNAME,
+)
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.selector import (
     SelectOptionDict,
     SelectSelector,
@@ -26,12 +37,14 @@ _LOGGER = logging.getLogger(__name__)
 class LmConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for La Marzocco."""
 
+    VERSION = 2
+
     def __init__(self) -> None:
         """Initialize the config flow."""
 
         self.reauth_entry: ConfigEntry | None = None
         self._config: dict[str, Any] = {}
-        self._machines: list[tuple[str, str]] = []
+        self._fleet: dict[str, LaMarzoccoDeviceInfo] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -49,9 +62,12 @@ class LmConfigFlow(ConfigFlow, domain=DOMAIN):
                 **user_input,
             }
 
-            lm = LaMarzoccoClient()
+            cloud_client = LaMarzoccoCloudClient(
+                username=data[CONF_USERNAME],
+                password=data[CONF_PASSWORD],
+            )
             try:
-                self._machines = await lm.get_all_machines(data)
+                self._fleet = await cloud_client.get_customer_fleet()
             except AuthFail:
                 _LOGGER.debug("Server rejected login credentials")
                 errors["base"] = "invalid_auth"
@@ -59,7 +75,7 @@ class LmConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.error("Error connecting to server: %s", exc)
                 errors["base"] = "cannot_connect"
             else:
-                if not self._machines:
+                if not self._fleet:
                     errors["base"] = "no_machines"
 
             if not errors:
@@ -97,28 +113,35 @@ class LmConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(serial_number)
             self._abort_if_unique_id_configured()
 
+            selected_device = self._fleet[CONF_MACHINE]
+
             # validate local connection if host is provided
             if user_input.get(CONF_HOST):
-                lm = LaMarzoccoClient()
-                if not await lm.check_local_connection(
-                    credentials=self._config,
+                if not await LaMarzoccoLocalClient.validate_connection(
+                    client=get_async_client(self.hass),
                     host=user_input[CONF_HOST],
-                    serial=serial_number,
+                    token=selected_device.communication_key,
                 ):
                     errors[CONF_HOST] = "cannot_connect"
 
             if not errors:
                 return self.async_create_entry(
                     title=serial_number,
-                    data=self._config | user_input,
+                    data={
+                        **self._config,
+                        **user_input,
+                        CONF_NAME: selected_device.name,
+                        CONF_MODEL: selected_device.model,
+                        CONF_TOKEN: selected_device.communication_key,
+                    },
                 )
 
         machine_options = [
             SelectOptionDict(
                 value=serial_number,
-                label=f"{model_name} ({serial_number})",
+                label=f"{device.model} ({device.serial_number})",
             )
-            for serial_number, model_name in self._machines
+            for device in self._fleet.values()
         ]
 
         machine_selection_schema = vol.Schema(

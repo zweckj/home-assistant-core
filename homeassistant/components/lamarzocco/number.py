@@ -4,8 +4,8 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
-from lmcloud import LMCloud as LaMarzoccoClient
-from lmcloud.const import LaMarzoccoModel
+from lmcloud.const import BoilerType, MachineModel
+from lmcloud.lm_machine import LaMarzoccoMachine
 
 from homeassistant.components.number import (
     NumberDeviceClass,
@@ -23,7 +23,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import LaMarzoccoUpdateCoordinator
+from .coordinator import LaMarzoccoMachineUpdateCoordinator
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 
 
@@ -34,9 +34,9 @@ class LaMarzoccoNumberEntityDescription(
 ):
     """Description of a La Marzocco number entity."""
 
-    native_value_fn: Callable[[LaMarzoccoClient], float | int]
+    native_value_fn: Callable[[LaMarzoccoMachine], float | int]
     set_value_fn: Callable[
-        [LaMarzoccoUpdateCoordinator, float | int], Coroutine[Any, Any, bool]
+        [LaMarzoccoMachineUpdateCoordinator, float | int], Coroutine[Any, Any, bool]
     ]
 
 
@@ -49,8 +49,12 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_step=PRECISION_TENTHS,
         native_min_value=85,
         native_max_value=104,
-        set_value_fn=lambda coordinator, temp: coordinator.lm.set_coffee_temp(temp),
-        native_value_fn=lambda lm: lm.current_status["coffee_set_temp"],
+        set_value_fn=lambda coordinator, temp: coordinator.device.set_temp(
+            BoilerType.COFFEE, temp
+        ),
+        native_value_fn=lambda device: device.config.boilers[
+            BoilerType.COFFEE
+        ].target_temperature,
     ),
     LaMarzoccoNumberEntityDescription(
         key="steam_temp",
@@ -60,12 +64,16 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_step=PRECISION_WHOLE,
         native_min_value=126,
         native_max_value=131,
-        set_value_fn=lambda coordinator, temp: coordinator.lm.set_steam_temp(int(temp)),
-        native_value_fn=lambda lm: lm.current_status["steam_set_temp"],
-        supported_fn=lambda coordinator: coordinator.lm.model_name
+        set_value_fn=lambda coordinator, temp: coordinator.device.set_temp(
+            BoilerType.STEAM, temp
+        ),
+        native_value_fn=lambda device: device.config.boilers[
+            BoilerType.STEAM
+        ].target_temperature,
+        supported_fn=lambda coordinator: coordinator.device.model
         in (
-            LaMarzoccoModel.GS3_AV,
-            LaMarzoccoModel.GS3_MP,
+            MachineModel.GS3_AV,
+            MachineModel.GS3_MP,
         ),
     ),
     LaMarzoccoNumberEntityDescription(
@@ -76,14 +84,14 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
         native_step=PRECISION_WHOLE,
         native_min_value=0,
         native_max_value=30,
-        set_value_fn=lambda coordinator, value: coordinator.lm.set_dose_hot_water(
-            value=int(value)
+        set_value_fn=lambda coordinator, value: coordinator.device.set_dose_tea_water(
+            int(value)
         ),
-        native_value_fn=lambda lm: lm.current_status["dose_hot_water"],
-        supported_fn=lambda coordinator: coordinator.lm.model_name
+        native_value_fn=lambda device: device.config.dose_hot_water,
+        supported_fn=lambda coordinator: coordinator.device.model
         in (
-            LaMarzoccoModel.GS3_AV,
-            LaMarzoccoModel.GS3_MP,
+            MachineModel.GS3_AV,
+            MachineModel.GS3_MP,
         ),
     ),
 )
@@ -112,7 +120,7 @@ class LaMarzoccoNumberEntity(LaMarzoccoEntity, NumberEntity):
     @property
     def native_value(self) -> float:
         """Return the current value."""
-        return self.entity_description.native_value_fn(self.coordinator.lm)
+        return self.entity_description.native_value_fn(self.coordinator.device)
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
