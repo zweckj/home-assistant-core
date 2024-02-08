@@ -43,7 +43,7 @@ ENTITIES: tuple[LaMarzoccoSwitchEntityDescription, ...] = (
         translation_key="auto_on_off",
         control_fn=lambda coordinator,
         enabled: coordinator.device.enable_schedule_globally(enabled),
-        is_on_fn=lambda coordinator: coordinator.device.config.auto_on_off_enabled,
+        is_on_fn=lambda coordinator: coordinator.device.config.auto_on_off_schedule.enabled,
         entity_category=EntityCategory.CONFIG,
     ),
     LaMarzoccoSwitchEntityDescription(

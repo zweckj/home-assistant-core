@@ -73,15 +73,15 @@
         "state": {
           "disabled": "Disabled",
           "prebrew": "Prebrew",
-          "preinfusion": "Preinfusion"
+          "typeb": "Preinfusion"
         }
       },
       "steam_temp_select": {
         "name": "Steam level",
         "state": {
-          "1": "1",
-          "2": "2",
-          "3": "3"
+          "126": "1",
+          "128": "2",
+          "131": "3"
         }
       }
     },

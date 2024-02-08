@@ -6,14 +6,14 @@
       'options': list([
         'disabled',
         'prebrew',
-        'preinfusion',
+        'typeb',
       ]),
     }),
     'context': <ANY>,
     'entity_id': 'select.gs01234_prebrew_infusion_mode',
     'last_changed': <ANY>,
     'last_updated': <ANY>,
-    'state': 'unknown',
+    'state': 'typeb',
   })
 # ---
 # name: test_pre_brew_infusion_select[GS3 AV].1
@@ -25,7 +25,7 @@
       'options': list([
         'disabled',
         'prebrew',
-        'preinfusion',
+        'typeb',
       ]),
     }),
     'config_entry_id': <ANY>,
@@ -60,14 +60,14 @@
       'options': list([
         'disabled',
         'prebrew',
-        'preinfusion',
+        'typeb',
       ]),
     }),
     'context': <ANY>,
     'entity_id': 'select.lm01234_prebrew_infusion_mode',
     'last_changed': <ANY>,
     'last_updated': <ANY>,
-    'state': 'unknown',
+    'state': 'typeb',
   })
 # ---
 # name: test_pre_brew_infusion_select[Linea Mini].1
@@ -79,7 +79,7 @@
       'options': list([
         'disabled',
         'prebrew',
-        'preinfusion',
+        'typeb',
       ]),
     }),
     'config_entry_id': <ANY>,
@@ -114,14 +114,14 @@
       'options': list([
         'disabled',
         'prebrew',
-        'preinfusion',
+        'typeb',
       ]),
     }),
     'context': <ANY>,
     'entity_id': 'select.mr01234_prebrew_infusion_mode',
     'last_changed': <ANY>,
     'last_updated': <ANY>,
-    'state': 'unknown',
+    'state': 'typeb',
   })
 # ---
 # name: test_pre_brew_infusion_select[Micra].1
@@ -133,7 +133,7 @@
       'options': list([
         'disabled',
         'prebrew',
-        'preinfusion',
+        'typeb',
       ]),
     }),
     'config_entry_id': <ANY>,
@@ -166,16 +166,16 @@
     'attributes': ReadOnlyDict({
       'friendly_name': 'MR01234 Steam level',
       'options': list([
-        '1',
-        '2',
-        '3',
+        '126',
+        '128',
+        '131',
       ]),
     }),
     'context': <ANY>,
     'entity_id': 'select.mr01234_steam_level',
     'last_changed': <ANY>,
     'last_updated': <ANY>,
-    'state': '3',
+    'state': '126',
   })
 # ---
 # name: test_steam_boiler_level[Micra].1
@@ -185,9 +185,9 @@
     'area_id': None,
     'capabilities': dict({
       'options': list([
-        '1',
-        '2',
-        '3',
+        '126',
+        '128',
+        '131',
       ]),
     }),
     'config_entry_id': <ANY>,

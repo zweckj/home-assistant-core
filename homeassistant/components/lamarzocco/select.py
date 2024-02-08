@@ -16,6 +16,12 @@ from .const import DOMAIN
 from .coordinator import LaMarzoccoMachineUpdateCoordinator
 from .entity import LaMarzoccoEntity, LaMarzoccoEntityDescription
 
+PBREWBREW_MODE_HA_TO_LM = {
+    "disabled": PrebrewMode.DISABLED,
+    "prebrew": PrebrewMode.PREBREW,
+    "typeb": PrebrewMode.PREINFUSION,
+}
+
 
 @dataclass(frozen=True, kw_only=True)
 class LaMarzoccoSelectEntityDescription(
@@ -34,7 +40,7 @@ ENTITIES: tuple[LaMarzoccoSelectEntityDescription, ...] = (
     LaMarzoccoSelectEntityDescription(
         key="steam_temp_select",
         translation_key="steam_temp_select",
-        options=["1", "2", "3"],
+        options=["126", "128", "131"],
         select_option_fn=lambda coordinator, option: coordinator.device.set_steam_level(
             SteamLevel(int(option))
         ),
@@ -45,9 +51,9 @@ ENTITIES: tuple[LaMarzoccoSelectEntityDescription, ...] = (
     LaMarzoccoSelectEntityDescription(
         key="prebrew_infusion_select",
         translation_key="prebrew_infusion_select",
-        options=["disabled", "prebrew", "preinfusion"],
+        options=["disabled", "prebrew", "typeb"],
         select_option_fn=lambda coordinator,
-        option: coordinator.device.set_prebrew_mode(PrebrewMode(option.capitalize())),
+        option: coordinator.device.set_prebrew_mode(PBREWBREW_MODE_HA_TO_LM[option]),
         current_option_fn=lambda device: device.config.prebrew_mode.lower(),
         supported_fn=lambda coordinator: coordinator.device.model
         in (

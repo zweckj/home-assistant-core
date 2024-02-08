@@ -1,9 +1,8 @@
 """Tests for the La Marzocco number entities."""
 
-
 from unittest.mock import MagicMock
 
-from lmcloud.const import LaMarzoccoModel
+from lmcloud.const import BoilerType, MachineModel
 import pytest
 from syrupy import SnapshotAssertion
 
@@ -53,18 +52,23 @@ async def test_coffee_boiler(
         blocking=True,
     )
 
-    assert len(mock_lamarzocco.set_coffee_temp.mock_calls) == 1
-    mock_lamarzocco.set_coffee_temp.assert_called_once_with(temperature=95)
+    assert len(mock_lamarzocco.set_temp.mock_calls) == 1
+    mock_lamarzocco.set_temp.assert_called_once_with(
+        boiler=BoilerType.COFFEE, temperature=95
+    )
 
 
-@pytest.mark.parametrize(
-    "device_fixture", [LaMarzoccoModel.GS3_AV, LaMarzoccoModel.GS3_MP]
-)
+@pytest.mark.parametrize("device_fixture", [MachineModel.GS3_AV, MachineModel.GS3_MP])
 @pytest.mark.parametrize(
     ("entity_name", "value", "func_name", "kwargs"),
     [
-        ("steam_target_temperature", 131, "set_steam_temp", {"temperature": 131}),
-        ("tea_water_duration", 15, "set_dose_hot_water", {"value": 15}),
+        (
+            "steam_target_temperature",
+            131,
+            "set_temp",
+            {"boiler": BoilerType.STEAM, "temperature": 131},
+        ),
+        ("tea_water_duration", 15, "set_dose_tea_water", {"dose": 15}),
     ],
 )
 async def test_gs3_exclusive(
@@ -112,7 +116,7 @@ async def test_gs3_exclusive(
 
 
 @pytest.mark.parametrize(
-    "device_fixture", [LaMarzoccoModel.LINEA_MICRA, LaMarzoccoModel.LINEA_MINI]
+    "device_fixture", [MachineModel.LINEA_MICRA, MachineModel.LINEA_MINI]
 )
 async def test_gs3_exclusive_none(
     hass: HomeAssistant,

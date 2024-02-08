@@ -1,4 +1,5 @@
 """Tests for La Marzocco switches."""
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,7 +21,7 @@ pytestmark = pytest.mark.usefixtures("init_integration")
     ("entity_name", "method_name"),
     [
         ("", "set_power"),
-        ("_auto_on_off", "set_auto_on_off_global"),
+        ("_auto_on_off", "enable_schedule_globally"),
         ("_steam_boiler", "set_steam"),
     ],
 )

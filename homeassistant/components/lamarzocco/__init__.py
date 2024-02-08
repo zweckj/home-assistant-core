@@ -18,7 +18,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 
-from .const import CONF_MACHINE, DOMAIN
+from .const import DOMAIN
 from .coordinator import LaMarzoccoMachineUpdateCoordinator
 
 PLATFORMS = [
@@ -73,7 +73,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except (AuthFail, RequestNotSuccessful) as exc:
             raise ConfigEntryError("Migration failed") from exc
 
-        device = fleet[CONF_MACHINE]
+        assert entry.unique_id
+        device = fleet[entry.unique_id]
 
         entry.version = 2
         hass.config_entries.async_update_entry(
