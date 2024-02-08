@@ -10,14 +10,7 @@ from lmcloud.models import LaMarzoccoDeviceInfo
 import pytest
 
 from homeassistant.components.lamarzocco.const import CONF_MACHINE, DOMAIN
-from homeassistant.const import (
-    CONF_HOST,
-    CONF_MODEL,
-    CONF_NAME,
-    CONF_PASSWORD,
-    CONF_TOKEN,
-    CONF_USERNAME,
-)
+from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_NAME, CONF_TOKEN
 from homeassistant.core import HomeAssistant
 
 from . import USER_INPUT, async_init_integration
@@ -37,8 +30,6 @@ def mock_config_entry(mock_lamarzocco: MagicMock) -> MockConfigEntry:
             CONF_MACHINE: mock_lamarzocco.serial_number,
             CONF_MODEL: mock_lamarzocco.model,
             CONF_HOST: "host",
-            CONF_USERNAME: "username",
-            CONF_PASSWORD: "password",
             CONF_TOKEN: "token",
             CONF_NAME: "GS3",
         },
@@ -76,10 +67,16 @@ def mock_device_info() -> LaMarzoccoDeviceInfo:
 @pytest.fixture
 def mock_cloud_client(mock_device_info: LaMarzoccoDeviceInfo) -> MagicMock:
     """Return a mocked LM cloud client."""
-    with patch(
-        "homeassistant.components.lamarzocco.config_flow.LaMarzoccoCloudClient",
-        autospec=True,
-    ) as cloud_client:
+    with (
+        patch(
+            "homeassistant.components.lamarzocco.config_flow.LaMarzoccoCloudClient",
+            autospec=True,
+        ) as cloud_client,
+        patch(
+            "homeassistant.components.lamarzocco.LaMarzoccoCloudClient",
+            new=cloud_client,
+        ),
+    ):
         client = cloud_client.return_value
         client.get_customer_fleet.return_value = {
             mock_device_info.serial_number: mock_device_info

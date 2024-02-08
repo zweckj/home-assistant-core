@@ -4,9 +4,12 @@ from unittest.mock import MagicMock
 
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 
-from homeassistant.components.lamarzocco.const import DOMAIN
+from homeassistant.components.lamarzocco.const import CONF_MACHINE, DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
+from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
+
+from . import USER_INPUT
 
 from tests.common import MockConfigEntry
 
@@ -69,3 +72,29 @@ async def test_invalid_auth(
     assert "context" in flow
     assert flow["context"].get("source") == SOURCE_REAUTH
     assert flow["context"].get("entry_id") == mock_config_entry.entry_id
+
+
+async def test_v1_migration(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_cloud_client: MagicMock,
+    mock_lamarzocco: MagicMock,
+) -> None:
+    """Test v1 -> v2 Migration."""
+    entry_v1 = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        unique_id=mock_lamarzocco.serial_number,
+        data={
+            **USER_INPUT,
+            CONF_HOST: "host",
+            CONF_MACHINE: mock_lamarzocco.serial_number,
+        },
+    )
+
+    entry_v1.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry_v1.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry_v1.version == 2
+    assert entry_v1.data == mock_config_entry.data
