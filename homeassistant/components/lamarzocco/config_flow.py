@@ -113,7 +113,7 @@ class LmConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(serial_number)
             self._abort_if_unique_id_configured()
 
-            selected_device = self._fleet[CONF_MACHINE]
+            selected_device = self._fleet[serial_number]
 
             # validate local connection if host is provided
             if user_input.get(CONF_HOST):
@@ -138,7 +138,7 @@ class LmConfigFlow(ConfigFlow, domain=DOMAIN):
 
         machine_options = [
             SelectOptionDict(
-                value=serial_number,
+                value=device.serial_number,
                 label=f"{device.model} ({device.serial_number})",
             )
             for device in self._fleet.values()

@@ -18,12 +18,12 @@
     }),
     'is_new': False,
     'manufacturer': 'La Marzocco',
-    'model': 'GS3 AV',
+    'model': <MachineModel.GS3_AV: 'GS3 AV'>,
     'name': 'GS01234',
     'name_by_user': None,
     'serial_number': 'GS01234',
     'suggested_area': None,
-    'sw_version': '1.1',
+    'sw_version': '1.40',
     'via_device_id': None,
   })
 # ---
@@ -67,6 +67,49 @@
     'supported_features': 0,
     'translation_key': 'main',
     'unique_id': 'GS01234_main',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_switches[_auto_on_off-enable_schedule_globally]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'friendly_name': 'GS01234 Auto on/off',
+    }),
+    'context': <ANY>,
+    'entity_id': 'switch.gs01234_auto_on_off',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'on',
+  })
+# ---
+# name: test_switches[_auto_on_off-enable_schedule_globally].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'switch',
+    'entity_category': <EntityCategory.CONFIG: 'config'>,
+    'entity_id': 'switch.gs01234_auto_on_off',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Auto on/off',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'auto_on_off',
+    'unique_id': 'GS01234_auto_on_off',
     'unit_of_measurement': None,
   })
 # ---

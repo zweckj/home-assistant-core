@@ -4,7 +4,6 @@ from collections.abc import Callable, Generator
 import json
 from unittest.mock import MagicMock, patch
 
-from lmcloud.client_cloud import LaMarzoccoCloudClient
 from lmcloud.const import FirmwareType, MachineModel, SteamLevel
 from lmcloud.lm_machine import LaMarzoccoMachine
 from lmcloud.models import LaMarzoccoDeviceInfo
@@ -64,23 +63,27 @@ def device_fixture() -> MachineModel:
 
 
 @pytest.fixture
-def mock_cloud_client() -> LaMarzoccoCloudClient:
+def mock_device_info() -> LaMarzoccoDeviceInfo:
+    """Return a mocked La Marzocco device info."""
+    return LaMarzoccoDeviceInfo(
+        model=MachineModel.GS3_AV,
+        serial_number="GS01234",
+        name="GS3",
+        communication_key="token",
+    )
+
+
+@pytest.fixture
+def mock_cloud_client(mock_device_info: LaMarzoccoDeviceInfo) -> MagicMock:
     """Return a mocked LM cloud client."""
     with patch(
         "homeassistant.components.lamarzocco.config_flow.LaMarzoccoCloudClient",
         autospec=True,
     ) as cloud_client:
         client = cloud_client.return_value
-        client.get_customer_fleet.return_value = [
-            {
-                "GS01234": LaMarzoccoDeviceInfo(
-                    model=MachineModel.GS3_AV,
-                    serial_number="GS01234",
-                    name="GS3",
-                    communication_key="token",
-                ),
-            }
-        ]
+        client.get_customer_fleet.return_value = {
+            mock_device_info.serial_number: mock_device_info
+        }
         yield client
 
 
