@@ -8,7 +8,13 @@ from lmcloud.models import LaMarzoccoDeviceInfo
 from homeassistant import config_entries
 from homeassistant.components.lamarzocco.config_flow import CONF_MACHINE
 from homeassistant.components.lamarzocco.const import DOMAIN
-from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_NAME, CONF_TOKEN
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_MODEL,
+    CONF_NAME,
+    CONF_PASSWORD,
+    CONF_TOKEN,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
 
@@ -228,33 +234,35 @@ async def test_form_cannot_connect(
     await __do_sucessful_machine_selection_step(hass, result2, mock_device_info)
 
 
-# async def test_reauth_flow(
-#     hass: HomeAssistant, mock_lamarzocco: MagicMock, mock_config_entry: MockConfigEntry
-# ) -> None:
-#     """Test that the reauth flow."""
+async def test_reauth_flow(
+    hass: HomeAssistant,
+    mock_cloud_client: MagicMock,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test that the reauth flow."""
 
-#     mock_config_entry.add_to_hass(hass)
+    mock_config_entry.add_to_hass(hass)
 
-#     result = await hass.config_entries.flow.async_init(
-#         DOMAIN,
-#         context={
-#             "source": SOURCE_REAUTH,
-#             "unique_id": mock_config_entry.unique_id,
-#             "entry_id": mock_config_entry.entry_id,
-#         },
-#         data=mock_config_entry.data,
-#     )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_REAUTH,
+            "unique_id": mock_config_entry.unique_id,
+            "entry_id": mock_config_entry.entry_id,
+        },
+        data=mock_config_entry.data,
+    )
 
-#     assert result["type"] == FlowResultType.FORM
-#     assert result["step_id"] == "reauth_confirm"
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
 
-#     result2 = await hass.config_entries.flow.async_configure(
-#         result["flow_id"],
-#         {CONF_PASSWORD: "new_password"},
-#     )
+    result2 = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_PASSWORD: "new_password"},
+    )
 
-#     assert result2["type"] == FlowResultType.ABORT
-#     await hass.async_block_till_done()
-#     assert result2["reason"] == "reauth_successful"
-#     assert len(mock_lamarzocco.get_all_machines.mock_calls) == 1
-#     assert mock_config_entry.data[CONF_PASSWORD] == "new_password"
+    assert result2["type"] == FlowResultType.ABORT
+    await hass.async_block_till_done()
+    assert result2["reason"] == "reauth_successful"
+    assert len(mock_cloud_client.get_customer_fleet.mock_calls) == 1
+    assert mock_config_entry.data[CONF_PASSWORD] == "new_password"
