@@ -3,5 +3,3 @@
 from typing import Final
 
 DOMAIN: Final = "lamarzocco"
-
-CONF_MACHINE: Final = "machine"

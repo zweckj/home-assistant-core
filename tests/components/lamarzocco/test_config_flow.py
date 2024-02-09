@@ -6,7 +6,8 @@ from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 from lmcloud.models import LaMarzoccoDeviceInfo
 
 from homeassistant import config_entries
-from homeassistant.components.lamarzocco.const import CONF_MACHINE, DOMAIN
+from homeassistant.components.lamarzocco.config_flow import CONF_MACHINE
+from homeassistant.components.lamarzocco.const import DOMAIN
 from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_NAME, CONF_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
@@ -55,7 +56,6 @@ async def __do_sucessful_machine_selection_step(
     assert result3["data"] == {
         **USER_INPUT,
         CONF_HOST: "192.168.1.1",
-        CONF_MACHINE: mock_device_info.serial_number,
         CONF_MODEL: mock_device_info.model,
         CONF_NAME: mock_device_info.name,
         CONF_TOKEN: mock_device_info.communication_key,

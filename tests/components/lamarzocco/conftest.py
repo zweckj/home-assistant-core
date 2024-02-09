@@ -9,7 +9,7 @@ from lmcloud.lm_machine import LaMarzoccoMachine
 from lmcloud.models import LaMarzoccoDeviceInfo
 import pytest
 
-from homeassistant.components.lamarzocco.const import CONF_MACHINE, DOMAIN
+from homeassistant.components.lamarzocco.const import DOMAIN
 from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_NAME, CONF_TOKEN
 from homeassistant.core import HomeAssistant
 
@@ -27,7 +27,6 @@ def mock_config_entry(mock_lamarzocco: MagicMock) -> MockConfigEntry:
         version=2,
         data=USER_INPUT
         | {
-            CONF_MACHINE: mock_lamarzocco.serial_number,
             CONF_MODEL: mock_lamarzocco.model,
             CONF_HOST: "host",
             CONF_TOKEN: "token",

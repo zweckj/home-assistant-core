@@ -8,6 +8,7 @@ from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    CONF_HOST,
     CONF_MODEL,
     CONF_NAME,
     CONF_PASSWORD,
@@ -75,16 +76,21 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         assert entry.unique_id
         device = fleet[entry.unique_id]
+        v2_data = {
+            CONF_USERNAME: entry.data[CONF_USERNAME],
+            CONF_PASSWORD: entry.data[CONF_PASSWORD],
+            CONF_MODEL: device.model,
+            CONF_NAME: device.name,
+            CONF_TOKEN: device.communication_key,
+        }
+
+        if CONF_HOST in entry.data:
+            v2_data[CONF_HOST] = entry.data[CONF_HOST]
 
         entry.version = 2
         hass.config_entries.async_update_entry(
             entry,
-            data={
-                **entry.data,
-                CONF_MODEL: device.model,
-                CONF_NAME: device.name,
-                CONF_TOKEN: device.communication_key,
-            },
+            data=v2_data,
         )
         _LOGGER.debug("Migrated La Marzocco config entry to version 2")
     return True

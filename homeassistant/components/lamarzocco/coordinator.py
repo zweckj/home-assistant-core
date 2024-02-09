@@ -25,7 +25,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_MACHINE, DOMAIN
+from .const import DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=30)
 
@@ -63,7 +63,7 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None], Generic[_DeviceT]
 
         self.device = self._init_device(
             model=self.config_entry.data[CONF_MODEL],
-            serial_number=self.config_entry.data[CONF_MACHINE],
+            serial_number=self.config_entry.unique_id,
             name=self.config_entry.data[CONF_NAME],
             cloud_client=cloud_client,
             local_client=local_client,
@@ -105,7 +105,7 @@ class LaMarzoccoMachineUpdateCoordinator(
             self.config_entry.async_create_background_task(
                 hass=self.hass,
                 target=self.device.websocket_connect(
-                    notify_callback=self.async_update_listeners
+                    notify_callback=lambda: self.async_set_updated_data(None)
                 ),
                 name="lm_websocket_task",
             )

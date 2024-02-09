@@ -29,7 +29,9 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from .const import CONF_MACHINE, DOMAIN
+from .const import DOMAIN
+
+CONF_MACHINE = "machine"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -123,13 +125,14 @@ class LmConfigFlow(ConfigFlow, domain=DOMAIN):
                     token=selected_device.communication_key,
                 ):
                     errors[CONF_HOST] = "cannot_connect"
+                else:
+                    self._config[CONF_HOST] = user_input[CONF_HOST]
 
             if not errors:
                 return self.async_create_entry(
                     title=serial_number,
                     data={
                         **self._config,
-                        **user_input,
                         CONF_NAME: selected_device.name,
                         CONF_MODEL: selected_device.model,
                         CONF_TOKEN: selected_device.communication_key,

@@ -4,7 +4,8 @@ from unittest.mock import MagicMock
 
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 
-from homeassistant.components.lamarzocco.const import CONF_MACHINE, DOMAIN
+from homeassistant.components.lamarzocco.config_flow import CONF_MACHINE
+from homeassistant.components.lamarzocco.const import DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
