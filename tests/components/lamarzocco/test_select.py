@@ -50,7 +50,9 @@ async def test_steam_boiler_level(
     )
 
     assert len(mock_lamarzocco.set_steam_level.mock_calls) == 1
-    mock_lamarzocco.set_steam_level.assert_called_once_with(level=SteamLevel.LEVEL_1)
+    mock_lamarzocco.set_steam_level.assert_called_once_with(
+        level=SteamLevel.LEVEL_1, ble_device=None
+    )
 
 
 @pytest.mark.parametrize(

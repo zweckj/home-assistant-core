@@ -22,11 +22,34 @@ class LaMarzoccoEntityDescription(EntityDescription):
     supported_fn: Callable[[LaMarzoccoMachineUpdateCoordinator], bool] = lambda _: True
 
 
-class LaMarzoccoEntity(CoordinatorEntity[LaMarzoccoMachineUpdateCoordinator]):
+class LaMarzoccoBaseEntity(CoordinatorEntity[LaMarzoccoMachineUpdateCoordinator]):
+    """Common elements for all entities."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: LaMarzoccoMachineUpdateCoordinator,
+        key: str,
+    ) -> None:
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        device = coordinator.device
+        self._attr_unique_id = f"{device.serial_number}_{key}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device.serial_number)},
+            name=device.name,
+            manufacturer="La Marzocco",
+            model=device.full_model_name,
+            serial_number=device.serial_number,
+            sw_version=device.firmware[FirmwareType.MACHINE].current_version,
+        )
+
+
+class LaMarzoccoEntity(LaMarzoccoBaseEntity):
     """Common elements for all entities."""
 
     entity_description: LaMarzoccoEntityDescription
-    _attr_has_entity_name = True
 
     @property
     def available(self) -> bool:
@@ -41,15 +64,5 @@ class LaMarzoccoEntity(CoordinatorEntity[LaMarzoccoMachineUpdateCoordinator]):
         entity_description: LaMarzoccoEntityDescription,
     ) -> None:
         """Initialize the entity."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, entity_description.key)
         self.entity_description = entity_description
-        device = coordinator.device
-        self._attr_unique_id = f"{device.serial_number}_{entity_description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device.serial_number)},
-            name=device.name,
-            manufacturer="La Marzocco",
-            model=device.full_model_name,
-            serial_number=device.serial_number,
-            sw_version=device.firmware[FirmwareType.MACHINE].current_version,
-        )

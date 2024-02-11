@@ -35,7 +35,9 @@ ENTITIES: tuple[LaMarzoccoSwitchEntityDescription, ...] = (
         key="main",
         translation_key="main",
         name=None,
-        control_fn=lambda coordinator, state: coordinator.device.set_power(state),
+        control_fn=lambda coordinator, state: coordinator.device.set_power(
+            state, coordinator.async_get_ble_device()
+        ),
         is_on_fn=lambda coordinator: coordinator.device.config.turned_on,
     ),
     LaMarzoccoSwitchEntityDescription(
@@ -49,7 +51,9 @@ ENTITIES: tuple[LaMarzoccoSwitchEntityDescription, ...] = (
     LaMarzoccoSwitchEntityDescription(
         key="steam_boiler_enable",
         translation_key="steam_boiler",
-        control_fn=lambda coordinator, state: coordinator.device.set_steam(state),
+        control_fn=lambda coordinator, state: coordinator.device.set_steam(
+            state, coordinator.async_get_ble_device()
+        ),
         is_on_fn=lambda coordinator: coordinator.device.config.boilers[
             BoilerType.STEAM
         ].enabled,

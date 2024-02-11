@@ -152,3 +152,8 @@ def remove_local_connection(
     del data[CONF_HOST]
     hass.config_entries.async_update_entry(mock_config_entry, data=data)
     return mock_config_entry
+
+
+@pytest.fixture(autouse=True)
+def mock_bluetooth(enable_bluetooth):
+    """Auto mock bluetooth."""

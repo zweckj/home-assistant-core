@@ -2,13 +2,16 @@
 
 import logging
 
+from lmcloud.client_bluetooth import LaMarzoccoBluetoothClient
 from lmcloud.client_cloud import LaMarzoccoCloudClient
 from lmcloud.const import MachineModel
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 
+from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_HOST,
+    CONF_MAC,
     CONF_MODEL,
     CONF_NAME,
     CONF_PASSWORD,
@@ -19,12 +22,13 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 
-from .const import DOMAIN
+from .const import CONF_USE_BLUETOOTH, DOMAIN
 from .coordinator import LaMarzoccoMachineUpdateCoordinator
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
+    Platform.CALENDAR,
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
@@ -43,10 +47,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         raise ConfigEntryError(f"Invalid model {model}")
 
+    if entry.data.get(CONF_USE_BLUETOOTH, True):
+        assert entry.unique_id
+
+        # check if there are any bluetooth adapters to use
+        count = bluetooth.async_scanner_count(hass, connectable=True)
+        if count > 0:
+            _LOGGER.debug("Found Bluetooth adapters, initializing with Bluetooth")
+            bt_devices = await LaMarzoccoBluetoothClient.discover_devices(
+                scanner=bluetooth.async_get_scanner(hass)
+            )
+            for bt_device in bt_devices:
+                if bt_device.name is not None and entry.unique_id in bt_device.name:
+                    # found a device, add MAC address to config entry
+                    _LOGGER.debug("Found Bluetooth device %s", bt_device.name)
+                    new_data = entry.data.copy()
+                    new_data[CONF_MAC] = bt_device.address
+                    hass.config_entries.async_update_entry(
+                        entry,
+                        data=new_data,
+                    )
+
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+        await hass.config_entries.async_reload(entry.entry_id)
+
+    entry.async_on_unload(entry.add_update_listener(update_listener))
 
     return True
 
@@ -74,7 +104,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except (AuthFail, RequestNotSuccessful) as exc:
             raise ConfigEntryError("Migration failed") from exc
 
-        assert entry.unique_id
+        assert entry.unique_id is not None
         device = fleet[entry.unique_id]
         v2_data = {
             CONF_USERNAME: entry.data[CONF_USERNAME],
@@ -86,6 +116,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if CONF_HOST in entry.data:
             v2_data[CONF_HOST] = entry.data[CONF_HOST]
+
+        if CONF_MAC in entry.data:
+            v2_data[CONF_MAC] = entry.data[CONF_MAC]
 
         entry.version = 2
         hass.config_entries.async_update_entry(

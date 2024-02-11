@@ -974,7 +974,7 @@ libsoundtouch==0.8
 linear-garage-door==0.2.7
 
 # homeassistant.components.lamarzocco
-lmcloud==1.0.0b3
+lmcloud==1.0.0b5
 
 # homeassistant.components.logi_circle
 logi-circle==0.2.3

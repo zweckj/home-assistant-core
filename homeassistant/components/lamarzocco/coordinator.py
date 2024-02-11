@@ -5,15 +5,19 @@ from datetime import timedelta
 import logging
 from typing import Any, Generic, TypeVar
 
+from bleak.backends.device import BLEDevice
+from lmcloud.client_bluetooth import LaMarzoccoBluetoothClient
 from lmcloud.client_cloud import LaMarzoccoCloudClient
 from lmcloud.client_local import LaMarzoccoLocalClient
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 from lmcloud.lm_device import LaMarzoccoDevice
 from lmcloud.lm_machine import LaMarzoccoMachine
 
+from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_HOST,
+    CONF_MAC,
     CONF_MODEL,
     CONF_NAME,
     CONF_PASSWORD,
@@ -25,7 +29,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
+from .const import CONF_USE_BLUETOOTH, DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=30)
 
@@ -61,12 +65,30 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None], Generic[_DeviceT]
                 client=get_async_client(self.hass),
             )
 
+        bluetooth_client: LaMarzoccoBluetoothClient | None = None
+        self._use_bluetooth = False
+        # initialize Bluetooth
+        if mac_address := self.config_entry.data.get(
+            CONF_MAC, ""
+        ) and self.config_entry.data.get(CONF_USE_BLUETOOTH, True):
+            assert self.config_entry.unique_id is not None
+            if ble_device := bluetooth.async_ble_device_from_address(hass, mac_address):
+                _LOGGER.debug("Initializing with known Bluetooth device")
+                self._use_bluetooth = True
+                bluetooth_client = LaMarzoccoBluetoothClient(
+                    username=self.config_entry.data[CONF_USERNAME],
+                    serial_number=self.config_entry.unique_id,
+                    token=self.config_entry.data[CONF_TOKEN],
+                    ble_device=ble_device,
+                )
+
         self.device = self._init_device(
             model=self.config_entry.data[CONF_MODEL],
             serial_number=self.config_entry.unique_id,
             name=self.config_entry.data[CONF_NAME],
             cloud_client=cloud_client,
             local_client=local_client,
+            bluetooth_client=bluetooth_client,
         )
 
     @abstractmethod
@@ -87,6 +109,17 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None], Generic[_DeviceT]
             raise UpdateFailed("Querying API failed. Error: %s" % ex) from ex
 
         _LOGGER.debug("Current status: %s", str(self.device.config))
+
+    def async_get_ble_device(self) -> BLEDevice | None:
+        """Get a Bleak Client for the machine."""
+        # according to HA best practices, we should not reuse the same client
+        # get a new BLE device from hass and init a new Bleak Client with it
+        if not self._use_bluetooth:
+            return None
+
+        return bluetooth.async_ble_device_from_address(
+            self.hass, self.config_entry.data[CONF_MAC], connectable=True
+        )
 
 
 class LaMarzoccoMachineUpdateCoordinator(
