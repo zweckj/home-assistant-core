@@ -85,7 +85,8 @@ async def test_no_calendar_events_global_disable(
 ) -> None:
     """Assert no events when global auto on/off is disabled."""
 
-    mock_lamarzocco.config.auto_on_off_schedule.enable = False
+    mock_lamarzocco.config.auto_on_off_schedule.enabled = False
+
     test_time = datetime(2024, 1, 12, 11, tzinfo=dt_util.DEFAULT_TIME_ZONE)
     freezer.move_to(test_time)
 
@@ -162,9 +163,9 @@ async def test_service_set_auto_on_off_times(
     )
 
     assert len(mock_lamarzocco.set_schedule.mock_calls) == 1
-    mock_lamarzocco.set_schedule.assert_called_once_with(
-        schedule=mock_lamarzocco.config.auto_on_off_schedule
-    )
+    schedule = deepcopy(mock_lamarzocco.config.auto_on_off_schedule)
+    schedule.days[WeekDay.TUESDAY].enabled = True
+    mock_lamarzocco.set_schedule.assert_called_once_with(schedule=schedule)
 
     assert len(mock_lamarzocco.set_schedule_day.mock_calls) == 1
     mock_lamarzocco.set_schedule_day.assert_called_once_with(

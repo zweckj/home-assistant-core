@@ -4,7 +4,6 @@ import logging
 
 from lmcloud.client_bluetooth import LaMarzoccoBluetoothClient
 from lmcloud.client_cloud import LaMarzoccoCloudClient
-from lmcloud.const import MachineModel
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 
 from homeassistant.components import bluetooth
@@ -20,7 +19,6 @@ from homeassistant.const import (
     Platform,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryError
 
 from .const import CONF_USE_BLUETOOTH, DOMAIN
 from .coordinator import LaMarzoccoMachineUpdateCoordinator
@@ -42,11 +40,6 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up La Marzocco as config entry."""
 
-    if (model := entry.data[CONF_MODEL]) in MachineModel:
-        coordinator = LaMarzoccoMachineUpdateCoordinator(hass)
-    else:
-        raise ConfigEntryError(f"Invalid model {model}")
-
     if entry.data.get(CONF_USE_BLUETOOTH, True):
         assert entry.unique_id
 
@@ -67,6 +60,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         entry,
                         data=new_data,
                     )
+
+    coordinator = LaMarzoccoMachineUpdateCoordinator(hass)
 
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -102,7 +97,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             fleet = await cloud_client.get_customer_fleet()
         except (AuthFail, RequestNotSuccessful) as exc:
-            raise ConfigEntryError("Migration failed") from exc
+            _LOGGER.error("Migration failed with error %s", exc)
+            return False
 
         assert entry.unique_id is not None
         device = fleet[entry.unique_id]

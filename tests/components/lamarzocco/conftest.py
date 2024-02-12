@@ -4,6 +4,7 @@ from collections.abc import Callable, Generator
 import json
 from unittest.mock import MagicMock, patch
 
+from bleak.backends.device import BLEDevice
 from lmcloud.const import FirmwareType, MachineModel, SteamLevel
 from lmcloud.lm_machine import LaMarzoccoMachine
 from lmcloud.models import LaMarzoccoDeviceInfo
@@ -64,7 +65,9 @@ def mock_device_info() -> LaMarzoccoDeviceInfo:
 
 
 @pytest.fixture
-def mock_cloud_client(mock_device_info: LaMarzoccoDeviceInfo) -> MagicMock:
+def mock_cloud_client(
+    mock_device_info: LaMarzoccoDeviceInfo,
+) -> Generator[MagicMock, None, None]:
     """Return a mocked LM cloud client."""
     with (
         patch(
@@ -157,3 +160,11 @@ def remove_local_connection(
 @pytest.fixture(autouse=True)
 def mock_bluetooth(enable_bluetooth):
     """Auto mock bluetooth."""
+
+
+@pytest.fixture
+def mock_ble_device() -> BLEDevice:
+    """Return a mock BLE device."""
+    return BLEDevice(
+        "00:00:00:00:00:00", "GS_GS01234", details={"path": "path"}, rssi=50
+    )
