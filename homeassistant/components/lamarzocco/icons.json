@@ -35,7 +35,7 @@
         "default": "mdi:water"
       },
       "preinfusion_off": {
-        "default": "mdi:water-off"
+        "default": "mdi:water"
       },
       "steam_temp": {
         "default": "mdi:thermometer-water"

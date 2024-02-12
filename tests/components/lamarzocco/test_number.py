@@ -142,23 +142,26 @@ async def test_gs3_exclusive_none(
     "device_fixture", [MachineModel.LINEA_MICRA, MachineModel.LINEA_MINI]
 )
 @pytest.mark.parametrize(
-    ("entity_name", "function_name", "value", "kwargs"),
+    ("entity_name", "function_name", "prebrew_mode", "value", "kwargs"),
     [
         (
             "prebrew_off_time",
             "set_prebrew_time",
+            PrebrewMode.PREBREW,
             6,
             {"prebrew_off_time": 6.0, "key": PhysicalKey.A},
         ),
         (
             "prebrew_on_time",
             "set_prebrew_time",
+            PrebrewMode.PREBREW,
             6,
             {"prebrew_on_time": 6.0, "key": PhysicalKey.A},
         ),
         (
             "preinfusion_time",
             "set_preinfusion_time",
+            PrebrewMode.PREINFUSION,
             7,
             {"preinfusion_time": 7.0, "key": PhysicalKey.A},
         ),
@@ -171,12 +174,13 @@ async def test_pre_brew_infusion_numbers(
     snapshot: SnapshotAssertion,
     entity_name: str,
     function_name: str,
+    prebrew_mode: PrebrewMode,
     value: float,
     kwargs: dict[str, float],
 ) -> None:
     """Test the La Marzocco prebrew/-infusion sensors."""
 
-    mock_lamarzocco.config.prebrew_mode = PrebrewMode.PREINFUSION
+    mock_lamarzocco.config.prebrew_mode = prebrew_mode
 
     serial_number = mock_lamarzocco.serial_number
 
@@ -207,22 +211,30 @@ async def test_pre_brew_infusion_numbers(
 @pytest.mark.parametrize("device_fixture", [MachineModel.GS3_AV])
 @pytest.mark.usefixtures("entity_registry_enabled_by_default")
 @pytest.mark.parametrize(
-    ("entity_name", "value", "function_name", "kwargs"),
+    ("entity_name", "value", "prebrew_mode", "function_name", "kwargs"),
     [
         (
             "prebrew_off_time",
             6,
+            PrebrewMode.PREBREW,
             "set_prebrew_time",
             {"prebrew_off_time": 6.0},
         ),
         (
             "prebrew_on_time",
             6,
+            PrebrewMode.PREBREW,
             "set_prebrew_time",
             {"prebrew_on_time": 6.0},
         ),
-        ("preinfusion_time", 7, "set_preinfusion_time", {"preinfusion_time": 7.0}),
-        ("dose", 6, "set_dose", {"dose": 6}),
+        (
+            "preinfusion_time",
+            7,
+            PrebrewMode.PREINFUSION,
+            "set_preinfusion_time",
+            {"preinfusion_time": 7.0},
+        ),
+        ("dose", 6, PrebrewMode.DISABLED, "set_dose", {"dose": 6}),
     ],
 )
 async def test_pre_brew_infusion_key_numbers(
@@ -231,12 +243,13 @@ async def test_pre_brew_infusion_key_numbers(
     snapshot: SnapshotAssertion,
     entity_name: str,
     value: float,
+    prebrew_mode: PrebrewMode,
     function_name: str,
     kwargs: dict[str, float],
 ) -> None:
     """Test the La Marzocco number sensors for GS3AV model."""
 
-    mock_lamarzocco.config.prebrew_mode = PrebrewMode.PREINFUSION
+    mock_lamarzocco.config.prebrew_mode = prebrew_mode
 
     serial_number = mock_lamarzocco.serial_number
 

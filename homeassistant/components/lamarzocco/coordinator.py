@@ -68,8 +68,8 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None], Generic[_DeviceT]
         bluetooth_client: LaMarzoccoBluetoothClient | None = None
         self._use_bluetooth = False
         # initialize Bluetooth
-        if mac_address := self.config_entry.data.get(
-            CONF_MAC, ""
+        if (
+            mac_address := self.config_entry.data.get(CONF_MAC, "")
         ) and self.config_entry.data.get(CONF_USE_BLUETOOTH, True):
             assert self.config_entry.unique_id is not None
             if ble_device := bluetooth.async_ble_device_from_address(hass, mac_address):

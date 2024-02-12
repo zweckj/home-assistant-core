@@ -4,7 +4,13 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
-from lmcloud.const import KEYS_PER_MODEL, BoilerType, MachineModel, PhysicalKey
+from lmcloud.const import (
+    KEYS_PER_MODEL,
+    BoilerType,
+    MachineModel,
+    PhysicalKey,
+    PrebrewMode,
+)
 from lmcloud.lm_machine import LaMarzoccoMachine
 
 from homeassistant.components.number import (
@@ -127,7 +133,8 @@ KEY_ENTITIES: tuple[LaMarzoccoKeyNumberEntityDescription, ...] = (
         native_value_fn=lambda device, key: device.config.prebrew_configuration[
             key
         ].off_time,
-        available_fn=lambda device: len(device.config.prebrew_configuration) > 0,
+        available_fn=lambda device: len(device.config.prebrew_configuration) > 0
+        and device.config.prebrew_mode == PrebrewMode.PREBREW,
         supported_fn=lambda coordinator: coordinator.device.model
         != MachineModel.GS3_MP,
     ),
@@ -146,7 +153,8 @@ KEY_ENTITIES: tuple[LaMarzoccoKeyNumberEntityDescription, ...] = (
         native_value_fn=lambda device, key: device.config.prebrew_configuration[
             key
         ].off_time,
-        available_fn=lambda device: len(device.config.prebrew_configuration) > 0,
+        available_fn=lambda device: len(device.config.prebrew_configuration) > 0
+        and device.config.prebrew_mode == PrebrewMode.PREBREW,
         supported_fn=lambda coordinator: coordinator.device.model
         != MachineModel.GS3_MP,
     ),
@@ -165,7 +173,8 @@ KEY_ENTITIES: tuple[LaMarzoccoKeyNumberEntityDescription, ...] = (
         native_value_fn=lambda device, key: device.config.prebrew_configuration[
             key
         ].preinfusion_time,
-        available_fn=lambda device: len(device.config.prebrew_configuration) > 0,
+        available_fn=lambda device: len(device.config.prebrew_configuration) > 0
+        and device.config.prebrew_mode == PrebrewMode.PREINFUSION,
         supported_fn=lambda coordinator: coordinator.device.model
         != MachineModel.GS3_MP,
     ),
