@@ -58,7 +58,7 @@
         "state": {
           "disabled": "mdi:water-pump-off",
           "prebrew": "mdi:water-pump",
-          "preinfusion": "mdi:water-pump"
+          "typeb": "mdi:water-pump"
         }
       }
     },

@@ -92,5 +92,6 @@ class LaMarzoccoSelectEntity(LaMarzoccoEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Change the selected option."""
-        await self.entity_description.select_option_fn(self.coordinator, option)
-        self.async_write_ha_state()
+        if option != self.current_option:
+            await self.entity_description.select_option_fn(self.coordinator, option)
+            self.async_write_ha_state()

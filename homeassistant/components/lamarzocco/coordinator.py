@@ -1,8 +1,10 @@
 """Coordinator for La Marzocco API."""
 
 from abc import abstractmethod
+from collections.abc import Callable, Coroutine
 from datetime import timedelta
 import logging
+from time import time
 from typing import Any, Generic, TypeVar
 
 from bleak.backends.device import BLEDevice
@@ -32,6 +34,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import CONF_USE_BLUETOOTH, DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=30)
+FIRMWARE_UPDATE_INTERVAL = 3600
+STATISTICS_UPDATE_INTERVAL = 300
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,15 +95,38 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None], Generic[_DeviceT]
             bluetooth_client=bluetooth_client,
         )
 
+        self._last_firmware_data_update: float | None = None
+        self._last_statistics_data_update: float | None = None
+
     @abstractmethod
     def _init_device(*args: Any, **kwargs: Any) -> _DeviceT:
         """Initialize the La Marzocco Device."""
 
     async def _async_update_data(self) -> None:
         """Fetch data from API endpoint."""
+        await self._async_handle_request(self.device.get_config)
 
+        if (
+            self._last_firmware_data_update is None
+            or (self._last_firmware_data_update + FIRMWARE_UPDATE_INTERVAL) < time()
+        ):
+            await self._async_handle_request(self.device.get_firmware)
+            self._last_firmware_data_update = time()
+
+        if (
+            self._last_statistics_data_update is None
+            or (self._last_statistics_data_update + STATISTICS_UPDATE_INTERVAL) < time()
+        ):
+            await self._async_handle_request(self.device.get_statistics)
+            self._last_statistics_data_update = time()
+
+        _LOGGER.debug("Current status: %s", str(self.device.config))
+
+    async def _async_handle_request(
+        self, func: Callable[[], Coroutine[None, None, None]]
+    ) -> None:
         try:
-            await self.device.get_config()
+            await func()
         except AuthFail as ex:
             msg = "Authentication failed."
             _LOGGER.debug(msg, exc_info=True)
@@ -107,8 +134,6 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None], Generic[_DeviceT]
         except RequestNotSuccessful as ex:
             _LOGGER.debug(ex, exc_info=True)
             raise UpdateFailed("Querying API failed. Error: %s" % ex) from ex
-
-        _LOGGER.debug("Current status: %s", str(self.device.config))
 
     def async_get_ble_device(self) -> BLEDevice | None:
         """Get a Bleak Client for the machine."""

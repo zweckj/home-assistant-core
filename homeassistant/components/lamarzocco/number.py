@@ -233,8 +233,9 @@ class LaMarzoccoNumberEntity(LaMarzoccoEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
-        await self.entity_description.set_value_fn(self.coordinator, value)
-        self.async_write_ha_state()
+        if value != self.native_value:
+            await self.entity_description.set_value_fn(self.coordinator, value)
+            self.async_write_ha_state()
 
 
 class LaMarzoccoKeyNumberEntity(LaMarzoccoEntity, NumberEntity):
@@ -270,7 +271,8 @@ class LaMarzoccoKeyNumberEntity(LaMarzoccoEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
-        await self.entity_description.set_value_fn(
-            self.coordinator.device, value, PhysicalKey(self.pyhsical_key)
-        )
-        self.async_write_ha_state()
+        if value != self.native_value:
+            await self.entity_description.set_value_fn(
+                self.coordinator.device, value, PhysicalKey(self.pyhsical_key)
+            )
+            self.async_write_ha_state()
