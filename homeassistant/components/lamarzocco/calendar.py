@@ -85,16 +85,13 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
     @property
     def event(self) -> CalendarEvent | None:
         """Return the next upcoming event."""
-        # only need to check the next 6 days, because if we don't find anything there
-        # then there is no event scheduled
-        for date in self._get_date_range(
-            dt_util.now(), dt_util.now() + timedelta(days=6)
-        ):
-            scheduled = self._async_get_calendar_event(date)
-            if scheduled:
-                if scheduled.start < dt_util.now() and scheduled.end < dt_util.now():
-                    continue
-                return scheduled
+        now = dt_util.now()
+        events = self._get_events(
+            start_date=now,
+            end_date=now + timedelta(days=7),  # only check next 7 days
+        )
+        if events:
+            return events[0]
         return None
 
     async def async_get_events(
@@ -105,11 +102,25 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
     ) -> list[CalendarEvent]:
         """Return calendar events within a datetime range."""
 
+        return self._get_events(
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    def _get_events(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[CalendarEvent]:
+        """Return calendar events within a datetime range."""
+
         events: list[CalendarEvent] = []
 
         for date in self._get_date_range(start_date, end_date):
             scheduled = self._async_get_calendar_event(date)
             if scheduled:
+                if scheduled.end < start_date:
+                    continue
                 events.append(scheduled)
         return events
 
@@ -149,7 +160,7 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
                 second=0,
                 microsecond=0,
             ),
-            summary=f"Machine {self.coordinator.device.full_model_name} ({self.coordinator.device.serial_number}) on",
+            summary=f"Machine {self.coordinator.device.name} on",
             description="Machine is scheduled to turn on at the start time and off at the end time",
         )
 
