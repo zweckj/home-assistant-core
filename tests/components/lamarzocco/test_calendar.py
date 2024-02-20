@@ -76,6 +76,59 @@ async def test_calendar_events(
     assert events == snapshot
 
 
+@pytest.mark.parametrize(
+    (
+        "start_date",
+        "end_date",
+    ),
+    [
+        (datetime(2024, 2, 11, 6, 0), datetime(2024, 2, 18, 6, 0)),
+        (datetime(2024, 2, 11, 7, 15), datetime(2024, 2, 18, 6, 0)),
+        (datetime(2024, 2, 11, 9, 0), datetime(2024, 2, 18, 7, 15)),
+        (datetime(2024, 2, 11, 9, 0), datetime(2024, 2, 18, 8, 0)),
+        (datetime(2024, 2, 11, 9, 0), datetime(2024, 2, 18, 6, 0)),
+        (datetime(2024, 2, 11, 6, 0), datetime(2024, 2, 18, 8, 0)),
+    ],
+)
+async def test_calendar_edge_cases(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+    snapshot: SnapshotAssertion,
+    start_date: datetime,
+    end_date: datetime,
+) -> None:
+    """Test edge cases."""
+    start_date = start_date.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    end_date = end_date.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+
+    # set schedule to be only on Sunday, 07:00 - 07:30
+    for day in WeekDay:
+        mock_lamarzocco.config.auto_on_off_schedule.days[day].enabled = False
+
+    mock_lamarzocco.config.auto_on_off_schedule.days[WeekDay.SUNDAY].enabled = True
+    mock_lamarzocco.config.auto_on_off_schedule.days[WeekDay.SUNDAY].h_on = 7
+    mock_lamarzocco.config.auto_on_off_schedule.days[WeekDay.SUNDAY].m_on = 0
+    mock_lamarzocco.config.auto_on_off_schedule.days[WeekDay.SUNDAY].h_off = 7
+    mock_lamarzocco.config.auto_on_off_schedule.days[WeekDay.SUNDAY].m_off = 30
+
+    await async_init_integration(hass, mock_config_entry)
+
+    events = await hass.services.async_call(
+        CALENDAR_DOMAIN,
+        SERVICE_GET_EVENTS,
+        {
+            ATTR_ENTITY_ID: f"calendar.{mock_lamarzocco.serial_number}_auto_on_off_schedule",
+            EVENT_START_DATETIME: start_date,
+            EVENT_END_DATETIME: end_date,
+        },
+        blocking=True,
+        return_response=True,
+    )
+
+    assert events == snapshot
+
+
 async def test_no_calendar_events_global_disable(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,

@@ -90,9 +90,7 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
             start_date=now,
             end_date=now + timedelta(days=7),  # only check next 7 days
         )
-        if events:
-            return events[0]
-        return None
+        return next(iter(events), None)
 
     async def async_get_events(
         self,
@@ -121,6 +119,8 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
             if scheduled:
                 if scheduled.end < start_date:
                     continue
+                if scheduled.start > end_date:
+                    continue
                 events.append(scheduled)
         return events
 
@@ -128,9 +128,10 @@ class LaMarzoccoCalendarEntity(LaMarzoccoBaseEntity, CalendarEntity):
         self, start_date: datetime, end_date: datetime
     ) -> Iterator[datetime]:
         current_date = start_date
-        while current_date <= end_date:
+        while current_date.date() < end_date.date():
             yield current_date
             current_date += timedelta(days=1)
+        yield end_date
 
     def _async_get_calendar_event(self, date: datetime) -> CalendarEvent | None:
         """Return calendar event for a given weekday."""
