@@ -17,21 +17,26 @@ from homeassistant.components.number import (
     DOMAIN as NUMBER_DOMAIN,
     SERVICE_SET_VALUE,
 )
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-pytestmark = pytest.mark.usefixtures("init_integration")
+from . import async_init_integration
+
+from tests.common import MockConfigEntry
 
 
 async def test_coffee_boiler(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
     entity_registry: er.EntityRegistry,
     device_registry: dr.DeviceRegistry,
     snapshot: SnapshotAssertion,
 ) -> None:
     """Test the La Marzocco coffee temperature Number."""
+
+    await async_init_integration(hass, mock_config_entry)
     serial_number = mock_lamarzocco.serial_number
 
     state = hass.states.get(f"number.{serial_number}_coffee_target_temperature")
@@ -53,14 +58,14 @@ async def test_coffee_boiler(
         SERVICE_SET_VALUE,
         {
             ATTR_ENTITY_ID: f"number.{serial_number}_coffee_target_temperature",
-            ATTR_VALUE: 95,
+            ATTR_VALUE: 94,
         },
         blocking=True,
     )
 
     assert len(mock_lamarzocco.set_temp.mock_calls) == 1
     mock_lamarzocco.set_temp.assert_called_once_with(
-        boiler=BoilerType.COFFEE, temperature=95, ble_device=None
+        boiler=BoilerType.COFFEE, temperature=94, ble_device=None
     )
 
 
@@ -80,6 +85,7 @@ async def test_coffee_boiler(
 async def test_gs3_exclusive(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
     entity_registry: er.EntityRegistry,
     device_registry: dr.DeviceRegistry,
     snapshot: SnapshotAssertion,
@@ -89,7 +95,7 @@ async def test_gs3_exclusive(
     kwargs: dict[str, float],
 ) -> None:
     """Test exclusive entities for GS3 AV/MP."""
-
+    await async_init_integration(hass, mock_config_entry)
     serial_number = mock_lamarzocco.serial_number
 
     func = getattr(mock_lamarzocco, func_name)
@@ -127,9 +133,10 @@ async def test_gs3_exclusive(
 async def test_gs3_exclusive_none(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Ensure GS3 exclusive is None for unsupported models."""
-
+    await async_init_integration(hass, mock_config_entry)
     ENTITIES = ("steam_target_temperature", "tea_water_duration")
 
     serial_number = mock_lamarzocco.serial_number
@@ -170,6 +177,7 @@ async def test_gs3_exclusive_none(
 async def test_pre_brew_infusion_numbers(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
     entity_registry: er.EntityRegistry,
     snapshot: SnapshotAssertion,
     entity_name: str,
@@ -181,6 +189,7 @@ async def test_pre_brew_infusion_numbers(
     """Test the La Marzocco prebrew/-infusion sensors."""
 
     mock_lamarzocco.config.prebrew_mode = prebrew_mode
+    await async_init_integration(hass, mock_config_entry)
 
     serial_number = mock_lamarzocco.serial_number
 
@@ -206,6 +215,49 @@ async def test_pre_brew_infusion_numbers(
 
     function = getattr(mock_lamarzocco, function_name)
     function.assert_called_once_with(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "device_fixture", [MachineModel.LINEA_MICRA, MachineModel.LINEA_MINI]
+)
+@pytest.mark.parametrize(
+    ("prebrew_mode", "entity", "unavailable"),
+    [
+        (
+            PrebrewMode.PREBREW,
+            ("prebrew_off_time", "prebrew_on_time"),
+            ("preinfusion_time",),
+        ),
+        (
+            PrebrewMode.PREINFUSION,
+            ("preinfusion_time",),
+            ("prebrew_off_time", "prebrew_on_time"),
+        ),
+    ],
+)
+async def test_pre_brew_infusion_numbers_unavailable(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+    prebrew_mode: PrebrewMode,
+    entity: tuple[str, ...],
+    unavailable: tuple[str, ...],
+) -> None:
+    """Test entities are unavailable depending on selected state."""
+
+    mock_lamarzocco.config.prebrew_mode = prebrew_mode
+    await async_init_integration(hass, mock_config_entry)
+
+    serial_number = mock_lamarzocco.serial_number
+    for entity_name in entity:
+        state = hass.states.get(f"number.{serial_number}_{entity_name}")
+        assert state
+        assert state.state != STATE_UNAVAILABLE
+
+    for entity_name in unavailable:
+        state = hass.states.get(f"number.{serial_number}_{entity_name}")
+        assert state
+        assert state.state == STATE_UNAVAILABLE
 
 
 @pytest.mark.parametrize("device_fixture", [MachineModel.GS3_AV])
@@ -240,6 +292,7 @@ async def test_pre_brew_infusion_numbers(
 async def test_pre_brew_infusion_key_numbers(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
     snapshot: SnapshotAssertion,
     entity_name: str,
     value: float,
@@ -250,6 +303,7 @@ async def test_pre_brew_infusion_key_numbers(
     """Test the La Marzocco number sensors for GS3AV model."""
 
     mock_lamarzocco.config.prebrew_mode = prebrew_mode
+    await async_init_integration(hass, mock_config_entry)
 
     serial_number = mock_lamarzocco.serial_number
 
@@ -284,9 +338,10 @@ async def test_pre_brew_infusion_key_numbers(
 async def test_disabled_entites(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Test the La Marzocco prebrew/-infusion sensors for GS3AV model."""
-
+    await async_init_integration(hass, mock_config_entry)
     ENTITIES = (
         "prebrew_off_time",
         "prebrew_on_time",
@@ -309,9 +364,10 @@ async def test_disabled_entites(
 async def test_not_existing_key_entities(
     hass: HomeAssistant,
     mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Assert not existing key entities."""
-
+    await async_init_integration(hass, mock_config_entry)
     serial_number = mock_lamarzocco.serial_number
 
     for entity in (
@@ -323,17 +379,3 @@ async def test_not_existing_key_entities(
         for key in range(1, KEYS_PER_MODEL[MachineModel.GS3_AV] + 1):
             state = hass.states.get(f"number.{serial_number}_{entity}_key_{key}")
             assert state is None
-
-
-# @pytest.mark.parametrize("device_fixture", [MachineModel.LINEA_MICRA])
-# async def test_not_settable_entites(
-#     hass: HomeAssistant,
-#     mock_lamarzocco: MagicMock,
-# ) -> None:
-#     """Assert not settable causes error."""
-
-#     serial_number = mock_lamarzocco.serial_number
-
-#     state = hass.states.get(f"number.{serial_number}_preinfusion_time")
-#     assert state
-#     assert state.state == STATE_UNAVAILABLE
