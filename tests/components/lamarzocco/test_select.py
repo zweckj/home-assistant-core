@@ -44,15 +44,12 @@ async def test_steam_boiler_level(
         SERVICE_SELECT_OPTION,
         {
             ATTR_ENTITY_ID: f"select.{serial_number}_steam_level",
-            ATTR_OPTION: "126",
+            ATTR_OPTION: "128",
         },
         blocking=True,
     )
 
-    assert len(mock_lamarzocco.set_steam_level.mock_calls) == 1
-    mock_lamarzocco.set_steam_level.assert_called_once_with(
-        level=SteamLevel.LEVEL_1, ble_device=None
-    )
+    mock_lamarzocco.set_steam_level.assert_called_once_with(level=SteamLevel.LEVEL_2)
 
 
 @pytest.mark.parametrize(
@@ -99,15 +96,12 @@ async def test_pre_brew_infusion_select(
         SERVICE_SELECT_OPTION,
         {
             ATTR_ENTITY_ID: f"select.{serial_number}_prebrew_infusion_mode",
-            ATTR_OPTION: "typeb",
+            ATTR_OPTION: "prebrew",
         },
         blocking=True,
     )
 
-    assert len(mock_lamarzocco.set_prebrew_mode.mock_calls) == 1
-    mock_lamarzocco.set_prebrew_mode.assert_called_once_with(
-        mode=PrebrewMode.PREINFUSION
-    )
+    mock_lamarzocco.set_prebrew_mode.assert_called_once_with(mode=PrebrewMode.PREBREW)
 
 
 @pytest.mark.parametrize(

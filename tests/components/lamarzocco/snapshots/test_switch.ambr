@@ -27,6 +27,49 @@
     'via_device_id': None,
   })
 # ---
+# name: test_switches[-set_power-True-False]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'friendly_name': 'GS01234',
+    }),
+    'context': <ANY>,
+    'entity_id': 'switch.gs01234',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'on',
+  })
+# ---
+# name: test_switches[-set_power-True-False].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'switch',
+    'entity_category': None,
+    'entity_id': 'switch.gs01234',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': None,
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'main',
+    'unique_id': 'GS01234_main',
+    'unit_of_measurement': None,
+  })
+# ---
 # name: test_switches[-set_power-on_call0-off_call0]
   StateSnapshot({
     'attributes': ReadOnlyDict({
@@ -40,6 +83,49 @@
   })
 # ---
 # name: test_switches[-set_power-on_call0-off_call0].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'switch',
+    'entity_category': None,
+    'entity_id': 'switch.gs01234',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': None,
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'main',
+    'unique_id': 'GS01234_main',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_switches[-set_power]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'friendly_name': 'GS01234',
+    }),
+    'context': <ANY>,
+    'entity_id': 'switch.gs01234',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'on',
+  })
+# ---
+# name: test_switches[-set_power].1
   EntityRegistryEntrySnapshot({
     'aliases': set({
     }),
@@ -113,6 +199,49 @@
     'unit_of_measurement': None,
   })
 # ---
+# name: test_switches[_steam_boiler-set_steam-True-False]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'friendly_name': 'GS01234 Steam boiler',
+    }),
+    'context': <ANY>,
+    'entity_id': 'switch.gs01234_steam_boiler',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'on',
+  })
+# ---
+# name: test_switches[_steam_boiler-set_steam-True-False].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'switch',
+    'entity_category': None,
+    'entity_id': 'switch.gs01234_steam_boiler',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Steam boiler',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'steam_boiler',
+    'unique_id': 'GS01234_steam_boiler_enable',
+    'unit_of_measurement': None,
+  })
+# ---
 # name: test_switches[_steam_boiler-set_steam-on_call2-off_call2]
   StateSnapshot({
     'attributes': ReadOnlyDict({
@@ -126,6 +255,49 @@
   })
 # ---
 # name: test_switches[_steam_boiler-set_steam-on_call2-off_call2].1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'switch',
+    'entity_category': None,
+    'entity_id': 'switch.gs01234_steam_boiler',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Steam boiler',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'steam_boiler',
+    'unique_id': 'GS01234_steam_boiler_enable',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_switches[_steam_boiler-set_steam]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'friendly_name': 'GS01234 Steam boiler',
+    }),
+    'context': <ANY>,
+    'entity_id': 'switch.gs01234_steam_boiler',
+    'last_changed': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'on',
+  })
+# ---
+# name: test_switches[_steam_boiler-set_steam].1
   EntityRegistryEntrySnapshot({
     'aliases': set({
     }),

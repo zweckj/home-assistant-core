@@ -54,6 +54,7 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None], Generic[_DeviceT]
             self.config_entry.data.get(CONF_HOST) is not None
         )
 
+        assert self.config_entry.unique_id
         serial = self.config_entry.unique_id
 
         cloud_client = LaMarzoccoCloudClient(
@@ -74,7 +75,7 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None], Generic[_DeviceT]
         bluetooth_client: LaMarzoccoBluetoothClient | None = None
         self._use_bluetooth = False
         # initialize Bluetooth
-        if self.config_entry.data.get(CONF_USE_BLUETOOTH, True):
+        if self.config_entry.options.get(CONF_USE_BLUETOOTH, True):
 
             def bluetooth_configured() -> bool:
                 return self.config_entry.data.get(

@@ -14,7 +14,7 @@ from homeassistant.components.lamarzocco.const import DOMAIN
 from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_NAME, CONF_TOKEN
 from homeassistant.core import HomeAssistant
 
-from . import USER_INPUT, async_init_integration
+from . import SERIAL_DICT, USER_INPUT, async_init_integration
 
 from tests.common import MockConfigEntry, load_fixture, load_json_object_fixture
 
@@ -93,14 +93,7 @@ def mock_lamarzocco(
     """Return a mocked LM client."""
     model = device_fixture
 
-    if model == MachineModel.GS3_AV:
-        serial_number = "GS01234"
-    elif model == MachineModel.GS3_MP:
-        serial_number = "GS01234"
-    elif model == MachineModel.LINEA_MICRA:
-        serial_number = "MR01234"
-    elif model == MachineModel.LINEA_MINI:
-        serial_number = "LM01234"
+    serial_number = SERIAL_DICT[model]
 
     dummy_machine = LaMarzoccoMachine(
         model=model,

@@ -18,6 +18,13 @@ PASSWORD_SELECTION = {
 
 USER_INPUT = PASSWORD_SELECTION | {CONF_USERNAME: "username"}
 
+SERIAL_DICT = {
+    MachineModel.GS3_AV: "GS01234",
+    MachineModel.GS3_MP: "GS01234",
+    MachineModel.LINEA_MICRA: "MR01234",
+    MachineModel.LINEA_MINI: "LM01234",
+}
+
 
 async def async_init_integration(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry

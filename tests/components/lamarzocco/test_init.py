@@ -2,16 +2,15 @@
 
 from unittest.mock import MagicMock, patch
 
-from bleak.backends.device import BLEDevice
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 
 from homeassistant.components.lamarzocco.config_flow import CONF_MACHINE
 from homeassistant.components.lamarzocco.const import DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
-from homeassistant.const import CONF_HOST, CONF_MAC
+from homeassistant.const import CONF_HOST, CONF_MAC, CONF_NAME
 from homeassistant.core import HomeAssistant
 
-from . import USER_INPUT
+from . import USER_INPUT, async_init_integration, get_bluetooth_service_info
 
 from tests.common import MockConfigEntry
 
@@ -76,31 +75,6 @@ async def test_invalid_auth(
     assert flow["context"].get("entry_id") == mock_config_entry.entry_id
 
 
-async def test_init_with_bluetooth(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_lamarzocco: MagicMock,
-    mock_cloud_client: MagicMock,
-    mock_ble_device: BLEDevice,
-) -> None:
-    """Test the La Marzocco configuration entry with Bluetooth."""
-    with (
-        patch(
-            "homeassistant.components.lamarzocco.LaMarzoccoBluetoothClient.discover_devices",
-            return_value=[mock_ble_device],
-        ),
-        patch(
-            "homeassistant.components.lamarzocco.coordinator.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ),
-    ):
-        mock_config_entry.add_to_hass(hass)
-        await hass.config_entries.async_setup(mock_config_entry.entry_id)
-        await hass.async_block_till_done()
-
-    assert mock_config_entry.state is ConfigEntryState.LOADED
-
-
 async def test_v1_migration(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -153,3 +127,31 @@ async def test_migration_errors(
 
     assert not await hass.config_entries.async_setup(entry_v1.entry_id)
     assert entry_v1.state is ConfigEntryState.MIGRATION_ERROR
+
+
+async def test_bluetooth_is_set_from_discovery(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_lamarzocco: MagicMock,
+) -> None:
+    """Check we can fill a device from discovery info."""
+
+    service_info = get_bluetooth_service_info(
+        mock_lamarzocco.model, mock_lamarzocco.serial_number
+    )
+    with (
+        patch(
+            "homeassistant.components.lamarzocco.coordinator.async_discovered_service_info",
+            return_value=[service_info],
+        ) as discovery,
+        patch(
+            "homeassistant.components.lamarzocco.coordinator.LaMarzoccoMachineUpdateCoordinator._init_device"
+        ) as init_device,
+    ):
+        await async_init_integration(hass, mock_config_entry)
+    discovery.assert_called_once()
+    init_device.assert_called_once()
+    _, kwargs = init_device.call_args
+    assert kwargs["bluetooth_client"] is not None
+    assert mock_config_entry.data[CONF_NAME] == service_info.name
+    assert mock_config_entry.data[CONF_MAC] == service_info.address

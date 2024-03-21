@@ -65,7 +65,7 @@ async def test_coffee_boiler(
 
     assert len(mock_lamarzocco.set_temp.mock_calls) == 1
     mock_lamarzocco.set_temp.assert_called_once_with(
-        boiler=BoilerType.COFFEE, temperature=94, ble_device=None
+        boiler=BoilerType.COFFEE, temperature=94
     )
 
 
@@ -77,7 +77,7 @@ async def test_coffee_boiler(
             "steam_target_temperature",
             131,
             "set_temp",
-            {"boiler": BoilerType.STEAM, "temperature": 131, "ble_device": None},
+            {"boiler": BoilerType.STEAM, "temperature": 131},
         ),
         ("tea_water_duration", 15, "set_dose_tea_water", {"dose": 15}),
     ],
