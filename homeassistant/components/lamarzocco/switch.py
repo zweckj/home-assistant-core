@@ -10,6 +10,7 @@ from lmcloud.models import LaMarzoccoMachineConfig
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -35,14 +36,25 @@ ENTITIES: tuple[LaMarzoccoSwitchEntityDescription, ...] = (
         key="main",
         translation_key="main",
         name=None,
-        control_fn=lambda machine, state: machine.set_power(state),
+        control_fn=lambda machine, state: machine.set_power(enabled=state),
         is_on_fn=lambda config: config.turned_on,
     ),
     LaMarzoccoSwitchEntityDescription[LaMarzoccoMachine, LaMarzoccoMachineConfig](
         key="steam_boiler_enable",
         translation_key="steam_boiler",
-        control_fn=lambda machine, state: machine.set_steam(state),
+        control_fn=lambda machine, state: machine.set_steam(enabled=state),
         is_on_fn=lambda config: config.boilers[BoilerType.STEAM].enabled,
+    ),
+    LaMarzoccoSwitchEntityDescription[LaMarzoccoMachine, LaMarzoccoMachineConfig](
+        key="standby_enabled",
+        translation_key="standby_enabled",
+        entity_category=EntityCategory.CONFIG,
+        control_fn=lambda machine, state: machine.set_smart_standby(
+            enabled=state,
+            mode=machine.config.smart_standby.mode,
+            minutes=machine.config.smart_standby.minutes,
+        ),
+        is_on_fn=lambda config: config.smart_standby.enabled,
     ),
 )
 

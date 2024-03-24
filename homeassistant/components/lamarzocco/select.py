@@ -4,12 +4,13 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, Generic
 
-from lmcloud.const import MachineModel, PrebrewMode, SteamLevel
+from lmcloud.const import MachineModel, PrebrewMode, SmartStandbyMode, SteamLevel
 from lmcloud.lm_machine import LaMarzoccoMachine
 from lmcloud.models import LaMarzoccoMachineConfig
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -21,6 +22,11 @@ PBREWBREW_MODE_HA_TO_LM = {
     "disabled": PrebrewMode.DISABLED,
     "prebrew": PrebrewMode.PREBREW,
     "typeb": PrebrewMode.PREINFUSION,
+}
+
+STANDBY_MODE_HA_TO_LM = {
+    "poweron": SmartStandbyMode.POWER_ON,
+    "lastbrewing": SmartStandbyMode.LAST_BREWING,
 }
 
 
@@ -52,6 +58,7 @@ ENTITIES: tuple[LaMarzoccoSelectEntityDescription, ...] = (
         key="prebrew_infusion_select",
         translation_key="prebrew_infusion_select",
         options=["disabled", "prebrew", "typeb"],
+        entity_category=EntityCategory.CONFIG,
         select_option_fn=lambda machine, option: machine.set_prebrew_mode(
             PBREWBREW_MODE_HA_TO_LM[option]
         ),
@@ -62,6 +69,18 @@ ENTITIES: tuple[LaMarzoccoSelectEntityDescription, ...] = (
             MachineModel.LINEA_MICRA,
             MachineModel.LINEA_MINI,
         ),
+    ),
+    LaMarzoccoSelectEntityDescription[LaMarzoccoMachine, LaMarzoccoMachineConfig](
+        key="standby_mode_select",
+        translation_key="standby_mode_select",
+        entity_category=EntityCategory.CONFIG,
+        options=["poweron", "lastbrewing"],
+        select_option_fn=lambda machine, option: machine.set_smart_standby(
+            enabled=machine.config.smart_standby.enabled,
+            mode=STANDBY_MODE_HA_TO_LM[option],
+            minutes=machine.config.smart_standby.minutes,
+        ),
+        current_option_fn=lambda config: config.smart_standby.mode.lower(),
     ),
 )
 

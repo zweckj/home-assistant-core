@@ -69,6 +69,50 @@ async def test_coffee_boiler(
     )
 
 
+async def test_auto_standby(
+    hass: HomeAssistant,
+    mock_lamarzocco: MagicMock,
+    mock_config_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    device_registry: dr.DeviceRegistry,
+    snapshot: SnapshotAssertion,
+) -> None:
+    """Test the La Marzocco auto standby number."""
+
+    await async_init_integration(hass, mock_config_entry)
+    serial_number = mock_lamarzocco.serial_number
+
+    state = hass.states.get(f"number.{serial_number}_time_to_auto_standby")
+
+    assert state
+    assert state == snapshot
+
+    entry = entity_registry.async_get(state.entity_id)
+    assert entry
+    assert entry.device_id
+    assert entry == snapshot
+
+    device = device_registry.async_get(entry.device_id)
+    assert device
+
+    # service call
+    await hass.services.async_call(
+        NUMBER_DOMAIN,
+        SERVICE_SET_VALUE,
+        {
+            ATTR_ENTITY_ID: f"number.{serial_number}_time_to_auto_standby",
+            ATTR_VALUE: "20",
+        },
+        blocking=True,
+    )
+
+    mock_lamarzocco.set_smart_standby.assert_called_once_with(
+        enabled=mock_lamarzocco.config.smart_standby.enabled,
+        mode=mock_lamarzocco.config.smart_standby.mode,
+        minutes=20,
+    )
+
+
 @pytest.mark.parametrize("device_fixture", [MachineModel.GS3_AV, MachineModel.GS3_MP])
 @pytest.mark.parametrize(
     ("entity_name", "value", "func_name", "kwargs"),

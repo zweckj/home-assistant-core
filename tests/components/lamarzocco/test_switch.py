@@ -30,6 +30,10 @@ from tests.common import MockConfigEntry
             "set_power",
         ),
         (
+            "_auto_standby_enabled",
+            "set_smart_standby",
+        ),
+        (
             "_steam_boiler",
             "set_steam",
         ),
@@ -69,7 +73,8 @@ async def test_switches(
     )
 
     assert len(control_fn.mock_calls) == 1
-    control_fn.assert_called_once_with(False)
+    _, kwargs = control_fn.call_args
+    assert kwargs["enabled"] is False
 
     await hass.services.async_call(
         SWITCH_DOMAIN,
@@ -81,7 +86,8 @@ async def test_switches(
     )
 
     assert len(control_fn.mock_calls) == 2
-    control_fn.assert_called_with(True)
+    _, kwargs = control_fn.call_args
+    assert kwargs["enabled"] is True
 
 
 async def test_device(

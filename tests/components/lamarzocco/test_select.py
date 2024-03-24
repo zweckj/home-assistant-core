@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from lmcloud.const import MachineModel, PrebrewMode, SteamLevel
+from lmcloud.const import MachineModel, PrebrewMode, SmartStandbyMode, SteamLevel
 import pytest
 from syrupy import SnapshotAssertion
 
@@ -117,3 +117,39 @@ async def test_pre_brew_infusion_select_none(
     state = hass.states.get(f"select.{serial_number}_prebrew_infusion_mode")
 
     assert state is None
+
+
+async def test_auto_standby_mode_select(
+    hass: HomeAssistant,
+    entity_registry: er.EntityRegistry,
+    mock_lamarzocco: MagicMock,
+    snapshot: SnapshotAssertion,
+) -> None:
+    """Test the auto standby mode select."""
+
+    serial_number = mock_lamarzocco.serial_number
+
+    state = hass.states.get(f"select.{serial_number}_auto_standby_mode")
+
+    assert state
+    assert state == snapshot
+
+    entry = entity_registry.async_get(state.entity_id)
+    assert entry
+    assert entry == snapshot
+
+    # on/off service calls
+    await hass.services.async_call(
+        SELECT_DOMAIN,
+        SERVICE_SELECT_OPTION,
+        {
+            ATTR_ENTITY_ID: f"select.{serial_number}_auto_standby_mode",
+            ATTR_OPTION: "poweron",
+        },
+        blocking=True,
+    )
+    mock_lamarzocco.set_smart_standby.assert_called_once_with(
+        enabled=mock_lamarzocco.config.smart_standby.enabled,
+        mode=SmartStandbyMode.POWER_ON,
+        minutes=mock_lamarzocco.config.smart_standby.minutes,
+    )

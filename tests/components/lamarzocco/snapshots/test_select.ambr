@@ -1,4 +1,59 @@
 # serializer version: 1
+# name: test_auto_standby_mode_select
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'friendly_name': 'GS01234 Auto standby mode',
+      'options': list([
+        'poweron',
+        'lastbrewing',
+      ]),
+    }),
+    'context': <ANY>,
+    'entity_id': 'select.gs01234_auto_standby_mode',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'lastbrewing',
+  })
+# ---
+# name: test_auto_standby_mode_select.1
+  EntityRegistryEntrySnapshot({
+    'aliases': set({
+    }),
+    'area_id': None,
+    'capabilities': dict({
+      'options': list([
+        'poweron',
+        'lastbrewing',
+      ]),
+    }),
+    'config_entry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'select',
+    'entity_category': <EntityCategory.CONFIG: 'config'>,
+    'entity_id': 'select.gs01234_auto_standby_mode',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Auto standby mode',
+    'platform': 'lamarzocco',
+    'previous_unique_id': None,
+    'supported_features': 0,
+    'translation_key': 'standby_mode_select',
+    'unique_id': 'GS01234_standby_mode_select',
+    'unit_of_measurement': None,
+  })
+# ---
 # name: test_pre_brew_infusion_select[GS3 AV]
   StateSnapshot({
     'attributes': ReadOnlyDict({
@@ -34,7 +89,7 @@
     'device_id': <ANY>,
     'disabled_by': None,
     'domain': 'select',
-    'entity_category': None,
+    'entity_category': <EntityCategory.CONFIG: 'config'>,
     'entity_id': 'select.gs01234_prebrew_infusion_mode',
     'has_entity_name': True,
     'hidden_by': None,
@@ -91,7 +146,7 @@
     'device_id': <ANY>,
     'disabled_by': None,
     'domain': 'select',
-    'entity_category': None,
+    'entity_category': <EntityCategory.CONFIG: 'config'>,
     'entity_id': 'select.lm01234_prebrew_infusion_mode',
     'has_entity_name': True,
     'hidden_by': None,
@@ -148,7 +203,7 @@
     'device_id': <ANY>,
     'disabled_by': None,
     'domain': 'select',
-    'entity_category': None,
+    'entity_category': <EntityCategory.CONFIG: 'config'>,
     'entity_id': 'select.mr01234_prebrew_infusion_mode',
     'has_entity_name': True,
     'hidden_by': None,
