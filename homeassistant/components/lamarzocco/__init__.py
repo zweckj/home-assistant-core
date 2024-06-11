@@ -41,8 +41,10 @@ PLATFORMS = [
 
 _LOGGER = logging.getLogger(__name__)
 
+type LaMarzoccoConfigEntry = ConfigEntry[LaMarzoccoUpdateCoordinator]
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+
+async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -> bool:
     """Set up La Marzocco as config entry."""
 
     assert entry.unique_id
@@ -107,7 +109,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await coordinator.async_setup()
     await coordinator.async_config_entry_first_refresh()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
 
     gateway_version = coordinator.device.firmware[FirmwareType.GATEWAY].current_version
     if version.parse(gateway_version) < version.parse("v3.5-rc5"):
