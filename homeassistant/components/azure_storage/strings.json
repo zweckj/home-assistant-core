@@ -7,6 +7,16 @@
     },
     "step": {
       "user": {
+        "menu_options": {
+          "key": "Connect via the Storage account key",
+          "pick_implementation": "Connect with service principal"
+        },
+        "description": "Pick auth implementation."
+      },
+      "pick_implementation": {
+        "title": "[%key:common::config_flow::title::oauth2_pick_implementation%]"
+      },
+      "key": {
         "data": {
           "storage_account_key": "Storage account key",
           "account_name": "Account name",
@@ -22,22 +32,22 @@
       },
       "reauth_confirm": {
         "data": {
-          "storage_account_key": "[%key:component::azure_storage::config::step::user::data::storage_account_key%]"
+          "storage_account_key": "[%key:component::azure_storage::config::step::key::data::storage_account_key%]"
         },
         "data_description": {
-          "storage_account_key": "[%key:component::azure_storage::config::step::user::data_description::storage_account_key%]"
+          "storage_account_key": "[%key:component::azure_storage::config::step::key::data_description::storage_account_key%]"
         },
         "description": "Provide a new storage account key.",
         "title": "Reauthenticate Azure storage account"
       },
       "reconfigure": {
         "data": {
-          "container_name": "[%key:component::azure_storage::config::step::user::data::container_name%]",
-          "storage_account_key": "[%key:component::azure_storage::config::step::user::data::storage_account_key%]"
+          "container_name": "[%key:component::azure_storage::config::step::key::data::container_name%]",
+          "storage_account_key": "[%key:component::azure_storage::config::step::key::data::storage_account_key%]"
         },
         "data_description": {
-          "container_name": "[%key:component::azure_storage::config::step::user::data_description::container_name%]",
-          "storage_account_key": "[%key:component::azure_storage::config::step::user::data_description::storage_account_key%]"
+          "container_name": "[%key:component::azure_storage::config::step::key::data_description::container_name%]",
+          "storage_account_key": "[%key:component::azure_storage::config::step::key::data_description::storage_account_key%]"
         },
         "description": "Change the settings of the Azure storage integration.",
         "title": "Reconfigure Azure storage account"

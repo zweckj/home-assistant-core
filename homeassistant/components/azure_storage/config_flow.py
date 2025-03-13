@@ -11,8 +11,9 @@ from azure.core.pipeline.transport._aiohttp import (
 from azure.storage.blob.aio import ContainerClient
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2FlowHandler
 
 from .const import (
     CONF_ACCOUNT_NAME,
@@ -24,12 +25,24 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-class AzureStorageConfigFlow(ConfigFlow, domain=DOMAIN):
+class AzureStorageConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     """Handle a config flow for azure storage."""
+
+    DOMAIN = DOMAIN
 
     def get_account_url(self, account_name: str) -> str:
         """Get the account URL."""
         return f"https://{account_name}.blob.core.windows.net/"
+
+    @property
+    def logger(self) -> logging.Logger:
+        """Return logger."""
+        return logging.getLogger(__name__)
+
+    @property
+    def extra_authorize_data(self) -> dict[str, Any]:
+        """Extra data that needs to be appended to the authorize url."""
+        return {"scope": "https://storage.azure.com/.default"}
 
     async def validate_config(
         self, container_client: ContainerClient
@@ -48,6 +61,12 @@ class AzureStorageConfigFlow(ConfigFlow, domain=DOMAIN):
         return errors
 
     async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the initial step."""
+        return self.async_show_menu(menu_options=["key", "pick_implementation"])
+
+    async def async_step_key(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """User step for Azure Storage."""
