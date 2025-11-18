@@ -50,6 +50,7 @@ ENTITIES: tuple[LaMarzoccoSwitchEntityDescription, ...] = (
             ).mode
             is MachineMode.BREWING_MODE
         ),
+        available_via_bluetooth=True,
     ),
     LaMarzoccoSwitchEntityDescription(
         key="steam_boiler_enable",
@@ -65,6 +66,7 @@ ENTITIES: tuple[LaMarzoccoSwitchEntityDescription, ...] = (
             lambda coordinator: coordinator.device.dashboard.model_name
             in (ModelName.LINEA_MINI_R, ModelName.LINEA_MICRA)
         ),
+        available_via_bluetooth=True,
     ),
     LaMarzoccoSwitchEntityDescription(
         key="steam_boiler_enable",
@@ -80,6 +82,7 @@ ENTITIES: tuple[LaMarzoccoSwitchEntityDescription, ...] = (
             lambda coordinator: coordinator.device.dashboard.model_name
             not in (ModelName.LINEA_MINI_R, ModelName.LINEA_MICRA)
         ),
+        available_via_bluetooth=True,
     ),
     LaMarzoccoSwitchEntityDescription(
         key="smart_standby_enabled",

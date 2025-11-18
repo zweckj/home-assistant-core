@@ -58,6 +58,7 @@ ENTITIES: tuple[LaMarzoccoNumberEntityDescription, ...] = (
                 CoffeeBoiler, machine.dashboard.config[WidgetType.CM_COFFEE_BOILER]
             ).target_temperature
         ),
+        available_via_bluetooth=True,
     ),
     LaMarzoccoNumberEntityDescription(
         key="smart_standby_time",

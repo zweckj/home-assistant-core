@@ -26,6 +26,7 @@ class LaMarzoccoEntityDescription(EntityDescription):
 
     available_fn: Callable[[LaMarzoccoUpdateCoordinator], bool] = lambda _: True
     supported_fn: Callable[[LaMarzoccoUpdateCoordinator], bool] = lambda _: True
+    available_via_bluetooth: bool = False
 
 
 class LaMarzoccoBaseEntity(
@@ -35,6 +36,7 @@ class LaMarzoccoBaseEntity(
 
     _attr_has_entity_name = True
     _unavailable_when_machine_off = True
+    _available_via_bluetooth = False
 
     def __init__(
         self,
@@ -77,7 +79,23 @@ class LaMarzoccoBaseEntity(
             if WidgetType.CM_MACHINE_STATUS in self.coordinator.device.dashboard.config
             else MachineState.OFF
         )
-        return super().available and not (
+        
+        # Check base availability from coordinator
+        base_available = super().available
+        
+        # If not connected to cloud but Bluetooth is available and entity supports it
+        if (
+            not self.coordinator.device.dashboard.connected
+            and self.coordinator.device.bluetooth_client is not None
+            and self._available_via_bluetooth
+        ):
+            # Entity is available via Bluetooth even if cloud is disconnected
+            return not (
+                self._unavailable_when_machine_off and machine_state is MachineState.OFF
+            )
+        
+        # Standard availability check
+        return base_available and not (
             self._unavailable_when_machine_off and machine_state is MachineState.OFF
         )
 
@@ -102,3 +120,4 @@ class LaMarzoccoEntity(LaMarzoccoBaseEntity):
         """Initialize the entity."""
         super().__init__(coordinator, entity_description.key)
         self.entity_description = entity_description
+        self._available_via_bluetooth = entity_description.available_via_bluetooth

@@ -80,6 +80,7 @@ ENTITIES: tuple[LaMarzoccoSelectEntityDescription, ...] = (
             lambda coordinator: coordinator.device.dashboard.model_name
             in (ModelName.LINEA_MINI_R, ModelName.LINEA_MICRA)
         ),
+        available_via_bluetooth=True,
     ),
     LaMarzoccoSelectEntityDescription(
         key="prebrew_infusion_select",
