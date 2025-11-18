@@ -10,6 +10,7 @@ from typing import Any
 
 from pylamarzocco import LaMarzoccoCloudClient, LaMarzoccoMachine
 from pylamarzocco.exceptions import AuthFail, RequestNotSuccessful
+from pylamarzocco.lm_bluetooth import BluetoothConnectionFailed
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -98,6 +99,23 @@ class LaMarzoccoConfigUpdateCoordinator(LaMarzoccoUpdateCoordinator):
         if self.device.websocket.connected:
             return
 
+        # If cloud is disconnected but Bluetooth is available, get updates via Bluetooth
+        if (
+            not self.device.dashboard.connected
+            and self.device.bluetooth_client is not None
+        ):
+            try:
+                await self.device.get_dashboard_from_bluetooth()
+                _LOGGER.debug(
+                    "Updated dashboard from Bluetooth: %s", self.device.dashboard.to_dict()
+                )
+            except BluetoothConnectionFailed:
+                _LOGGER.debug("Bluetooth connection failed, falling back to cloud")
+            else:
+                # Successfully updated via Bluetooth, skip cloud update and websocket
+                return
+
+        # Fall back to cloud update
         await self.device.get_dashboard()
         _LOGGER.debug("Current status: %s", self.device.dashboard.to_dict())
 

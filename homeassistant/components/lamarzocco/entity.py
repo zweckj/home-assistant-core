@@ -79,10 +79,10 @@ class LaMarzoccoBaseEntity(
             if WidgetType.CM_MACHINE_STATUS in self.coordinator.device.dashboard.config
             else MachineState.OFF
         )
-        
+
         # Check base availability from coordinator
         base_available = super().available
-        
+
         # If not connected to cloud but Bluetooth is available and entity supports it
         if (
             not self.coordinator.device.dashboard.connected
@@ -93,7 +93,7 @@ class LaMarzoccoBaseEntity(
             return not (
                 self._unavailable_when_machine_off and machine_state is MachineState.OFF
             )
-        
+
         # Standard availability check
         return base_available and not (
             self._unavailable_when_machine_off and machine_state is MachineState.OFF
