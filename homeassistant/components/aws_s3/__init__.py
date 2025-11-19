@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import cast
 
@@ -33,14 +34,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: S3ConfigEntry) -> bool:
 
     data = cast(dict, entry.data)
     try:
-        session = AioSession()
-        # pylint: disable-next=unnecessary-dunder-call
-        client = await session.create_client(
-            "s3",
-            endpoint_url=data.get(CONF_ENDPOINT_URL),
-            aws_secret_access_key=data[CONF_SECRET_ACCESS_KEY],
-            aws_access_key_id=data[CONF_ACCESS_KEY_ID],
-        ).__aenter__()
+        # Wrap client creation in executor to handle blocking I/O during
+        # botocore service definition loading. We use the import executor
+        # since loading service definitions is similar to importing modules.
+        def _create_client_sync() -> S3Client:
+            """Synchronously create S3 client in thread."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                session = AioSession()
+                client_cm = session.create_client(
+                    "s3",
+                    endpoint_url=data.get(CONF_ENDPOINT_URL),
+                    aws_secret_access_key=data[CONF_SECRET_ACCESS_KEY],
+                    aws_access_key_id=data[CONF_ACCESS_KEY_ID],
+                )
+                # pylint: disable-next=unnecessary-dunder-call
+                return loop.run_until_complete(client_cm.__aenter__())
+            finally:
+                loop.close()
+
+        client = await hass.async_add_import_executor_job(_create_client_sync)
         await client.head_bucket(Bucket=data[CONF_BUCKET])
     except ClientError as err:
         raise ConfigEntryError(
