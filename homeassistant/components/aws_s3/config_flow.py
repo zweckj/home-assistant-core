@@ -80,7 +80,9 @@ class S3ConfigFlow(ConfigFlow, domain=DOMAIN):
                             client_cm = session.create_client(
                                 "s3",
                                 endpoint_url=user_input.get(CONF_ENDPOINT_URL),
-                                aws_secret_access_key=user_input[CONF_SECRET_ACCESS_KEY],
+                                aws_secret_access_key=user_input[
+                                    CONF_SECRET_ACCESS_KEY
+                                ],
                                 aws_access_key_id=user_input[CONF_ACCESS_KEY_ID],
                             )
                             # pylint: disable-next=unnecessary-dunder-call
@@ -88,7 +90,9 @@ class S3ConfigFlow(ConfigFlow, domain=DOMAIN):
                         finally:
                             loop.close()
 
-                    client = await self.hass.async_add_import_executor_job(_create_client_sync)
+                    client = await self.hass.async_add_import_executor_job(
+                        _create_client_sync
+                    )
                     try:
                         await client.head_bucket(Bucket=user_input[CONF_BUCKET])
                     finally:
