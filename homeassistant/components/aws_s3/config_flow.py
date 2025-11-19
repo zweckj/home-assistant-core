@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from urllib.parse import urlparse
 
+from aiobotocore.client import AioBaseClient as S3Client
 from aiobotocore.session import AioSession
 from botocore.exceptions import ClientError, ConnectionError, ParamValidationError
 import voluptuous as vol
@@ -66,14 +68,32 @@ class S3ConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors[CONF_ENDPOINT_URL] = "invalid_endpoint_url"
             else:
                 try:
-                    session = AioSession()
-                    async with session.create_client(
-                        "s3",
-                        endpoint_url=user_input.get(CONF_ENDPOINT_URL),
-                        aws_secret_access_key=user_input[CONF_SECRET_ACCESS_KEY],
-                        aws_access_key_id=user_input[CONF_ACCESS_KEY_ID],
-                    ) as client:
+                    # Wrap client creation in executor to handle blocking I/O during
+                    # botocore service definition loading. We use the import executor
+                    # since loading service definitions is similar to importing modules.
+                    def _create_client_sync() -> S3Client:
+                        """Synchronously create S3 client in thread."""
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            session = AioSession()
+                            client_cm = session.create_client(
+                                "s3",
+                                endpoint_url=user_input.get(CONF_ENDPOINT_URL),
+                                aws_secret_access_key=user_input[CONF_SECRET_ACCESS_KEY],
+                                aws_access_key_id=user_input[CONF_ACCESS_KEY_ID],
+                            )
+                            # pylint: disable-next=unnecessary-dunder-call
+                            return loop.run_until_complete(client_cm.__aenter__())
+                        finally:
+                            loop.close()
+
+                    client = await self.hass.async_add_import_executor_job(_create_client_sync)
+                    try:
                         await client.head_bucket(Bucket=user_input[CONF_BUCKET])
+                    finally:
+                        # pylint: disable-next=unnecessary-dunder-call
+                        await client.__aexit__(None, None, None)
                 except ClientError:
                     errors["base"] = "invalid_credentials"
                 except ParamValidationError as err:
