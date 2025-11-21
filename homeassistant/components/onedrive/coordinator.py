@@ -32,7 +32,7 @@ class OneDriveRuntimeData:
     client: OneDriveClient
     token_function: Callable[[], Awaitable[str]]
     backup_folder_id: str
-    coordinator: OneDriveUpdateCoordinator
+    coordinator: OneDriveUpdateCoordinator | None = None
 
 
 type OneDriveConfigEntry = ConfigEntry[OneDriveRuntimeData]

@@ -102,25 +102,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -> 
             entry, data={**entry.data, CONF_FOLDER_NAME: backup_folder.name}
         )
 
-    coordinator = OneDriveUpdateCoordinator(hass, entry, client)
-    await coordinator.async_config_entry_first_refresh()
+    # Coordinator and platforms only for personal accounts
+    if not is_business:
+        coordinator = OneDriveUpdateCoordinator(hass, entry, client)
+        await coordinator.async_config_entry_first_refresh()
 
-    entry.runtime_data = OneDriveRuntimeData(
-        client=client,
-        token_function=get_access_token,
-        backup_folder_id=backup_folder.id,
-        coordinator=coordinator,
-    )
+        entry.runtime_data = OneDriveRuntimeData(
+            client=client,
+            token_function=get_access_token,
+            backup_folder_id=backup_folder.id,
+            coordinator=coordinator,
+        )
 
-    try:
-        await _migrate_backup_files(client, backup_folder.id)
-    except OneDriveException as err:
-        raise ConfigEntryNotReady(
-            translation_domain=DOMAIN,
-            translation_key="failed_to_migrate_files",
-        ) from err
+        try:
+            await _migrate_backup_files(client, backup_folder.id)
+        except OneDriveException as err:
+            raise ConfigEntryNotReady(
+                translation_domain=DOMAIN,
+                translation_key="failed_to_migrate_files",
+            ) from err
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    else:
+        # Business accounts: simpler runtime data without coordinator
+        entry.runtime_data = OneDriveRuntimeData(
+            client=client,
+            token_function=get_access_token,
+            backup_folder_id=backup_folder.id,
+            coordinator=None,
+        )
 
     def async_notify_backup_listeners() -> None:
         for listener in hass.data.get(DATA_BACKUP_AGENT_LISTENERS, []):
@@ -133,6 +143,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -> 
 
 async def async_unload_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -> bool:
     """Unload a OneDrive config entry."""
+    is_business = entry.data.get(CONF_BUSINESS, False)
+    if is_business:
+        return True
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
