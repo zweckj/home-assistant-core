@@ -8,7 +8,11 @@ from pylamarzocco.models import WebSocketDetails
 import pytest
 from syrupy.assertion import SnapshotAssertion
 
-from homeassistant.components.lamarzocco.const import CONF_INSTALLATION_KEY, DOMAIN
+from homeassistant.components.lamarzocco.const import (
+    CONF_BLUETOOTH_ONLY,
+    CONF_INSTALLATION_KEY,
+    DOMAIN,
+)
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import (
     CONF_ADDRESS,
@@ -273,3 +277,43 @@ async def test_device(
     device = device_registry.async_get(entry.device_id)
     assert device
     assert device == snapshot
+
+
+async def test_bluetooth_only_mode_without_bluetooth(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test Bluetooth-only mode fails when Bluetooth is not available."""
+    hass.config_entries.async_update_entry(
+        mock_config_entry, options={CONF_BLUETOOTH_ONLY: True}
+    )
+    mock_config_entry.add_to_hass(hass)
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Should fail to setup without Bluetooth
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_bluetooth_only_mode_with_bluetooth(
+    hass: HomeAssistant,
+    mock_config_entry_bluetooth: MockConfigEntry,
+    mock_lamarzocco_bluetooth: MagicMock,
+    mock_ble_device_from_address: MagicMock,
+) -> None:
+    """Test Bluetooth-only mode works when Bluetooth is available."""
+    hass.config_entries.async_update_entry(
+        mock_config_entry_bluetooth, options={CONF_BLUETOOTH_ONLY: True}
+    )
+    mock_config_entry_bluetooth.add_to_hass(hass)
+
+    await hass.config_entries.async_setup(mock_config_entry_bluetooth.entry_id)
+    await hass.async_block_till_done()
+
+    # Should successfully setup with Bluetooth
+    assert mock_config_entry_bluetooth.state is ConfigEntryState.LOADED
+    # Bluetooth coordinator should be created
+    assert (
+        mock_config_entry_bluetooth.runtime_data.bluetooth_coordinator is not None
+    )
