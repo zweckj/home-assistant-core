@@ -66,11 +66,13 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None]):
         cloud_client: LaMarzoccoCloudClient | None = None,
     ) -> None:
         """Initialize coordinator."""
-        # Disable polling in Bluetooth-only mode for cloud coordinators
+        # Disable polling in Bluetooth-only mode for all coordinators except Bluetooth
         bluetooth_only_mode = entry.options.get(CONF_BLUETOOTH_ONLY, False)
+        # Check if this is a Bluetooth coordinator by class name
+        is_bluetooth_coordinator = type(self).__name__ == "LaMarzoccoBluetoothUpdateCoordinator"
         update_interval = (
             None
-            if bluetooth_only_mode and cloud_client is not None
+            if bluetooth_only_mode and not is_bluetooth_coordinator
             else self._default_update_interval
         )
         super().__init__(
