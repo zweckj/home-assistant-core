@@ -77,8 +77,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up OneDrive sensors based on a config entry."""
     coordinator = entry.runtime_data.coordinator
-    if coordinator is None:
-        return
     async_add_entities(
         OneDriveDriveStateSensor(coordinator, description)
         for description in DRIVE_STATE_ENTITIES

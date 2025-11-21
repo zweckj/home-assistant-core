@@ -306,7 +306,7 @@ async def test_business_account_setup(
     mock_onedrive_client: MagicMock,
     mock_folder: Folder,
 ) -> None:
-    """Test business account setup without coordinator."""
+    """Test business account setup with coordinator and sensors."""
     from homeassistant.components.onedrive.const import CONF_BUSINESS
 
     # Create business account config entry
@@ -333,5 +333,6 @@ async def test_business_account_setup(
             name=mock_config_entry.data[CONF_FOLDER_NAME],
         )
     # Business accounts should not update folder description with instance_id
-    # (only one update call if folder was created, none if it existed)
-    assert mock_onedrive_client.update_drive_item.call_count <= 1
+    assert mock_onedrive_client.update_drive_item.call_count == 0
+    # Business accounts should have coordinator and sensors
+    assert business_config.runtime_data.coordinator is not None
