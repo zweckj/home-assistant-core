@@ -183,6 +183,9 @@
     "bluetooth_connection_failed": {
       "message": "Error while connecting to machine via Bluetooth"
     },
+    "bluetooth_required_for_bluetooth_only_mode": {
+      "message": "Bluetooth-only mode requires a Bluetooth connection. Please ensure Bluetooth is enabled and the device is discoverable."
+    },
     "button_error": {
       "message": "Error while executing button {key}"
     },
@@ -212,10 +215,12 @@
     "step": {
       "init": {
         "data": {
-          "use_bluetooth": "Use Bluetooth"
+          "use_bluetooth": "Use Bluetooth",
+          "bluetooth_only": "Bluetooth only mode"
         },
         "data_description": {
-          "use_bluetooth": "Should the integration try to use Bluetooth to control the machine?"
+          "use_bluetooth": "Should the integration try to use Bluetooth to control the machine?",
+          "bluetooth_only": "Use only Bluetooth and disable cloud connection. Requires Bluetooth to be enabled and available."
         }
       }
     }

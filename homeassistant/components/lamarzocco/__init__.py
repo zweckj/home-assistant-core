@@ -33,7 +33,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .const import CONF_INSTALLATION_KEY, CONF_USE_BLUETOOTH, DOMAIN
+from .const import CONF_BLUETOOTH_ONLY, CONF_INSTALLATION_KEY, CONF_USE_BLUETOOTH, DOMAIN
 from .coordinator import (
     LaMarzoccoBluetoothUpdateCoordinator,
     LaMarzoccoConfigEntry,
@@ -66,6 +66,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
     assert entry.unique_id
     serial = entry.unique_id
 
+    bluetooth_only_mode = entry.options.get(CONF_BLUETOOTH_ONLY, False)
+
     cloud_client = LaMarzoccoCloudClient(
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
@@ -73,38 +75,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
         client=create_client_session(hass),
     )
 
-    try:
-        settings = await cloud_client.get_thing_settings(serial)
-    except AuthFail as ex:
-        raise ConfigEntryAuthFailed(
-            translation_domain=DOMAIN, translation_key="authentication_failed"
-        ) from ex
-    except (RequestNotSuccessful, TimeoutError) as ex:
-        _LOGGER.debug(ex, exc_info=True)
-        raise ConfigEntryNotReady(
-            translation_domain=DOMAIN, translation_key="api_error"
-        ) from ex
+    # Skip cloud initialization if Bluetooth-only mode is enabled
+    if not bluetooth_only_mode:
+        try:
+            settings = await cloud_client.get_thing_settings(serial)
+        except AuthFail as ex:
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="authentication_failed"
+            ) from ex
+        except (RequestNotSuccessful, TimeoutError) as ex:
+            _LOGGER.debug(ex, exc_info=True)
+            raise ConfigEntryNotReady(
+                translation_domain=DOMAIN, translation_key="api_error"
+            ) from ex
 
-    gateway_version = version.parse(
-        settings.firmwares[FirmwareType.GATEWAY].build_version
-    )
-
-    if gateway_version < version.parse("v5.0.9"):
-        # incompatible gateway firmware, create an issue
-        ir.async_create_issue(
-            hass,
-            DOMAIN,
-            "unsupported_gateway_firmware",
-            is_fixable=False,
-            severity=ir.IssueSeverity.ERROR,
-            translation_key="unsupported_gateway_firmware",
-            translation_placeholders={"gateway_version": str(gateway_version)},
+        gateway_version = version.parse(
+            settings.firmwares[FirmwareType.GATEWAY].build_version
         )
+
+        if gateway_version < version.parse("v5.0.9"):
+            # incompatible gateway firmware, create an issue
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                "unsupported_gateway_firmware",
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="unsupported_gateway_firmware",
+                translation_placeholders={"gateway_version": str(gateway_version)},
+            )
+    else:
+        settings = None
 
     # initialize Bluetooth
     bluetooth_client: LaMarzoccoBluetoothClient | None = None
     if entry.options.get(CONF_USE_BLUETOOTH, True) and (
-        token := (entry.data.get(CONF_TOKEN) or settings.ble_auth_token)
+        token := (
+            entry.data.get(CONF_TOKEN)
+            or (settings.ble_auth_token if settings else None)
+        )
     ):
         if CONF_MAC not in entry.data:
             for discovery_info in async_discovered_service_info(hass):
@@ -146,10 +155,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
                 _LOGGER.info(
                     "Bluetooth device not found during lamarzocco setup, continuing with cloud only"
                 )
+        elif bluetooth_only_mode:
+            # Bluetooth-only mode requires a Bluetooth connection
+            raise ConfigEntryNotReady(
+                translation_domain=DOMAIN,
+                translation_key="bluetooth_required_for_bluetooth_only_mode",
+            )
 
     device = LaMarzoccoMachine(
         serial_number=entry.unique_id,
-        cloud_client=cloud_client,
+        cloud_client=cloud_client if not bluetooth_only_mode else None,
         bluetooth_client=bluetooth_client,
     )
 
@@ -162,12 +177,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
         LaMarzoccoStatisticsUpdateCoordinator(hass, entry, device, bluetooth_client),
     )
 
-    await asyncio.gather(
-        coordinators.config_coordinator.async_config_entry_first_refresh(),
-        coordinators.settings_coordinator.async_config_entry_first_refresh(),
-        coordinators.schedule_coordinator.async_config_entry_first_refresh(),
-        coordinators.statistics_coordinator.async_config_entry_first_refresh(),
-    )
+    # In Bluetooth-only mode, skip cloud coordinator refreshes
+    if not bluetooth_only_mode:
+        await asyncio.gather(
+            coordinators.config_coordinator.async_config_entry_first_refresh(),
+            coordinators.settings_coordinator.async_config_entry_first_refresh(),
+            coordinators.schedule_coordinator.async_config_entry_first_refresh(),
+            coordinators.statistics_coordinator.async_config_entry_first_refresh(),
+        )
 
     # bt coordinator only if bluetooth client is available
     # and after the initial refresh of the config coordinator

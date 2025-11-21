@@ -47,7 +47,7 @@ from homeassistant.helpers.selector import (
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from . import create_client_session
-from .const import CONF_INSTALLATION_KEY, CONF_USE_BLUETOOTH, DOMAIN
+from .const import CONF_BLUETOOTH_ONLY, CONF_INSTALLATION_KEY, CONF_USE_BLUETOOTH, DOMAIN
 from .coordinator import LaMarzoccoConfigEntry
 
 CONF_MACHINE = "machine"
@@ -387,6 +387,10 @@ class LmOptionsFlowHandler(OptionsFlowWithReload):
                 vol.Optional(
                     CONF_USE_BLUETOOTH,
                     default=self.config_entry.options.get(CONF_USE_BLUETOOTH, True),
+                ): cv.boolean,
+                vol.Optional(
+                    CONF_BLUETOOTH_ONLY,
+                    default=self.config_entry.options.get(CONF_BLUETOOTH_ONLY, False),
                 ): cv.boolean,
             }
         )
