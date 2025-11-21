@@ -26,7 +26,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
+from .const import CONF_BLUETOOTH_ONLY, DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=60)
 SETTINGS_UPDATE_INTERVAL = timedelta(hours=8)
@@ -66,12 +66,19 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None]):
         cloud_client: LaMarzoccoCloudClient | None = None,
     ) -> None:
         """Initialize coordinator."""
+        # Disable polling in Bluetooth-only mode for cloud coordinators
+        bluetooth_only_mode = entry.options.get(CONF_BLUETOOTH_ONLY, False)
+        update_interval = (
+            None
+            if bluetooth_only_mode and cloud_client is not None
+            else self._default_update_interval
+        )
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=self._default_update_interval,
+            update_interval=update_interval,
         )
         self.device = device
         self.cloud_client = cloud_client

@@ -317,3 +317,33 @@ async def test_bluetooth_only_mode_with_bluetooth(
     assert (
         mock_config_entry_bluetooth.runtime_data.bluetooth_coordinator is not None
     )
+
+
+async def test_bluetooth_only_mode_disables_cloud_polling(
+    hass: HomeAssistant,
+    mock_config_entry_bluetooth: MockConfigEntry,
+    mock_lamarzocco_bluetooth: MagicMock,
+    mock_ble_device_from_address: MagicMock,
+    mock_cloud_client: MagicMock,
+) -> None:
+    """Test that cloud coordinators don't poll in Bluetooth-only mode."""
+    hass.config_entries.async_update_entry(
+        mock_config_entry_bluetooth, options={CONF_BLUETOOTH_ONLY: True}
+    )
+    mock_config_entry_bluetooth.add_to_hass(hass)
+
+    await hass.config_entries.async_setup(mock_config_entry_bluetooth.entry_id)
+    await hass.async_block_till_done()
+
+    # Should successfully setup with Bluetooth
+    assert mock_config_entry_bluetooth.state is ConfigEntryState.LOADED
+    
+    # Verify cloud coordinators have no update interval (won't poll)
+    assert mock_config_entry_bluetooth.runtime_data.config_coordinator.update_interval is None
+    assert mock_config_entry_bluetooth.runtime_data.settings_coordinator.update_interval is None
+    assert mock_config_entry_bluetooth.runtime_data.schedule_coordinator.update_interval is None
+    assert mock_config_entry_bluetooth.runtime_data.statistics_coordinator.update_interval is None
+    
+    # Bluetooth coordinator should still have an update interval
+    assert mock_config_entry_bluetooth.runtime_data.bluetooth_coordinator is not None
+    assert mock_config_entry_bluetooth.runtime_data.bluetooth_coordinator.update_interval is not None
