@@ -337,13 +337,13 @@ async def test_bluetooth_only_mode_disables_cloud_polling(
 
     # Should successfully setup with Bluetooth
     assert mock_config_entry_bluetooth.state is ConfigEntryState.LOADED
-    
+
     # Verify cloud coordinators have no update interval (won't poll)
     assert mock_config_entry_bluetooth.runtime_data.config_coordinator.update_interval is None
     assert mock_config_entry_bluetooth.runtime_data.settings_coordinator.update_interval is None
     assert mock_config_entry_bluetooth.runtime_data.schedule_coordinator.update_interval is None
     assert mock_config_entry_bluetooth.runtime_data.statistics_coordinator.update_interval is None
-    
+
     # Bluetooth coordinator should still have an update interval
     assert mock_config_entry_bluetooth.runtime_data.bluetooth_coordinator is not None
     assert mock_config_entry_bluetooth.runtime_data.bluetooth_coordinator.update_interval is not None

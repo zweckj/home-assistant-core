@@ -53,6 +53,7 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None]):
     """Base class for La Marzocco coordinators."""
 
     _default_update_interval = SCAN_INTERVAL
+    _bluetooth_only_polling_enabled = False  # Override in Bluetooth coordinator
     config_entry: LaMarzoccoConfigEntry
     websocket_terminated = True
     actual_update_success = False
@@ -66,14 +67,12 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None]):
         cloud_client: LaMarzoccoCloudClient | None = None,
     ) -> None:
         """Initialize coordinator."""
-        # Disable polling in Bluetooth-only mode for all coordinators except Bluetooth
+        # Disable polling in Bluetooth-only mode for cloud coordinators
         bluetooth_only_mode = entry.options.get(CONF_BLUETOOTH_ONLY, False)
-        # Check if this is a Bluetooth coordinator by class name
-        is_bluetooth_coordinator = type(self).__name__ == "LaMarzoccoBluetoothUpdateCoordinator"
         update_interval = (
-            None
-            if bluetooth_only_mode and not is_bluetooth_coordinator
-            else self._default_update_interval
+            self._default_update_interval
+            if not bluetooth_only_mode or self._bluetooth_only_polling_enabled
+            else None
         )
         super().__init__(
             hass,
@@ -218,6 +217,8 @@ class LaMarzoccoStatisticsUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
 class LaMarzoccoBluetoothUpdateCoordinator(LaMarzoccoUpdateCoordinator):
     """Class to handle fetching data from the La Marzocco Bluetooth API centrally."""
+
+    _bluetooth_only_polling_enabled = True  # Keep polling in Bluetooth-only mode
 
     async def _async_setup(self) -> None:
         """Initial setup for Bluetooth coordinator."""
