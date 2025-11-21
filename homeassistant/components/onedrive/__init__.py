@@ -28,7 +28,13 @@ from homeassistant.helpers.config_entry_oauth2_flow import (
 from homeassistant.helpers.instance_id import async_get as async_get_instance_id
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_FOLDER_ID, CONF_FOLDER_NAME, DATA_BACKUP_AGENT_LISTENERS, DOMAIN
+from .const import (
+    CONF_BUSINESS,
+    CONF_FOLDER_ID,
+    CONF_FOLDER_NAME,
+    DATA_BACKUP_AGENT_LISTENERS,
+    DOMAIN,
+)
 from .coordinator import (
     OneDriveConfigEntry,
     OneDriveRuntimeData,
@@ -52,9 +58,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -> 
     """Set up OneDrive from a config entry."""
     client, get_access_token = await _get_onedrive_client(hass, entry)
 
-    # get approot, will be created automatically if it does not exist
-    approot = await _handle_item_operation(client.get_approot, "approot")
+    is_business = entry.data.get(CONF_BUSINESS, False)
     folder_name = entry.data[CONF_FOLDER_NAME]
+
+    # Business accounts use "root", personal accounts use approot
+    if is_business:
+        parent_id = "root"
+    else:
+        # get approot, will be created automatically if it does not exist
+        approot = await _handle_item_operation(client.get_approot, "approot")
+        parent_id = approot.id
 
     try:
         backup_folder = await _handle_item_operation(
@@ -64,21 +77,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -> 
     except NotFoundError:
         _LOGGER.debug("Creating backup folder %s", folder_name)
         backup_folder = await _handle_item_operation(
-            lambda: client.create_folder(parent_id=approot.id, name=folder_name),
+            lambda: client.create_folder(parent_id=parent_id, name=folder_name),
             folder_name,
         )
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, CONF_FOLDER_ID: backup_folder.id}
         )
 
-    # write instance id to description
-    if backup_folder.description != (instance_id := await async_get_instance_id(hass)):
-        await _handle_item_operation(
-            lambda: client.update_drive_item(
-                backup_folder.id, ItemUpdate(description=instance_id)
-            ),
-            folder_name,
-        )
+    # write instance id to description (only for personal accounts)
+    if not is_business:
+        if backup_folder.description != (
+            instance_id := await async_get_instance_id(hass)
+        ):
+            await _handle_item_operation(
+                lambda: client.update_drive_item(
+                    backup_folder.id, ItemUpdate(description=instance_id)
+                ),
+                folder_name,
+            )
 
     # update in case folder was renamed manually inside OneDrive
     if backup_folder.name != entry.data[CONF_FOLDER_NAME]:

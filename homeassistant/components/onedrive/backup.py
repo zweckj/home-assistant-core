@@ -31,7 +31,7 @@ from homeassistant.components.backup import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_DELETE_PERMANENTLY, DATA_BACKUP_AGENT_LISTENERS, DOMAIN
+from .const import CONF_BUSINESS, CONF_DELETE_PERMANENTLY, DATA_BACKUP_AGENT_LISTENERS, DOMAIN
 from .coordinator import OneDriveConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -126,6 +126,7 @@ class OneDriveBackupAgent(BackupAgent):
         self._client = entry.runtime_data.client
         self._token_function = entry.runtime_data.token_function
         self._folder_id = entry.runtime_data.backup_folder_id
+        self._is_business = entry.data.get(CONF_BUSINESS, False)
         self.name = entry.title
         assert entry.unique_id
         self.unique_id = entry.unique_id
@@ -198,21 +199,22 @@ class OneDriveBackupAgent(BackupAgent):
             await self._client.delete_drive_item(backup_file.id)
             raise
 
-        # add metadata to the metadata file
-        metadata_description = {
-            "metadata_version": METADATA_VERSION,
-            "backup_id": backup.backup_id,
-            "backup_file_id": backup_file.id,
-        }
-        try:
-            await self._client.update_drive_item(
-                path_or_id=metadata_file.id,
-                data=ItemUpdate(description=dumps(metadata_description)),
-            )
-        except OneDriveException:
-            await self._client.delete_drive_item(backup_file.id)
-            await self._client.delete_drive_item(metadata_file.id)
-            raise
+        # add metadata to the metadata file description (for personal accounts only)
+        if not self._is_business:
+            metadata_description = {
+                "metadata_version": METADATA_VERSION,
+                "backup_id": backup.backup_id,
+                "backup_file_id": backup_file.id,
+            }
+            try:
+                await self._client.update_drive_item(
+                    path_or_id=metadata_file.id,
+                    data=ItemUpdate(description=dumps(metadata_description)),
+                )
+            except OneDriveException:
+                await self._client.delete_drive_item(backup_file.id)
+                await self._client.delete_drive_item(metadata_file.id)
+                raise
         self._cache_expiration = time()
 
     @handle_backup_errors
@@ -228,7 +230,12 @@ class OneDriveBackupAgent(BackupAgent):
 
         backup = backups[backup_id]
 
-        delete_permanently = self._entry.options.get(CONF_DELETE_PERMANENTLY, False)
+        # Delete permanently option only for personal accounts
+        delete_permanently = (
+            self._entry.options.get(CONF_DELETE_PERMANENTLY, False)
+            if not self._is_business
+            else False
+        )
 
         await self._client.delete_drive_item(backup.backup_file_id, delete_permanently)
         await self._client.delete_drive_item(
@@ -268,19 +275,54 @@ class OneDriveBackupAgent(BackupAgent):
             return AgentBackup.from_dict(metadata_json)
 
         backups: dict[str, OneDriveBackup] = {}
-        for item in items:
-            if item.description and f'"metadata_version": {METADATA_VERSION}' in (
-                metadata_description_json := unescape(item.description)
-            ):
-                backup = await download_backup_metadata(item.id)
+
+        if self._is_business:
+            # Business accounts: metadata stored in separate .metadata.json files
+            item_names = {item.name: item for item in items}
+            metadata_files = [
+                item for item in items if item.name.endswith(".metadata.json")
+            ]
+
+            for metadata_item in metadata_files:
+                # Get the corresponding backup filename
+                backup_filename = metadata_item.name.replace(".metadata.json", ".tar")
+
+                # Check if the corresponding backup file exists
+                if backup_filename not in item_names:
+                    _LOGGER.warning(
+                        "Backup file %s not found for metadata %s",
+                        backup_filename,
+                        metadata_item.name,
+                    )
+                    continue
+
+                backup_item = item_names[backup_filename]
+
+                # Download and parse metadata
+                backup = await download_backup_metadata(metadata_item.id)
                 if backup is None:
                     continue
-                metadata_description = loads(metadata_description_json)
+
                 backups[backup.backup_id] = OneDriveBackup(
                     backup=backup,
-                    backup_file_id=metadata_description["backup_file_id"],
-                    metadata_file_id=item.id,
+                    backup_file_id=backup_item.id,
+                    metadata_file_id=metadata_item.id,
                 )
+        else:
+            # Personal accounts: metadata stored in item descriptions
+            for item in items:
+                if item.description and f'"metadata_version": {METADATA_VERSION}' in (
+                    metadata_description_json := unescape(item.description)
+                ):
+                    backup = await download_backup_metadata(item.id)
+                    if backup is None:
+                        continue
+                    metadata_description = loads(metadata_description_json)
+                    backups[backup.backup_id] = OneDriveBackup(
+                        backup=backup,
+                        backup_file_id=metadata_description["backup_file_id"],
+                        metadata_file_id=item.id,
+                    )
 
         self._cache_expiration = time() + CACHE_TTL
         self._backup_cache = backups
