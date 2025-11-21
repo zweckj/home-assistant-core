@@ -155,7 +155,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
                 _LOGGER.info(
                     "Bluetooth device not found during lamarzocco setup, continuing with cloud only"
                 )
-    
+
     # Check if Bluetooth-only mode is enabled but no Bluetooth client was created
     if bluetooth_only_mode and bluetooth_client is None:
         raise ConfigEntryNotReady(
