@@ -298,3 +298,40 @@ async def test_migration_guard_against_major_downgrade(
 
     await setup_integration(hass, old_config_entry)
     assert old_config_entry.state is ConfigEntryState.MIGRATION_ERROR
+
+
+async def test_business_account_setup(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_onedrive_client: MagicMock,
+    mock_folder: Folder,
+) -> None:
+    """Test business account setup without coordinator."""
+    from homeassistant.components.onedrive.const import CONF_BUSINESS
+
+    # Create business account config entry
+    business_config = MockConfigEntry(
+        title="Business OneDrive",
+        domain=DOMAIN,
+        data={
+            **mock_config_entry.data,
+            CONF_BUSINESS: True,
+        },
+        unique_id="mock_drive_id_business",
+        minor_version=2,
+    )
+
+    await setup_integration(hass, business_config)
+
+    assert business_config.state is ConfigEntryState.LOADED
+    # Business accounts should not call get_approot
+    mock_onedrive_client.get_approot.assert_not_called()
+    # Business accounts should create folder with parent_id="root"
+    if mock_onedrive_client.create_folder.called:
+        mock_onedrive_client.create_folder.assert_called_with(
+            parent_id="root",
+            name=mock_config_entry.data[CONF_FOLDER_NAME],
+        )
+    # Business accounts should not update folder description with instance_id
+    # (only one update call if folder was created, none if it existed)
+    assert mock_onedrive_client.update_drive_item.call_count <= 1
