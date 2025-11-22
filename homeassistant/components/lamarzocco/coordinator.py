@@ -85,6 +85,11 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None]):
             return True
         return self._websocket_task.done()
 
+    @property
+    def local_mode_enabled(self) -> bool:
+        """Return True if local mode is enabled."""
+        return self.config_entry.options.get(CONF_LOCAL_MODE, False)
+
     async def __handle_internal_update(
         self, func: Callable[[], Coroutine[Any, Any, None]]
     ) -> None:
@@ -143,8 +148,8 @@ class LaMarzoccoConfigUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
-        # skip updates if local mode is enabled
-        if self.config_entry.options.get(CONF_LOCAL_MODE, False):
+        # Skip updates if local mode is enabled
+        if self.local_mode_enabled:
             return
 
         # ensure token stays valid; does nothing if token is still valid
@@ -190,8 +195,8 @@ class LaMarzoccoSettingsUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
-        # skip updates if local mode is enabled
-        if self.config_entry.options.get(CONF_LOCAL_MODE, False):
+        # Skip updates if local mode is enabled
+        if self.local_mode_enabled:
             return
         await self.device.get_settings()
         _LOGGER.debug("Current settings: %s", self.device.settings.to_dict())
@@ -204,8 +209,8 @@ class LaMarzoccoScheduleUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
-        # skip updates if local mode is enabled
-        if self.config_entry.options.get(CONF_LOCAL_MODE, False):
+        # Skip updates if local mode is enabled
+        if self.local_mode_enabled:
             return
         await self.device.get_schedule()
         _LOGGER.debug("Current schedule: %s", self.device.schedule.to_dict())
@@ -218,8 +223,8 @@ class LaMarzoccoStatisticsUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
-        # skip updates if local mode is enabled
-        if self.config_entry.options.get(CONF_LOCAL_MODE, False):
+        # Skip updates if local mode is enabled
+        if self.local_mode_enabled:
             return
         await self.device.get_coffee_and_flush_counter()
         _LOGGER.debug("Current statistics: %s", self.device.statistics.to_dict())
