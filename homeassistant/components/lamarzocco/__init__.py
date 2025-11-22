@@ -176,12 +176,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
 
     refresh_tasks = []
     if not local_mode:
-        refresh_tasks.extend([
-            coordinators.config_coordinator.async_config_entry_first_refresh(),
-            coordinators.settings_coordinator.async_config_entry_first_refresh(),
-            coordinators.schedule_coordinator.async_config_entry_first_refresh(),
-            coordinators.statistics_coordinator.async_config_entry_first_refresh(),
-        ])
+        refresh_tasks.extend(
+            [
+                coordinators.config_coordinator.async_config_entry_first_refresh(),
+                coordinators.settings_coordinator.async_config_entry_first_refresh(),
+                coordinators.schedule_coordinator.async_config_entry_first_refresh(),
+                coordinators.statistics_coordinator.async_config_entry_first_refresh(),
+            ]
+        )
 
     if refresh_tasks:
         await asyncio.gather(*refresh_tasks)

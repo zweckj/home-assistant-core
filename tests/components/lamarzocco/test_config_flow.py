@@ -11,6 +11,7 @@ import pytest
 from homeassistant.components.lamarzocco.config_flow import CONF_MACHINE
 from homeassistant.components.lamarzocco.const import (
     CONF_INSTALLATION_KEY,
+    CONF_LOCAL_MODE,
     CONF_USE_BLUETOOTH,
     DOMAIN,
 )
@@ -522,4 +523,33 @@ async def test_options_flow(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == {
         CONF_USE_BLUETOOTH: False,
+    }
+
+
+async def test_options_flow_local_mode(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test options flow with local mode."""
+    await async_init_integration(hass, mock_config_entry)
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_USE_BLUETOOTH: True,
+            CONF_LOCAL_MODE: True,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        CONF_USE_BLUETOOTH: True,
+        CONF_LOCAL_MODE: True,
     }
