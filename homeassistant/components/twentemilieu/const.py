@@ -14,6 +14,7 @@ SCAN_INTERVAL = timedelta(hours=1)
 CONF_POST_CODE = "post_code"
 CONF_HOUSE_NUMBER = "house_number"
 CONF_HOUSE_LETTER = "house_letter"
+CONF_OFFLINE_MODE = "offline_mode"
 
 WASTE_TYPE_TO_DESCRIPTION = {
     WasteType.NON_RECYCLABLE: "Non-recyclable waste pickup",

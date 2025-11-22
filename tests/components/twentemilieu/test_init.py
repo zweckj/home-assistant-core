@@ -44,3 +44,24 @@ async def test_config_entry_not_ready(
 
     assert mock_request.call_count == 1
     assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+@pytest.mark.usefixtures("mock_twentemilieu")
+async def test_offline_mode_disables_updates(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test that offline mode disables coordinator updates."""
+    # Set offline mode in options
+    mock_config_entry = MockConfigEntry(
+        **{**mock_config_entry.to_json(), "options": {"offline_mode": True}}
+    )
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+
+    # Check that coordinator has no update interval
+    coordinator = mock_config_entry.runtime_data
+    assert coordinator.update_interval is None

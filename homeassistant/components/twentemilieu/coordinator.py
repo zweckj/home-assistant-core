@@ -14,6 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     CONF_HOUSE_LETTER,
     CONF_HOUSE_NUMBER,
+    CONF_OFFLINE_MODE,
     CONF_POST_CODE,
     DOMAIN,
     LOGGER,
@@ -36,11 +37,13 @@ class TwenteMilieuDataUpdateCoordinator(
             house_letter=entry.data[CONF_HOUSE_LETTER],
             session=async_get_clientsession(hass),
         )
+        # Disable updates if offline mode is enabled
+        offline_mode = entry.options.get(CONF_OFFLINE_MODE, False)
         super().__init__(
             hass,
             LOGGER,
             name=DOMAIN,
-            update_interval=SCAN_INTERVAL,
+            update_interval=None if offline_mode else SCAN_INTERVAL,
             config_entry=entry,
         )
 

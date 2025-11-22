@@ -23,6 +23,18 @@
       }
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "offline_mode": "Offline mode"
+        },
+        "data_description": {
+          "offline_mode": "Enable offline mode to prevent internet data fetching and use only cached data"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "christmas_tree_pickup": {

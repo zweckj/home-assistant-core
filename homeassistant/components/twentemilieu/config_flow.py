@@ -11,11 +11,23 @@ from twentemilieu import (
 )
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_ID
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_HOUSE_LETTER, CONF_HOUSE_NUMBER, CONF_POST_CODE, DOMAIN
+from .const import (
+    CONF_HOUSE_LETTER,
+    CONF_HOUSE_NUMBER,
+    CONF_OFFLINE_MODE,
+    CONF_POST_CODE,
+    DOMAIN,
+)
 
 
 class TwenteMilieuFlowHandler(ConfigFlow, domain=DOMAIN):
@@ -77,4 +89,35 @@ class TwenteMilieuFlowHandler(ConfigFlow, domain=DOMAIN):
                 CONF_HOUSE_NUMBER: user_input[CONF_HOUSE_NUMBER],
                 CONF_HOUSE_LETTER: user_input.get(CONF_HOUSE_LETTER),
             },
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> TwenteMilieuOptionsFlowHandler:
+        """Get the options flow for this handler."""
+        return TwenteMilieuOptionsFlowHandler()
+
+
+class TwenteMilieuOptionsFlowHandler(OptionsFlow):
+    """Handle Twente Milieu options."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_OFFLINE_MODE,
+                        default=self.config_entry.options.get(CONF_OFFLINE_MODE, False),
+                    ): bool,
+                }
+            ),
         )
