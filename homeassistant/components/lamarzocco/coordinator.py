@@ -35,6 +35,9 @@ SCHEDULE_UPDATE_INTERVAL = timedelta(minutes=30)
 STATISTICS_UPDATE_INTERVAL = timedelta(minutes=15)
 _LOGGER = logging.getLogger(__name__)
 
+# Sentinel value to indicate update_interval should be disabled
+_DISABLE_POLLING: object = object()
+
 
 @dataclass
 class LaMarzoccoRuntimeData:
@@ -64,14 +67,23 @@ class LaMarzoccoUpdateCoordinator(DataUpdateCoordinator[None]):
         device: LaMarzoccoMachine,
         bluetooth_client: LaMarzoccoBluetoothClient | None = None,
         cloud_client: LaMarzoccoCloudClient | None = None,
+        update_interval: timedelta | object | None = None,
     ) -> None:
         """Initialize coordinator."""
+        # Handle sentinel value for disabling polling
+        if update_interval is _DISABLE_POLLING:
+            interval: timedelta | None = None
+        elif update_interval is None:
+            interval = self._default_update_interval
+        else:
+            interval = update_interval
+
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=self._default_update_interval,
+            update_interval=interval,
         )
         self.device = device
         self.cloud_client = cloud_client
@@ -148,11 +160,7 @@ class LaMarzoccoConfigUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
-        # Skip updates if local mode is enabled
-        if self.local_mode_enabled:
-            return
-
-        # ensure token stays valid; does nothing if token is still valid
+        # Ensure token stays valid; does nothing if token is still valid
         await self.cloud_client.async_get_access_token()
 
         if self.device.websocket.connected and not self.websocket_terminated:
@@ -195,9 +203,6 @@ class LaMarzoccoSettingsUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
-        # Skip updates if local mode is enabled
-        if self.local_mode_enabled:
-            return
         await self.device.get_settings()
         _LOGGER.debug("Current settings: %s", self.device.settings.to_dict())
 
@@ -209,9 +214,6 @@ class LaMarzoccoScheduleUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
-        # Skip updates if local mode is enabled
-        if self.local_mode_enabled:
-            return
         await self.device.get_schedule()
         _LOGGER.debug("Current schedule: %s", self.device.schedule.to_dict())
 
@@ -223,9 +225,6 @@ class LaMarzoccoStatisticsUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
-        # Skip updates if local mode is enabled
-        if self.local_mode_enabled:
-            return
         await self.device.get_coffee_and_flush_counter()
         _LOGGER.debug("Current statistics: %s", self.device.statistics.to_dict())
 

@@ -35,6 +35,7 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .const import CONF_INSTALLATION_KEY, CONF_LOCAL_MODE, CONF_USE_BLUETOOTH, DOMAIN
 from .coordinator import (
+    _DISABLE_POLLING,
     LaMarzoccoBluetoothUpdateCoordinator,
     LaMarzoccoConfigEntry,
     LaMarzoccoConfigUpdateCoordinator,
@@ -118,44 +119,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
                 _LOGGER.info(
                     "Bluetooth device not found during lamarzocco setup, continuing with cloud only"
                 )
-    try:
-        settings = await cloud_client.get_thing_settings(serial)
-    except AuthFail as ex:
-        raise ConfigEntryAuthFailed(
-            translation_domain=DOMAIN, translation_key="authentication_failed"
-        ) from ex
-    except (RequestNotSuccessful, TimeoutError) as ex:
-        _LOGGER.debug(ex, exc_info=True)
-        if not bluetooth_client:
-            raise ConfigEntryNotReady(
-                translation_domain=DOMAIN, translation_key="api_error"
-            ) from ex
-        _LOGGER.debug("Cloud failed, continuing with Bluetooth only", exc_info=True)
-    else:
-        gateway_version = version.parse(
-            settings.firmwares[FirmwareType.GATEWAY].build_version
-        )
 
-        if gateway_version < version.parse("v5.0.9"):
-            # incompatible gateway firmware, create an issue
-            ir.async_create_issue(
-                hass,
-                DOMAIN,
-                "unsupported_gateway_firmware",
-                is_fixable=False,
-                severity=ir.IssueSeverity.ERROR,
-                translation_key="unsupported_gateway_firmware",
-                translation_placeholders={"gateway_version": str(gateway_version)},
+    local_mode = entry.options.get(CONF_LOCAL_MODE, False)
+
+    if not local_mode:
+        try:
+            settings = await cloud_client.get_thing_settings(serial)
+        except AuthFail as ex:
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="authentication_failed"
+            ) from ex
+        except (RequestNotSuccessful, TimeoutError) as ex:
+            _LOGGER.debug(ex, exc_info=True)
+            if not bluetooth_client:
+                raise ConfigEntryNotReady(
+                    translation_domain=DOMAIN, translation_key="api_error"
+                ) from ex
+            _LOGGER.debug("Cloud failed, continuing with Bluetooth only", exc_info=True)
+        else:
+            gateway_version = version.parse(
+                settings.firmwares[FirmwareType.GATEWAY].build_version
             )
-        # Update BLE Token if exists
-        if settings.ble_auth_token:
-            hass.config_entries.async_update_entry(
-                entry,
-                data={
-                    **entry.data,
-                    CONF_TOKEN: settings.ble_auth_token,
-                },
-            )
+
+            if gateway_version < version.parse("v5.0.9"):
+                # incompatible gateway firmware, create an issue
+                ir.async_create_issue(
+                    hass,
+                    DOMAIN,
+                    "unsupported_gateway_firmware",
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.ERROR,
+                    translation_key="unsupported_gateway_firmware",
+                    translation_placeholders={"gateway_version": str(gateway_version)},
+                )
+            # Update BLE Token if exists
+            if settings.ble_auth_token:
+                hass.config_entries.async_update_entry(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_TOKEN: settings.ble_auth_token,
+                    },
+                )
 
     device = LaMarzoccoMachine(
         serial_number=entry.unique_id,
@@ -163,30 +168,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
         bluetooth_client=bluetooth_client,
     )
 
-    local_mode = entry.options.get(CONF_LOCAL_MODE, False)
+    # Set update_interval to _DISABLE_POLLING for cloud coordinators when local mode
+    # is enabled to disable polling
+    cloud_update_interval = _DISABLE_POLLING if local_mode else None
 
     coordinators = LaMarzoccoRuntimeData(
         LaMarzoccoConfigUpdateCoordinator(
-            hass, entry, device, bluetooth_client, cloud_client
+            hass, entry, device, bluetooth_client, cloud_client, cloud_update_interval
         ),
-        LaMarzoccoSettingsUpdateCoordinator(hass, entry, device, bluetooth_client),
-        LaMarzoccoScheduleUpdateCoordinator(hass, entry, device, bluetooth_client),
-        LaMarzoccoStatisticsUpdateCoordinator(hass, entry, device, bluetooth_client),
+        LaMarzoccoSettingsUpdateCoordinator(
+            hass, entry, device, bluetooth_client, update_interval=cloud_update_interval
+        ),
+        LaMarzoccoScheduleUpdateCoordinator(
+            hass, entry, device, bluetooth_client, update_interval=cloud_update_interval
+        ),
+        LaMarzoccoStatisticsUpdateCoordinator(
+            hass, entry, device, bluetooth_client, update_interval=cloud_update_interval
+        ),
     )
 
-    refresh_tasks = []
     if not local_mode:
-        refresh_tasks.extend(
-            [
-                coordinators.config_coordinator.async_config_entry_first_refresh(),
-                coordinators.settings_coordinator.async_config_entry_first_refresh(),
-                coordinators.schedule_coordinator.async_config_entry_first_refresh(),
-                coordinators.statistics_coordinator.async_config_entry_first_refresh(),
-            ]
+        await asyncio.gather(
+            coordinators.config_coordinator.async_config_entry_first_refresh(),
+            coordinators.settings_coordinator.async_config_entry_first_refresh(),
+            coordinators.schedule_coordinator.async_config_entry_first_refresh(),
+            coordinators.statistics_coordinator.async_config_entry_first_refresh(),
         )
-
-    if refresh_tasks:
-        await asyncio.gather(*refresh_tasks)
 
     # bt coordinator only if bluetooth client is available
     # and after the initial refresh of the config coordinator
