@@ -240,11 +240,15 @@ class LaMarzoccoBluetoothUpdateCoordinator(LaMarzoccoUpdateCoordinator):
     async def _internal_async_update_data(self) -> None:
         """Fetch data from Bluetooth endpoint.
 
-        Note: This coordinator does not check local_mode_enabled because
-        Bluetooth is the primary communication method in local mode.
+        Note: This coordinator does not skip updates when local mode is enabled
+        because Bluetooth is the primary communication method in local mode.
         """
         # If the websocket is connected and the machine is connected to the cloud
-        # skip bluetooth update, because we get push updates
-        if self.device.websocket.connected and self.device.dashboard.connected:
+        # and not in local mode, skip bluetooth update because we get push updates
+        if (
+            self.device.websocket.connected
+            and self.device.dashboard.connected
+            and not self.local_mode_enabled
+        ):
             return
         await self.device.get_dashboard_from_bluetooth()
