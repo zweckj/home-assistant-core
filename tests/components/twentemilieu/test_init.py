@@ -49,12 +49,28 @@ async def test_config_entry_not_ready(
 @pytest.mark.usefixtures("mock_twentemilieu")
 async def test_offline_mode_disables_updates(
     hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
 ) -> None:
     """Test that offline mode disables coordinator updates."""
-    # Set offline mode in options
+    from homeassistant.components.twentemilieu.const import (
+        CONF_HOUSE_LETTER,
+        CONF_HOUSE_NUMBER,
+        CONF_POST_CODE,
+        DOMAIN,
+    )
+    from homeassistant.const import CONF_ID
+
+    # Create config entry with offline mode enabled
     mock_config_entry = MockConfigEntry(
-        **{**mock_config_entry.to_json(), "options": {"offline_mode": True}}
+        title="1234AB 1",
+        domain=DOMAIN,
+        data={
+            CONF_ID: 12345,
+            CONF_POST_CODE: "1234AB",
+            CONF_HOUSE_NUMBER: "1",
+            CONF_HOUSE_LETTER: "A",
+        },
+        options={"offline_mode": True},
+        unique_id="12345",
     )
     mock_config_entry.add_to_hass(hass)
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
