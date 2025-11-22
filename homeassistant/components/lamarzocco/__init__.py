@@ -33,7 +33,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .const import CONF_INSTALLATION_KEY, CONF_USE_BLUETOOTH, DOMAIN
+from .const import CONF_INSTALLATION_KEY, CONF_LOCAL_MODE, CONF_USE_BLUETOOTH, DOMAIN
 from .coordinator import (
     LaMarzoccoBluetoothUpdateCoordinator,
     LaMarzoccoConfigEntry,
@@ -163,6 +163,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
         bluetooth_client=bluetooth_client,
     )
 
+    local_mode = entry.options.get(CONF_LOCAL_MODE, False)
+
     coordinators = LaMarzoccoRuntimeData(
         LaMarzoccoConfigUpdateCoordinator(
             hass, entry, device, bluetooth_client, cloud_client
@@ -172,12 +174,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaMarzoccoConfigEntry) -
         LaMarzoccoStatisticsUpdateCoordinator(hass, entry, device, bluetooth_client),
     )
 
-    await asyncio.gather(
-        coordinators.config_coordinator.async_config_entry_first_refresh(),
-        coordinators.settings_coordinator.async_config_entry_first_refresh(),
-        coordinators.schedule_coordinator.async_config_entry_first_refresh(),
-        coordinators.statistics_coordinator.async_config_entry_first_refresh(),
-    )
+    refresh_tasks = []
+    if not local_mode:
+        refresh_tasks.extend([
+            coordinators.config_coordinator.async_config_entry_first_refresh(),
+            coordinators.settings_coordinator.async_config_entry_first_refresh(),
+            coordinators.schedule_coordinator.async_config_entry_first_refresh(),
+            coordinators.statistics_coordinator.async_config_entry_first_refresh(),
+        ])
+
+    if refresh_tasks:
+        await asyncio.gather(*refresh_tasks)
 
     # bt coordinator only if bluetooth client is available
     # and after the initial refresh of the config coordinator

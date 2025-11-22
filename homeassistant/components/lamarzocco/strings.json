@@ -212,10 +212,12 @@
     "step": {
       "init": {
         "data": {
-          "use_bluetooth": "Use Bluetooth"
+          "use_bluetooth": "Use Bluetooth",
+          "local_mode": "Local mode"
         },
         "data_description": {
-          "use_bluetooth": "Should the integration try to use Bluetooth to control the machine?"
+          "use_bluetooth": "Should the integration try to use Bluetooth to control the machine?",
+          "local_mode": "Enable local-only mode to disable internet-facing features and use only Bluetooth"
         }
       }
     }

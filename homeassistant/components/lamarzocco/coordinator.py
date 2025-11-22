@@ -27,7 +27,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
+from .const import CONF_LOCAL_MODE, DOMAIN
 
 SCAN_INTERVAL = timedelta(seconds=60)
 SETTINGS_UPDATE_INTERVAL = timedelta(hours=8)
@@ -143,6 +143,9 @@ class LaMarzoccoConfigUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
+        # skip updates if local mode is enabled
+        if self.config_entry.options.get(CONF_LOCAL_MODE, False):
+            return
 
         # ensure token stays valid; does nothing if token is still valid
         await self.cloud_client.async_get_access_token()
@@ -187,6 +190,9 @@ class LaMarzoccoSettingsUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
+        # skip updates if local mode is enabled
+        if self.config_entry.options.get(CONF_LOCAL_MODE, False):
+            return
         await self.device.get_settings()
         _LOGGER.debug("Current settings: %s", self.device.settings.to_dict())
 
@@ -198,6 +204,9 @@ class LaMarzoccoScheduleUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
+        # skip updates if local mode is enabled
+        if self.config_entry.options.get(CONF_LOCAL_MODE, False):
+            return
         await self.device.get_schedule()
         _LOGGER.debug("Current schedule: %s", self.device.schedule.to_dict())
 
@@ -209,6 +218,9 @@ class LaMarzoccoStatisticsUpdateCoordinator(LaMarzoccoUpdateCoordinator):
 
     async def _internal_async_update_data(self) -> None:
         """Fetch data from API endpoint."""
+        # skip updates if local mode is enabled
+        if self.config_entry.options.get(CONF_LOCAL_MODE, False):
+            return
         await self.device.get_coffee_and_flush_counter()
         _LOGGER.debug("Current statistics: %s", self.device.statistics.to_dict())
 
