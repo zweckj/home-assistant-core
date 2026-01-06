@@ -1,0 +1,39 @@
+# Example Home Assistant Configuration for WebAuthn Auth Provider
+
+# In your configuration.yaml file:
+
+homeassistant:
+  auth_providers:
+    # Keep the default Home Assistant auth provider for fallback
+    - type: homeassistant
+    
+    # Add WebAuthn provider for passwordless authentication
+    - type: webauthn
+      # Optional: give it a custom name
+      name: "Security Key Login"
+
+# Note: The WebAuthn provider requires:
+# 1. HTTPS connection (WebAuthn specification requirement)
+# 2. Browser with WebAuthn support
+# 3. FIDO2-compatible authenticator (hardware key, platform authenticator, etc.)
+# 4. Frontend integration to call navigator.credentials.create() and navigator.credentials.get()
+
+# Example authentication flow:
+
+# 1. Registration (one-time setup):
+#    - User logs in with another provider (e.g., homeassistant provider)
+#    - Goes to profile settings to add a security key
+#    - Browser prompts to insert/touch security key
+#    - Public key is stored in Home Assistant
+
+# 2. Authentication (future logins):
+#    - User enters username
+#    - Browser prompts to insert/touch security key
+#    - Authenticator signs challenge with private key
+#    - Home Assistant verifies signature and logs user in
+
+# Security features:
+# - No passwords stored or transmitted
+# - Phishing resistant (credentials bound to domain)
+# - Hardware-backed security
+# - Multi-device support (register multiple authenticators)

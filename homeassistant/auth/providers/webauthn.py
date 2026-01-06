@@ -212,7 +212,9 @@ class WebAuthnAuthProvider(AuthProvider):
         """Clear the challenge for a username."""
         self._challenges.pop(username, None)
 
-    def get_registration_options(self, username: str, user_display_name: str) -> dict[str, Any]:
+    def get_registration_options(
+        self, username: str, user_display_name: str
+    ) -> dict[str, Any]:
         """Generate registration options for WebAuthn.
 
         This method would be called by the frontend to initiate credential registration.
