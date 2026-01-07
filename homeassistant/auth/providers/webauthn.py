@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from asyncio import Lock
 from collections.abc import Mapping
+from dataclasses import dataclass, field
+from time import time
 from typing import Any, Final
 
 import voluptuous as vol
@@ -14,18 +16,15 @@ from webauthn import (
     verify_authentication_response,
     verify_registration_response,
 )
-from webauthn.authentication.verify_authentication_response import (
-    VerifiedAuthentication,
-)
 from webauthn.helpers.structs import (
     AuthenticationCredential,
+    CredentialDeviceType,
     PublicKeyCredentialCreationOptions,
     PublicKeyCredentialDescriptor,
     PublicKeyCredentialRequestOptions,
     RegistrationCredential,
     UserVerificationRequirement,
 )
-from webauthn.registration.verify_registration_response import VerifiedRegistration
 
 from homeassistant.const import CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -57,11 +56,24 @@ CONFIG_SCHEMA = AUTH_PROVIDER_SCHEMA.extend(
 )
 
 
+@dataclass
+class WebAuthnRegistration:
+    """Class to hold WebAuthn registration data."""
+
+    credential_id: bytes
+    credential_public_key: bytes
+    sign_count: int
+    credential_device_type: CredentialDeviceType
+    credential_backed_up: bool
+    created_at: float = field(default_factory=time)
+    last_used_at: float = field(default_factory=time)
+
+
 class InvalidAuthError(HomeAssistantError):
     """Raised when submitting invalid authentication."""
 
 
-type DataType = dict[str, dict[bytes, VerifiedRegistration]]
+type DataType = dict[str, dict[bytes, WebAuthnRegistration]]
 
 
 class WebAuthnDataStore:
@@ -82,28 +94,29 @@ class WebAuthnDataStore:
         self._data = data
 
     async def async_add(
-        self, username: str, registration: VerifiedRegistration
+        self, username: str, registration: WebAuthnRegistration
     ) -> None:
         """Store data to persistent storage."""
+
         user_creds = self._data.setdefault(username, {})
         user_creds[registration.credential_id] = registration
         await self._store.async_save(self._data)
 
     async def async_update_user_registration(
-        self, username: str, verified_authentication: VerifiedAuthentication
+        self,
+        username: str,
+        credential_id: bytes,
+        new_sign_count: int,
+        credential_device_type: CredentialDeviceType,
+        credential_backed_up: bool,
     ) -> None:
         """Update credential data in after a successful authentication."""
-        registration = self._data.get(username, {}).get(
-            verified_authentication.credential_id
-        )
+        registration = self._data.get(username, {}).get(credential_id)
         if registration:
-            registration.sign_count = verified_authentication.new_sign_count
-            registration.credential_device_type = (
-                verified_authentication.credential_device_type
-            )
-            registration.credential_backed_up = (
-                verified_authentication.credential_backed_up
-            )
+            registration.sign_count = new_sign_count
+            registration.credential_device_type = credential_device_type
+            registration.credential_backed_up = credential_backed_up
+            registration.last_used_at = time()
             await self._store.async_save(self._data)
 
     async def async_get_user_registered_credentials(
@@ -115,7 +128,7 @@ class WebAuthnDataStore:
 
     async def async_get_user_registration(
         self, username: str, credential_id: bytes
-    ) -> VerifiedRegistration | None:
+    ) -> WebAuthnRegistration | None:
         """Retrieve data from persistent storage."""
         return self._data.get(username, {}).get(credential_id)
 
@@ -194,7 +207,15 @@ class WebAuthnProvider(AuthProvider):
             await self.async_initialize()
             assert self.data is not None
 
-        await self.data.async_add(username, verification)
+        registration = WebAuthnRegistration(
+            credential_id=verification.credential_id,
+            credential_public_key=verification.credential_public_key,
+            sign_count=verification.sign_count,
+            credential_device_type=verification.credential_device_type,
+            credential_backed_up=verification.credential_backed_up,
+        )
+
+        await self.data.async_add(username, registration)
 
     async def async_start_authentication(
         self, username: str
@@ -248,7 +269,13 @@ class WebAuthnProvider(AuthProvider):
             raise InvalidAuthError("Authentication failed.") from err
 
         # Update the sign count and other info
-        await self.data.async_update_user_registration(username, response)
+        await self.data.async_update_user_registration(
+            username=username,
+            credential_id=response.credential_id,
+            new_sign_count=response.new_sign_count,
+            credential_device_type=response.credential_device_type,
+            credential_backed_up=response.credential_backed_up,
+        )
 
     async def async_get_or_create_credentials(
         self, flow_result: Mapping[str, str]
