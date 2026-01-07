@@ -112,8 +112,7 @@ class WebAuthnDataStore:
         credential_backed_up: bool,
     ) -> None:
         """Update credential data in after a successful authentication."""
-        registration = self._data.get(username, {}).get(credential_id)
-        if registration:
+        if registration := self._data.get(username, {}).get(credential_id):
             registration.sign_count = new_sign_count
             registration.credential_device_type = credential_device_type
             registration.credential_backed_up = credential_backed_up
