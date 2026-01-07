@@ -10,12 +10,14 @@ from typing import Any, Final, cast
 
 import voluptuous as vol
 from webauthn import (
+    base64url_to_bytes,
     generate_authentication_options,
     generate_registration_options,
     options_to_json,
     verify_authentication_response,
     verify_registration_response,
 )
+from webauthn.helpers.bytes_to_base64url import bytes_to_base64url
 from webauthn.helpers.structs import (
     AuthenticationCredential,
     CredentialDeviceType,
@@ -72,11 +74,12 @@ def async_get_provider(hass: HomeAssistant) -> WebAuthnProvider:
 class WebAuthnCredential:
     """Class to hold WebAuthn registration data."""
 
-    credential_id: bytes
-    credential_public_key: bytes
+    credential_id: str
+    credential_public_key: str
     sign_count: int
     credential_device_type: CredentialDeviceType
     credential_backed_up: bool
+    name: str = "Passkey"
     created_at: float = field(default_factory=time)
     last_used_at: float = field(default_factory=time)
 
@@ -89,11 +92,11 @@ class InvalidUserError(HomeAssistantError):
     """Raised when submitting invalid user."""
 
 
-class InvalidCredentialError(HomeAssistantError):
+class CredentialNotFoundError(HomeAssistantError):
     """Raised when submitting invalid credential."""
 
 
-type DataType = dict[str, dict[bytes, WebAuthnCredential]]
+type DataType = dict[str, dict[str, WebAuthnCredential]]
 
 
 class WebAuthnDataStore:
@@ -122,20 +125,18 @@ class WebAuthnDataStore:
         user_creds[credential.credential_id] = credential
         await self._store.async_save(self._data)
 
-    async def async_delete_credential(
-        self, username: str, credential_id: bytes
-    ) -> None:
+    async def async_delete_credential(self, username: str, credential_id: str) -> None:
         """Delete credential from persistent storage."""
         if (user_data := self._data.get(username)) is None:
             raise InvalidUserError("User not found.")
         if user_data.pop(credential_id, None) is None:
-            raise InvalidCredentialError("Credential not found.")
+            raise CredentialNotFoundError("Credential not found.")
         await self._store.async_save(self._data)
 
     async def async_update_user_registration(
         self,
         username: str,
-        credential_id: bytes,
+        credential_id: str,
         new_sign_count: int,
         credential_device_type: CredentialDeviceType,
         credential_backed_up: bool,
@@ -153,7 +154,10 @@ class WebAuthnDataStore:
     ) -> list[PublicKeyCredentialDescriptor]:
         """Retrieve allowed credentials for a user."""
         user_creds = self._data.get(username, {})
-        return [PublicKeyCredentialDescriptor(id=cred_id) for cred_id in user_creds]
+        return [
+            PublicKeyCredentialDescriptor(id=base64url_to_bytes(cred_id))
+            for cred_id in user_creds
+        ]
 
     async def async_list_credentials(self, username: str) -> list[WebAuthnCredential]:
         """Retrieve all registered credentials for a user."""
@@ -162,7 +166,7 @@ class WebAuthnDataStore:
         return list(user_creds.values())
 
     async def async_get_user_credential(
-        self, username: str, credential_id: bytes
+        self, username: str, credential_id: str
     ) -> WebAuthnCredential | None:
         """Retrieve data from persistent storage."""
 
@@ -238,7 +242,7 @@ class WebAuthnProvider(AuthProvider):
         )
         return options
 
-    async def async_complete_registration(
+    async def async_verify_registration(
         self, username: str, credential: RegistrationCredential
     ) -> None:
         """Complete the registration of a new WebAuthn credential."""
@@ -262,8 +266,10 @@ class WebAuthnProvider(AuthProvider):
             assert self.data is not None
 
         web_authn_credential = WebAuthnCredential(
-            credential_id=verification.credential_id,
-            credential_public_key=verification.credential_public_key,
+            credential_id=bytes_to_base64url(verification.credential_id),
+            credential_public_key=bytes_to_base64url(
+                verification.credential_public_key
+            ),
             sign_count=verification.sign_count,
             credential_device_type=verification.credential_device_type,
             credential_backed_up=verification.credential_backed_up,
@@ -301,7 +307,7 @@ class WebAuthnProvider(AuthProvider):
         )
         return options
 
-    async def async_complete_authentication(
+    async def async_verify_authentication(
         self, username: str, credential: AuthenticationCredential
     ) -> None:
         """Complete the authentication process."""
@@ -317,7 +323,7 @@ class WebAuthnProvider(AuthProvider):
             assert self.data is not None
 
         registration = await self.data.async_get_user_credential(
-            username, credential.raw_id
+            username, credential.id
         )
         if registration is None:
             raise InvalidAuthError("No registered credentials found for user.")
@@ -328,7 +334,9 @@ class WebAuthnProvider(AuthProvider):
                 expected_challenge=challenge,
                 expected_rp_id=RP_ID,
                 expected_origin=self.config[CONF_EXPECTED_ORIGIN],
-                credential_public_key=registration.credential_public_key,
+                credential_public_key=base64url_to_bytes(
+                    registration.credential_public_key
+                ),
                 credential_current_sign_count=registration.sign_count,
                 require_user_verification=True,
             )
@@ -338,15 +346,13 @@ class WebAuthnProvider(AuthProvider):
         # Update the sign count and other info
         await self.data.async_update_user_registration(
             username=username,
-            credential_id=response.credential_id,
+            credential_id=bytes_to_base64url(response.credential_id),
             new_sign_count=response.new_sign_count,
             credential_device_type=response.credential_device_type,
             credential_backed_up=response.credential_backed_up,
         )
 
-    async def async_delete_credential(
-        self, username: str, credential_id: bytes
-    ) -> None:
+    async def async_delete_credential(self, username: str, credential_id: str) -> None:
         """Delete a registered credential."""
         if self.data is None:
             await self.async_initialize()
@@ -455,7 +461,7 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
 
         if user_input is not None:
             try:
-                await self._auth_provider.async_complete_authentication(
+                await self._auth_provider.async_verify_authentication(
                     self.username, user_input[CONF_AUTHENTICATION_CREDENTIAL]
                 )
             except InvalidAuthError:
