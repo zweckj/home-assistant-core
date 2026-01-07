@@ -44,18 +44,19 @@ WEBAUTHN_PROVIDER_TYPE: Final = "webauthn"
 STORAGE_VERSION: Final = 1
 STORAGE_KEY: Final = "auth_provider.webauthn"
 
-RP_NAME: Final = "Home Assistant"
-RP_ID: Final = "home-assistant.io"
-
 SIGN_IN_TIMEOUT_MS: Final = 60000
 REGISTER_TIMEOUT_MS: Final = 60000
 
+CONF_RP_ID: Final = "rp_id"
+CONF_RP_NAME: Final = "rp_name"
 CONF_EXPECTED_ORIGIN: Final = "expected_origin"
 CONF_AUTHENTICATION_CREDENTIAL: Final = "authentication_credential"
 
 
 CONFIG_SCHEMA = AUTH_PROVIDER_SCHEMA.extend(
     {
+        vol.Required(CONF_RP_ID): str,
+        vol.Required(CONF_RP_NAME, default="Home Assistant"): str,
         vol.Required(CONF_EXPECTED_ORIGIN): vol.All(cv.ensure_list, [cv.url]),
     }
 )
@@ -225,8 +226,8 @@ class WebAuthnProvider(AuthProvider):
 
         # Do we have a list of pub key algorithms to support?
         options = generate_registration_options(
-            rp_name=RP_NAME,
-            rp_id=RP_ID,
+            rp_name=self.config[CONF_RP_NAME],
+            rp_id=self.config[CONF_RP_ID],
             user_name=username,
             timeout=REGISTER_TIMEOUT_MS,
         )
@@ -257,7 +258,7 @@ class WebAuthnProvider(AuthProvider):
         verification = verify_registration_response(
             credential=credential,
             expected_challenge=challenge,
-            expected_rp_id=RP_ID,
+            expected_rp_id=self.config[CONF_RP_ID],
             expected_origin=self.config[CONF_EXPECTED_ORIGIN],
             require_user_verification=True,
         )
@@ -289,7 +290,7 @@ class WebAuthnProvider(AuthProvider):
             assert self.data is not None
 
         options = generate_authentication_options(
-            rp_id=RP_ID,
+            rp_id=self.config[CONF_RP_ID],
             allow_credentials=await self.data.async_get_user_registered_credentials(
                 username
             ),
@@ -334,7 +335,7 @@ class WebAuthnProvider(AuthProvider):
             response = verify_authentication_response(
                 credential=credential,
                 expected_challenge=challenge,
-                expected_rp_id=RP_ID,
+                expected_rp_id=self.config[CONF_RP_ID],
                 expected_origin=self.config[CONF_EXPECTED_ORIGIN],
                 credential_public_key=base64url_to_bytes(
                     registration.credential_public_key
