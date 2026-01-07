@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from asyncio import Lock
 from collections.abc import Mapping
+from datetime import datetime, timedelta
 from typing import Any, Final
 
 import voluptuous as vol
@@ -32,6 +33,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from ..auth_store import AuthStore
 from ..models import AuthFlowContext, AuthFlowResult, Credentials, UserMeta
@@ -62,6 +64,19 @@ class InvalidAuthError(HomeAssistantError):
 
 
 type DataType = dict[str, dict[bytes, VerifiedRegistration]]
+
+
+class PendingOperation[T]:
+    """Class to hold pending operation with timestamp."""
+
+    def __init__(self, options: T, created_at: datetime) -> None:
+        """Initialize pending operation."""
+        self.options = options
+        self.created_at = created_at
+
+    def is_expired(self, timeout: timedelta) -> bool:
+        """Check if the operation has expired."""
+        return dt_util.utcnow() > self.created_at + timeout
 
 
 class WebAuthnDataStore:
@@ -132,9 +147,12 @@ class WebAuthnProvider(AuthProvider):
         """Initialize an auth provider."""
         super().__init__(hass, store, config)
         self.data: WebAuthnDataStore | None = None
-        # TODO expire pending registrations/signins after their respective timeouts
-        self._pending_registrations: dict[str, PublicKeyCredentialCreationOptions] = {}
-        self._pending_signins: dict[str, PublicKeyCredentialRequestOptions] = {}
+        self._pending_registrations: dict[
+            str, PendingOperation[PublicKeyCredentialCreationOptions]
+        ] = {}
+        self._pending_signins: dict[
+            str, PendingOperation[PublicKeyCredentialRequestOptions]
+        ] = {}
         self._init_lock = Lock()
 
     @property
@@ -170,20 +188,26 @@ class WebAuthnProvider(AuthProvider):
             user_name=username,
             timeout=REGISTER_TIMEOUT_MS,
         )
-        self._pending_registrations[username] = options
+        self._pending_registrations[username] = PendingOperation(
+            options, dt_util.utcnow()
+        )
         return options
 
     async def async_complete_registration(
         self, username: str, credential: RegistrationCredential
     ) -> None:
         """Complete the registration of a new WebAuthn credential."""
-        options = self._pending_registrations.pop(username, None)
-        if options is None:
+        pending = self._pending_registrations.pop(username, None)
+        if pending is None:
             raise InvalidAuthError("No pending registration found for user.")
+
+        # Check if the registration has expired
+        if pending.is_expired(timedelta(milliseconds=REGISTER_TIMEOUT_MS)):
+            raise InvalidAuthError("Registration has expired.")
 
         verification = verify_registration_response(
             credential=credential,
-            expected_challenge=options.challenge,
+            expected_challenge=pending.options.challenge,
             expected_rp_id=RP_ID,
             expected_origin=self.config[CONF_EXPECTED_ORIGIN],
             require_user_verification=True,
@@ -213,16 +237,20 @@ class WebAuthnProvider(AuthProvider):
             user_verification=UserVerificationRequirement.REQUIRED,
             timeout=SIGN_IN_TIMEOUT_MS,
         )
-        self._pending_signins[username] = options
+        self._pending_signins[username] = PendingOperation(options, dt_util.utcnow())
         return options
 
     async def async_complete_authentication(
         self, username: str, credential: AuthenticationCredential
     ) -> None:
         """Complete the authentication process."""
-        options = self._pending_signins.pop(username, None)
-        if options is None:
+        pending = self._pending_signins.pop(username, None)
+        if pending is None:
             raise InvalidAuthError("No pending authentication found for user.")
+
+        # Check if the authentication has expired
+        if pending.is_expired(timedelta(milliseconds=SIGN_IN_TIMEOUT_MS)):
+            raise InvalidAuthError("Authentication has expired.")
 
         if self.data is None:
             await self.async_initialize()
@@ -237,7 +265,7 @@ class WebAuthnProvider(AuthProvider):
         try:
             response = verify_authentication_response(
                 credential=credential,
-                expected_challenge=options.challenge,
+                expected_challenge=pending.options.challenge,
                 expected_rp_id=RP_ID,
                 expected_origin=self.config[CONF_EXPECTED_ORIGIN],
                 credential_public_key=registration.credential_public_key,
