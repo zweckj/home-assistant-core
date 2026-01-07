@@ -67,7 +67,11 @@ type DataType = dict[str, dict[bytes, VerifiedRegistration]]
 
 
 class PendingOperation[T]:
-    """Class to hold pending operation with timestamp."""
+    """Class to hold pending WebAuthn operation with timestamp for expiration tracking.
+
+    T represents the type of options being stored, such as
+    PublicKeyCredentialCreationOptions or PublicKeyCredentialRequestOptions.
+    """
 
     def __init__(self, options: T, created_at: datetime) -> None:
         """Initialize pending operation."""
