@@ -6,7 +6,7 @@ from asyncio import Lock
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from time import time
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import voluptuous as vol
 from webauthn import (
@@ -37,6 +37,8 @@ from ..auth_store import AuthStore
 from ..models import AuthFlowContext, AuthFlowResult, Credentials, UserMeta
 from . import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
 
+WEBAUTHN_PROVIDER_TYPE: Final = "webauthn"
+
 STORAGE_VERSION: Final = 1
 STORAGE_KEY: Final = "auth_provider.webauthn"
 
@@ -55,6 +57,15 @@ CONFIG_SCHEMA = AUTH_PROVIDER_SCHEMA.extend(
         vol.Required(CONF_EXPECTED_ORIGIN): vol.All(cv.ensure_list, [cv.url]),
     }
 )
+
+
+@callback
+def async_get_provider(hass: HomeAssistant) -> WebAuthnProvider:
+    """Get the provider."""
+    for prv in hass.auth.auth_providers:
+        if prv.type == WEBAUTHN_PROVIDER_TYPE:
+            return cast(WebAuthnProvider, prv)
+    raise RuntimeError("Provider not found")
 
 
 @dataclass
@@ -133,7 +144,7 @@ class WebAuthnDataStore:
         return self._data.get(username, {}).get(credential_id)
 
 
-@AUTH_PROVIDERS.register("webauthn")
+@AUTH_PROVIDERS.register(WEBAUTHN_PROVIDER_TYPE)
 class WebAuthnProvider(AuthProvider):
     """WebAuthn authentication provider for Home Assistant."""
 
