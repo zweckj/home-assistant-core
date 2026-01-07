@@ -88,10 +88,6 @@ class InvalidAuthError(HomeAssistantError):
     """Raised when submitting invalid authentication."""
 
 
-class InvalidUserError(HomeAssistantError):
-    """Raised when submitting invalid user."""
-
-
 class CredentialNotFoundError(HomeAssistantError):
     """Raised when submitting invalid credential."""
 
@@ -127,10 +123,17 @@ class WebAuthnDataStore:
 
     async def async_delete_credential(self, username: str, credential_id: str) -> None:
         """Delete credential from persistent storage."""
-        if (user_data := self._data.get(username)) is None:
-            raise InvalidUserError("User not found.")
-        if user_data.pop(credential_id, None) is None:
+        if (self._data.get(username, {}).pop(credential_id, None)) is None:
             raise CredentialNotFoundError("Credential not found.")
+        await self._store.async_save(self._data)
+
+    async def async_rename_credential(
+        self, username: str, credential_id: str, new_name: str
+    ) -> None:
+        """Rename credential in persistent storage."""
+        if (credential := self._data.get(username, {}).get(credential_id)) is None:
+            raise CredentialNotFoundError("Credential not found.")
+        credential.name = new_name
         await self._store.async_save(self._data)
 
     async def async_update_user_registration(
@@ -162,7 +165,7 @@ class WebAuthnDataStore:
     async def async_list_credentials(self, username: str) -> list[WebAuthnCredential]:
         """Retrieve all registered credentials for a user."""
         if (user_creds := self._data.get(username)) is None:
-            raise InvalidUserError("User not found.")
+            return []
         return list(user_creds.values())
 
     async def async_get_user_credential(
@@ -170,7 +173,6 @@ class WebAuthnDataStore:
     ) -> WebAuthnCredential | None:
         """Retrieve data from persistent storage."""
 
-        # do not raise if not found, because during auth
         return self._data.get(username, {}).get(credential_id)
 
 
@@ -366,7 +368,20 @@ class WebAuthnProvider(AuthProvider):
             await self.async_initialize()
             assert self.data is not None
 
-        return await self.data.async_list_credentials(username)
+        return await self.data.async_list_credentials(username=username)
+
+    async def async_rename_credential(
+        self,
+        username: str,
+        credential_id: str,
+        new_name: str,
+    ) -> None:
+        """Rename a registered credential for a user."""
+        if self.data is None:
+            await self.async_initialize()
+            assert self.data is not None
+
+        await self.data.async_rename_credential(username, credential_id, new_name)
 
     async def async_get_or_create_credentials(
         self, flow_result: Mapping[str, str]
