@@ -69,7 +69,7 @@ def async_get_provider(hass: HomeAssistant) -> WebAuthnProvider:
 
 
 @dataclass
-class WebAuthnRegistration:
+class WebAuthnCredential:
     """Class to hold WebAuthn registration data."""
 
     credential_id: bytes
@@ -85,7 +85,7 @@ class InvalidAuthError(HomeAssistantError):
     """Raised when submitting invalid authentication."""
 
 
-type DataType = dict[str, dict[bytes, WebAuthnRegistration]]
+type DataType = dict[str, dict[bytes, WebAuthnCredential]]
 
 
 class WebAuthnDataStore:
@@ -105,13 +105,11 @@ class WebAuthnDataStore:
 
         self._data = data
 
-    async def async_add(
-        self, username: str, registration: WebAuthnRegistration
-    ) -> None:
+    async def async_add(self, username: str, credential: WebAuthnCredential) -> None:
         """Store data to persistent storage."""
 
         user_creds = self._data.setdefault(username, {})
-        user_creds[registration.credential_id] = registration
+        user_creds[credential.credential_id] = credential
         await self._store.async_save(self._data)
 
     async def async_update_user_registration(
@@ -139,7 +137,7 @@ class WebAuthnDataStore:
 
     async def async_get_user_registration(
         self, username: str, credential_id: bytes
-    ) -> WebAuthnRegistration | None:
+    ) -> WebAuthnCredential | None:
         """Retrieve data from persistent storage."""
         return self._data.get(username, {}).get(credential_id)
 
@@ -235,7 +233,7 @@ class WebAuthnProvider(AuthProvider):
             await self.async_initialize()
             assert self.data is not None
 
-        registration = WebAuthnRegistration(
+        web_authn_credential = WebAuthnCredential(
             credential_id=verification.credential_id,
             credential_public_key=verification.credential_public_key,
             sign_count=verification.sign_count,
@@ -243,7 +241,7 @@ class WebAuthnProvider(AuthProvider):
             credential_backed_up=verification.credential_backed_up,
         )
 
-        await self.data.async_add(username, registration)
+        await self.data.async_add(username, web_authn_credential)
 
     async def async_start_authentication(
         self, username: str
