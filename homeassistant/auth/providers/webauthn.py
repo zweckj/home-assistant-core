@@ -27,9 +27,10 @@ from webauthn.helpers.structs import (
 )
 
 from homeassistant.const import CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 
 from ..auth_store import AuthStore
@@ -145,10 +146,14 @@ class WebAuthnProvider(AuthProvider):
         """Initialize an auth provider."""
         super().__init__(hass, store, config)
         self.data: WebAuthnDataStore | None = None
-        # TODO expire pending registrations/signins after their respective timeouts
-        self._pending_registrations: dict[str, PublicKeyCredentialCreationOptions] = {}
-        self._pending_signins: dict[str, PublicKeyCredentialRequestOptions] = {}
+
+        # store the challenges for pending registrations and signins for each user
+        self._pending_registration_challenges: dict[str, bytes] = {}
+        self._pending_signin_challenges: dict[str, bytes] = {}
+
         self._init_lock = Lock()
+        self._registration_lock = Lock()
+        self._signin_lock = Lock()
 
     @property
     def support_mfa(self) -> bool:
@@ -183,20 +188,33 @@ class WebAuthnProvider(AuthProvider):
             user_name=username,
             timeout=REGISTER_TIMEOUT_MS,
         )
-        self._pending_registrations[username] = options
+
+        async with self._registration_lock:
+            self._pending_registration_challenges[username] = options.challenge
+
+        # clean the challenge after timeout
+        self._async_safe_remove_pending_challenges(
+            username=username,
+            challenge_dict=self._pending_registration_challenges,
+            challenge=options.challenge,
+            timeout=REGISTER_TIMEOUT_MS,
+            lock=self._registration_lock,
+        )
         return options
 
     async def async_complete_registration(
         self, username: str, credential: RegistrationCredential
     ) -> None:
         """Complete the registration of a new WebAuthn credential."""
-        options = self._pending_registrations.pop(username, None)
-        if options is None:
+        async with self._registration_lock:
+            challenge = self._pending_registration_challenges.pop(username, None)
+
+        if challenge is None:
             raise InvalidAuthError("No pending registration found for user.")
 
         verification = verify_registration_response(
             credential=credential,
-            expected_challenge=options.challenge,
+            expected_challenge=challenge,
             expected_rp_id=RP_ID,
             expected_origin=self.config[CONF_EXPECTED_ORIGIN],
             require_user_verification=True,
@@ -234,15 +252,28 @@ class WebAuthnProvider(AuthProvider):
             user_verification=UserVerificationRequirement.REQUIRED,
             timeout=SIGN_IN_TIMEOUT_MS,
         )
-        self._pending_signins[username] = options
+        async with self._signin_lock:
+            self._pending_signin_challenges[username] = options.challenge
+
+        # clean the challenge after timeout
+        self._async_safe_remove_pending_challenges(
+            username=username,
+            challenge=options.challenge,
+            challenge_dict=self._pending_signin_challenges,
+            timeout=SIGN_IN_TIMEOUT_MS,
+            lock=self._signin_lock,
+        )
         return options
 
     async def async_complete_authentication(
         self, username: str, credential: AuthenticationCredential
     ) -> None:
         """Complete the authentication process."""
-        options = self._pending_signins.pop(username, None)
-        if options is None:
+
+        async with self._signin_lock:
+            challenge = self._pending_signin_challenges.pop(username, None)
+
+        if challenge is None:
             raise InvalidAuthError("No pending authentication found for user.")
 
         if self.data is None:
@@ -258,7 +289,7 @@ class WebAuthnProvider(AuthProvider):
         try:
             response = verify_authentication_response(
                 credential=credential,
-                expected_challenge=options.challenge,
+                expected_challenge=challenge,
                 expected_rp_id=RP_ID,
                 expected_origin=self.config[CONF_EXPECTED_ORIGIN],
                 credential_public_key=registration.credential_public_key,
@@ -300,6 +331,29 @@ class WebAuthnProvider(AuthProvider):
         """
 
         return UserMeta(name=credentials.data[CONF_USERNAME], is_active=True)
+
+    @callback
+    def _async_safe_remove_pending_challenges(
+        self,
+        username: str,
+        challenge_dict: dict[str, bytes],
+        challenge: bytes,
+        timeout: int,
+        lock: Lock,
+    ) -> None:
+        """Remove a pending challenge for a user after a timeout."""
+
+        async def remove_challenge(_: Any) -> None:
+            async with lock:
+                chall = challenge_dict.get(username)
+                if chall is not None and chall == challenge:
+                    challenge_dict.pop(username)
+
+        async_call_later(
+            self.hass,
+            timeout / 1000,
+            remove_challenge,
+        )
 
 
 class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
