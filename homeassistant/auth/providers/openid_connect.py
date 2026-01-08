@@ -1,7 +1,7 @@
 """OpenID Connect authentication provider.
 
 This provider allows authentication via OpenID Connect (OIDC) identity providers.
-It uses the authorization code flow with proper JWKS signature verification.
+It uses the authorization code flow with PKCE and proper JWKS signature verification.
 """
 
 from __future__ import annotations
@@ -20,7 +20,9 @@ from yarl import URL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.config_entry_oauth2_flow import LocalOAuth2Implementation
+from homeassistant.helpers.config_entry_oauth2_flow import (
+    LocalOAuth2ImplementationWithPkce,
+)
 
 from ..models import AuthFlowContext, AuthFlowResult, Credentials, UserMeta
 from . import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
@@ -39,7 +41,7 @@ CONFIG_SCHEMA = AUTH_PROVIDER_SCHEMA.extend(
     {
         vol.Required(CONF_CONFIGURATION): str,
         vol.Required(CONF_CLIENT_ID): str,
-        vol.Required(CONF_CLIENT_SECRET): str,
+        vol.Optional(CONF_CLIENT_SECRET, default=""): str,
     },
     extra=vol.PREVENT_EXTRA,
 )
@@ -82,8 +84,8 @@ async def async_get_configuration(
     return cast(dict[str, Any], OPENID_CONFIGURATION_SCHEMA(data))
 
 
-class OpenIdConnectOAuth2Implementation(LocalOAuth2Implementation):
-    """OAuth2 implementation for OpenID Connect."""
+class OpenIdConnectOAuth2Implementation(LocalOAuth2ImplementationWithPkce):
+    """OAuth2 implementation with PKCE for OpenID Connect."""
 
     _nonce: str | None = None
     _scope: str
@@ -100,9 +102,9 @@ class OpenIdConnectOAuth2Implementation(LocalOAuth2Implementation):
             hass,
             DOMAIN,
             client_id,
-            client_secret,
             configuration["authorization_endpoint"],
             configuration["token_endpoint"],
+            client_secret,
         )
         scopes_supported = configuration.get("scopes_supported", list(WANTED_SCOPES))
         self._scope = " ".join(sorted(WANTED_SCOPES.intersection(scopes_supported)))
@@ -110,7 +112,9 @@ class OpenIdConnectOAuth2Implementation(LocalOAuth2Implementation):
     @property
     def extra_authorize_data(self) -> dict:
         """Extra data that needs to be appended to the authorize url."""
-        return {"scope": self._scope, "nonce": self._nonce}
+        data = {"scope": self._scope, "nonce": self._nonce}
+        data.update(super().extra_authorize_data)
+        return data
 
     def generate_authorize_url(
         self, redirect_uri: str, state: str, nonce: str
