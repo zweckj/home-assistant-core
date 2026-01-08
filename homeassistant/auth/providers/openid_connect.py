@@ -39,20 +39,54 @@ CONF_DISPLAY_NAME = "display_name"
 
 DEFAULT_SCOPES = ["openid", "profile", "email"]
 
-CONFIG_SCHEMA = AUTH_PROVIDER_SCHEMA.extend(
-    {
-        vol.Required(CONF_CLIENT_ID): str,
-        vol.Optional(CONF_CLIENT_SECRET, default=""): str,
-        vol.Optional(CONF_ISSUER_URL): str,
-        vol.Optional(CONF_AUTHORIZE_URL): str,
-        vol.Optional(CONF_TOKEN_URL): str,
-        vol.Optional(CONF_USERINFO_URL): str,
-        vol.Optional(CONF_SCOPES, default=DEFAULT_SCOPES): vol.All(
-            [str], vol.Length(min=1)
-        ),
-        vol.Optional(CONF_DISPLAY_NAME): str,
-    },
-    extra=vol.PREVENT_EXTRA,
+
+def _validate_endpoint_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Validate endpoint configuration.
+
+    Either issuer_url must be provided (for automatic discovery),
+    or both authorize_url AND token_url must be provided together.
+    """
+    has_issuer = bool(config.get(CONF_ISSUER_URL))
+    has_authorize = bool(config.get(CONF_AUTHORIZE_URL))
+    has_token = bool(config.get(CONF_TOKEN_URL))
+
+    # Valid configurations:
+    # 1. issuer_url provided (discovery will be used)
+    # 2. Both authorize_url and token_url provided (manual configuration)
+    # 3. issuer_url + partial manual URLs (manual takes precedence)
+
+    if not has_issuer and not (has_authorize and has_token):
+        raise vol.Invalid(
+            "Either 'issuer_url' must be provided for automatic discovery, "
+            "or both 'authorize_url' and 'token_url' must be provided"
+        )
+
+    if has_authorize != has_token and not has_issuer:
+        raise vol.Invalid(
+            "Both 'authorize_url' and 'token_url' must be provided together "
+            "when not using 'issuer_url' for discovery"
+        )
+
+    return config
+
+
+CONFIG_SCHEMA = vol.All(
+    AUTH_PROVIDER_SCHEMA.extend(
+        {
+            vol.Required(CONF_CLIENT_ID): str,
+            vol.Optional(CONF_CLIENT_SECRET, default=""): str,
+            vol.Optional(CONF_ISSUER_URL): str,
+            vol.Optional(CONF_AUTHORIZE_URL): str,
+            vol.Optional(CONF_TOKEN_URL): str,
+            vol.Optional(CONF_USERINFO_URL): str,
+            vol.Optional(CONF_SCOPES, default=DEFAULT_SCOPES): vol.All(
+                [str], vol.Length(min=1)
+            ),
+            vol.Optional(CONF_DISPLAY_NAME): str,
+        },
+        extra=vol.PREVENT_EXTRA,
+    ),
+    _validate_endpoint_config,
 )
 
 
@@ -104,7 +138,7 @@ def _compute_code_challenge(code_verifier: str) -> str:
 
     hashed = hashlib.sha256(code_verifier.encode("ascii")).digest()
     encoded = base64.urlsafe_b64encode(hashed)
-    return encoded.decode("ascii").rstrip("=")
+    return encoded.decode("ascii").replace("=", "")
 
 
 class OpenIdConnectOAuth2Implementation:
@@ -300,13 +334,25 @@ class OpenIdConnectAuthProvider(AuthProvider):
             _LOGGER.debug("Fetching OIDC discovery document from %s", discovery_url)
             resp = await session.get(discovery_url)
             resp.raise_for_status()
-            self._discovery_doc = await resp.json()
-            return cast(dict[str, Any], self._discovery_doc)
+            discovery_doc = await resp.json()
         except ClientError as err:
             _LOGGER.error("Failed to fetch discovery document: %s", err)
             raise OpenIdConnectConfigError(
                 f"Failed to fetch discovery document: {err}"
             ) from err
+
+        # Validate required fields per OpenID Connect Discovery spec
+        required_fields = ["authorization_endpoint", "token_endpoint", "issuer"]
+        missing_fields = [
+            field for field in required_fields if field not in discovery_doc
+        ]
+        if missing_fields:
+            raise OpenIdConnectConfigError(
+                f"Discovery document missing required fields: {', '.join(missing_fields)}"
+            )
+
+        self._discovery_doc = discovery_doc
+        return cast(dict[str, Any], self._discovery_doc)
 
     async def _async_get_endpoint_urls(
         self,
@@ -340,7 +386,8 @@ class OpenIdConnectAuthProvider(AuthProvider):
 
         if not authorize_url or not token_url:
             raise OpenIdConnectConfigError(
-                "Could not determine authorization and token endpoints"
+                "Could not determine authorization and token endpoints "
+                "from discovery document"
             )
 
         return authorize_url, token_url, userinfo_url
@@ -506,6 +553,17 @@ class OpenIdConnectLoginFlow(LoginFlow[OpenIdConnectAuthProvider]):
         Raises:
             OpenIdConnectError: If user info cannot be extracted.
 
+        Note on ID token signature verification:
+            We decode the ID token without signature verification because:
+            1. The token is received directly from the token endpoint over TLS
+            2. We authenticated to the token endpoint using our client credentials
+            3. Full JWKS verification would require additional complexity
+            4. This approach is common in confidential client scenarios
+
+            For higher security requirements, consider implementing full JWKS
+            verification by fetching the IdP's public keys from the jwks_uri
+            endpoint in the discovery document.
+
         """
         user_info: dict[str, Any] = {}
 
@@ -513,8 +571,7 @@ class OpenIdConnectLoginFlow(LoginFlow[OpenIdConnectAuthProvider]):
         id_token = token_response.get("id_token")
         if id_token:
             try:
-                # Decode without verification - the token was just issued by the IdP
-                # and we trust it since we received it directly from the token endpoint
+                # Decode without signature verification - see docstring for rationale
                 decoded = jwt.decode(
                     id_token,
                     options={"verify_signature": False},
