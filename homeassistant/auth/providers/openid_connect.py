@@ -1,160 +1,123 @@
 """OpenID Connect authentication provider.
 
 This provider allows authentication via OpenID Connect (OIDC) identity providers.
-It uses PKCE (Proof Key for Code Exchange) for enhanced security.
+It uses the authorization code flow with proper JWKS signature verification.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 import logging
-import secrets
+from secrets import token_hex
 from typing import Any, cast
 
-from aiohttp import ClientError, ClientResponseError
-import jwt
+from aiohttp import ClientError
+from jose import jwt
+from jose.exceptions import JWTError
 import voluptuous as vol
 from yarl import URL
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.config_entry_oauth2_flow import (
-    LocalOAuth2ImplementationWithPkce,
-)
+from homeassistant.helpers.config_entry_oauth2_flow import LocalOAuth2Implementation
 
-from ..auth_store import AuthStore
 from ..models import AuthFlowContext, AuthFlowResult, Credentials, UserMeta
 from . import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
 
 _LOGGER = logging.getLogger(__name__)
 
+CONF_CONFIGURATION = "configuration"
 CONF_CLIENT_ID = "client_id"
 CONF_CLIENT_SECRET = "client_secret"
-CONF_ISSUER_URL = "issuer_url"
-CONF_AUTHORIZE_URL = "authorize_url"
-CONF_TOKEN_URL = "token_url"
-CONF_USERINFO_URL = "userinfo_url"
-CONF_SCOPES = "scopes"
-CONF_DISPLAY_NAME = "display_name"
 
-DEFAULT_SCOPES = ["openid", "profile", "email"]
 DOMAIN = "openid_connect"
+WANTED_SCOPES = {"openid", "email", "profile"}
 
 
-def _validate_endpoint_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Validate endpoint configuration.
+CONFIG_SCHEMA = AUTH_PROVIDER_SCHEMA.extend(
+    {
+        vol.Required(CONF_CONFIGURATION): str,
+        vol.Required(CONF_CLIENT_ID): str,
+        vol.Required(CONF_CLIENT_SECRET): str,
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 
-    Either issuer_url must be provided (for automatic discovery),
-    or both authorize_url AND token_url must be provided together.
-    """
-    has_issuer = bool(config.get(CONF_ISSUER_URL))
-    has_authorize = bool(config.get(CONF_AUTHORIZE_URL))
-    has_token = bool(config.get(CONF_TOKEN_URL))
-
-    # Valid configurations:
-    # 1. issuer_url provided (discovery will be used)
-    # 2. Both authorize_url and token_url provided (manual configuration)
-    # 3. issuer_url + partial manual URLs (manual takes precedence)
-
-    if not has_issuer and not (has_authorize and has_token):
-        raise vol.Invalid(
-            "Either 'issuer_url' must be provided for automatic discovery, "
-            "or both 'authorize_url' and 'token_url' must be provided"
-        )
-
-    if has_authorize != has_token and not has_issuer:
-        raise vol.Invalid(
-            "Both 'authorize_url' and 'token_url' must be provided together "
-            "when not using 'issuer_url' for discovery"
-        )
-
-    return config
-
-
-CONFIG_SCHEMA = vol.All(
-    AUTH_PROVIDER_SCHEMA.extend(
-        {
-            vol.Required(CONF_CLIENT_ID): str,
-            vol.Optional(CONF_CLIENT_SECRET, default=""): str,
-            vol.Optional(CONF_ISSUER_URL): str,
-            vol.Optional(CONF_AUTHORIZE_URL): str,
-            vol.Optional(CONF_TOKEN_URL): str,
-            vol.Optional(CONF_USERINFO_URL): str,
-            vol.Optional(CONF_SCOPES, default=DEFAULT_SCOPES): vol.All(
-                [str], vol.Length(min=1)
-            ),
-            vol.Optional(CONF_DISPLAY_NAME): str,
-        },
-        extra=vol.PREVENT_EXTRA,
-    ),
-    _validate_endpoint_config,
+OPENID_CONFIGURATION_SCHEMA = vol.Schema(
+    {
+        vol.Required("issuer"): str,
+        vol.Required("jwks_uri"): str,
+        vol.Required("id_token_signing_alg_values_supported"): list,
+        vol.Optional("scopes_supported"): vol.Contains("openid"),
+        vol.Required("token_endpoint"): str,
+        vol.Required("authorization_endpoint"): str,
+        vol.Required("response_types_supported"): vol.Contains("code"),
+        vol.Optional(
+            "token_endpoint_auth_methods_supported", default=["client_secret_basic"]
+        ): vol.Contains("client_secret_post"),
+        vol.Optional(
+            "grant_types_supported", default=["authorization_code", "implicit"]
+        ): vol.Contains("authorization_code"),
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 
-class OpenIdConnectError(HomeAssistantError):
-    """Raised when OpenID Connect authentication fails."""
+class InvalidAuthError(HomeAssistantError):
+    """Raised when submitting invalid authentication."""
 
 
-class OpenIdConnectConfigError(OpenIdConnectError):
-    """Raised when OpenID Connect configuration is invalid."""
+async def async_get_configuration(
+    hass: HomeAssistant, configuration_url: str
+) -> dict[str, Any]:
+    """Get discovery document for OpenID."""
+    session = async_get_clientsession(hass)
+    try:
+        resp = await session.get(configuration_url)
+        resp.raise_for_status()
+    except ClientError as err:
+        raise InvalidAuthError(f"Failed to fetch configuration: {err}") from err
+    data = await resp.json()
+    return cast(dict[str, Any], OPENID_CONFIGURATION_SCHEMA(data))
 
 
-class OpenIdConnectUserInfoError(OpenIdConnectError):
-    """Raised when fetching user info fails."""
+class OpenIdConnectOAuth2Implementation(LocalOAuth2Implementation):
+    """OAuth2 implementation for OpenID Connect."""
 
-
-class OpenIdConnectOAuth2Implementation(LocalOAuth2ImplementationWithPkce):
-    """OAuth2 implementation with PKCE for OpenID Connect.
-
-    This class extends LocalOAuth2ImplementationWithPkce with
-    OpenID Connect specific functionality like userinfo endpoint support.
-    """
+    _nonce: str | None = None
+    _scope: str
 
     def __init__(
         self,
         hass: HomeAssistant,
         client_id: str,
         client_secret: str,
-        authorize_url: str,
-        token_url: str,
-        userinfo_url: str | None,
-        scopes: list[str],
+        configuration: dict[str, Any],
     ) -> None:
         """Initialize the OAuth2 implementation."""
         super().__init__(
-            hass=hass,
-            domain=DOMAIN,
-            client_id=client_id,
-            authorize_url=authorize_url,
-            token_url=token_url,
-            client_secret=client_secret,
+            hass,
+            DOMAIN,
+            client_id,
+            client_secret,
+            configuration["authorization_endpoint"],
+            configuration["token_endpoint"],
         )
-        self.userinfo_url = userinfo_url
-        self.scopes = scopes
+        scopes_supported = configuration.get("scopes_supported", list(WANTED_SCOPES))
+        self._scope = " ".join(sorted(WANTED_SCOPES.intersection(scopes_supported)))
 
     @property
     def extra_authorize_data(self) -> dict:
         """Extra data that needs to be appended to the authorize url."""
-        data = {"scope": " ".join(self.scopes)}
-        data.update(super().extra_authorize_data)
-        return data
+        return {"scope": self._scope, "nonce": self._nonce}
 
-    def generate_authorize_url(self, redirect_uri: str, state: str) -> str:
-        """Generate the authorization URL with custom state for auth flow.
-
-        This method is used by the auth provider login flow instead of
-        async_generate_authorize_url which is designed for config flows.
-
-        Args:
-            redirect_uri: The redirect URI for the OAuth2 callback.
-            state: State parameter for CSRF protection.
-
-        Returns:
-            The complete authorization URL.
-
-        """
-        return str(
+    def generate_authorize_url(
+        self, redirect_uri: str, state: str, nonce: str
+    ) -> str:
+        """Generate the authorization URL."""
+        self._nonce = nonce
+        url = str(
             URL(self.authorize_url)
             .with_query(
                 {
@@ -166,238 +129,154 @@ class OpenIdConnectOAuth2Implementation(LocalOAuth2ImplementationWithPkce):
             )
             .update_query(self.extra_authorize_data)
         )
-
-    async def async_get_userinfo(self, access_token: str) -> dict[str, Any]:
-        """Fetch user information from the userinfo endpoint.
-
-        Args:
-            access_token: The OAuth2 access token.
-
-        Returns:
-            User information from the userinfo endpoint.
-
-        Raises:
-            OpenIdConnectUserInfoError: If fetching user info fails.
-
-        """
-        if not self.userinfo_url:
-            raise OpenIdConnectUserInfoError("UserInfo URL not configured")
-
-        session = async_get_clientsession(self.hass)
-
-        try:
-            resp = await session.get(
-                self.userinfo_url,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            resp.raise_for_status()
-        except ClientResponseError as err:
-            _LOGGER.error("UserInfo request failed with status %s: %s", err.status, err)
-            raise OpenIdConnectUserInfoError(
-                f"UserInfo request failed: {err.status}"
-            ) from err
-        except ClientError as err:
-            _LOGGER.error("UserInfo request failed: %s", err)
-            raise OpenIdConnectUserInfoError(f"UserInfo request failed: {err}") from err
-
-        return cast(dict[str, Any], await resp.json())
+        self._nonce = None
+        return url
 
 
 @AUTH_PROVIDERS.register("openid_connect")
 class OpenIdConnectAuthProvider(AuthProvider):
-    """Authentication provider using OpenID Connect.
-
-    This provider authenticates users via an external OpenID Connect
-    identity provider using the authorization code flow with PKCE.
-    """
+    """Authentication provider using OpenID Connect."""
 
     DEFAULT_TITLE = "OpenID Connect"
 
-    def __init__(
-        self, hass: HomeAssistant, store: AuthStore, config: dict[str, Any]
-    ) -> None:
-        """Initialize the OpenID Connect auth provider."""
-        super().__init__(hass, store, config)
-        self._discovery_doc: dict[str, Any] | None = None
-        self._oauth_impl: OpenIdConnectOAuth2Implementation | None = None
+    _configuration: dict[str, Any]
+    _jwks: dict[str, Any]
+    _oauth2: OpenIdConnectOAuth2Implementation
 
-    @property
-    def display_name(self) -> str:
-        """Return the display name for this provider."""
-        return self.config.get(CONF_DISPLAY_NAME) or self.DEFAULT_TITLE
+    async def async_get_configuration(self) -> dict[str, Any]:
+        """Get discovery document for OpenID."""
+        return await async_get_configuration(
+            self.hass, self.config[CONF_CONFIGURATION]
+        )
 
-    async def _async_fetch_discovery_document(self) -> dict[str, Any]:
-        """Fetch the OpenID Connect discovery document.
-
-        Returns:
-            The parsed discovery document.
-
-        Raises:
-            OpenIdConnectConfigError: If fetching the discovery document fails.
-
-        """
-        if self._discovery_doc is not None:
-            return self._discovery_doc
-
-        issuer_url = self.config.get(CONF_ISSUER_URL)
-        if not issuer_url:
-            raise OpenIdConnectConfigError(
-                "Either issuer_url or explicit URLs must be configured"
-            )
-
-        discovery_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
+    async def async_get_jwks(self) -> dict[str, Any]:
+        """Get the keys for ID token verification."""
         session = async_get_clientsession(self.hass)
-
-        _LOGGER.debug("Fetching OIDC discovery document from %s", discovery_url)
         try:
-            resp = await session.get(discovery_url)
+            resp = await session.get(self._configuration["jwks_uri"])
             resp.raise_for_status()
         except ClientError as err:
-            _LOGGER.error("Failed to fetch discovery document: %s", err)
-            raise OpenIdConnectConfigError(
-                f"Failed to fetch discovery document: {err}"
-            ) from err
-
-        discovery_doc = await resp.json()
-
-        # Validate required fields per OpenID Connect Discovery spec
-        required_fields = ["authorization_endpoint", "token_endpoint", "issuer"]
-        missing_fields = [
-            field for field in required_fields if field not in discovery_doc
-        ]
-        if missing_fields:
-            raise OpenIdConnectConfigError(
-                f"Discovery document missing required fields: {', '.join(missing_fields)}"
-            )
-
-        self._discovery_doc = discovery_doc
-        return cast(dict[str, Any], self._discovery_doc)
-
-    async def _async_get_endpoint_urls(
-        self,
-    ) -> tuple[str, str, str | None]:
-        """Get the OAuth2 endpoint URLs.
-
-        Returns:
-            Tuple of (authorize_url, token_url, userinfo_url).
-
-        Raises:
-            OpenIdConnectConfigError: If URLs cannot be determined.
-
-        """
-        # Check for explicit URLs first
-        authorize_url = self.config.get(CONF_AUTHORIZE_URL)
-        token_url = self.config.get(CONF_TOKEN_URL)
-        userinfo_url = self.config.get(CONF_USERINFO_URL)
-
-        if authorize_url and token_url:
-            return authorize_url, token_url, userinfo_url
-
-        # Fall back to discovery document
-        discovery = await self._async_fetch_discovery_document()
-
-        if not authorize_url:
-            authorize_url = discovery.get("authorization_endpoint")
-        if not token_url:
-            token_url = discovery.get("token_endpoint")
-        if not userinfo_url:
-            userinfo_url = discovery.get("userinfo_endpoint")
-
-        if not authorize_url or not token_url:
-            raise OpenIdConnectConfigError(
-                "Could not determine authorization and token endpoints "
-                "from discovery document"
-            )
-
-        return authorize_url, token_url, userinfo_url
-
-    async def _async_create_oauth_impl(self) -> OpenIdConnectOAuth2Implementation:
-        """Create a new OAuth2 implementation instance.
-
-        Returns:
-            A configured OAuth2 implementation.
-
-        """
-        authorize_url, token_url, userinfo_url = await self._async_get_endpoint_urls()
-
-        return OpenIdConnectOAuth2Implementation(
-            hass=self.hass,
-            client_id=self.config[CONF_CLIENT_ID],
-            client_secret=self.config.get(CONF_CLIENT_SECRET, ""),
-            authorize_url=authorize_url,
-            token_url=token_url,
-            userinfo_url=userinfo_url,
-            scopes=self.config[CONF_SCOPES],
-        )
+            raise InvalidAuthError(f"Failed to fetch JWKS: {err}") from err
+        return cast(dict[str, Any], await resp.json())
 
     async def async_login_flow(
         self, context: AuthFlowContext | None
     ) -> OpenIdConnectLoginFlow:
         """Return a flow to login."""
-        # Create a new OAuth implementation for each login flow
-        # This ensures a fresh PKCE code verifier for each attempt
-        self._oauth_impl = await self._async_create_oauth_impl()
-        return OpenIdConnectLoginFlow(self, self._oauth_impl, context)
+        if not hasattr(self, "_configuration"):
+            self._configuration = await self.async_get_configuration()
+
+        if not hasattr(self, "_jwks"):
+            self._jwks = await self.async_get_jwks()
+
+        self._oauth2 = OpenIdConnectOAuth2Implementation(
+            self.hass,
+            self.config[CONF_CLIENT_ID],
+            self.config[CONF_CLIENT_SECRET],
+            self._configuration,
+        )
+        return OpenIdConnectLoginFlow(self, context)
+
+    def generate_authorize_url(
+        self, redirect_uri: str, state: str, nonce: str
+    ) -> str:
+        """Generate the authorization URL."""
+        return self._oauth2.generate_authorize_url(redirect_uri, state, nonce)
+
+    async def async_resolve_external_data(
+        self, external_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Resolve external data to tokens."""
+        return cast(
+            dict[str, Any],
+            await self._oauth2.async_resolve_external_data(external_data),
+        )
+
+    def decode_id_token(self, token: dict[str, Any], nonce: str) -> dict[str, Any]:
+        """Decode and verify the OpenID ID token."""
+        algorithms = self._configuration["id_token_signing_alg_values_supported"]
+        issuer = self._configuration["issuer"]
+
+        try:
+            id_token = jwt.decode(
+                token["id_token"],
+                algorithms=algorithms,
+                issuer=issuer,
+                key=self._jwks,
+                audience=self.config[CONF_CLIENT_ID],
+                access_token=token["access_token"],
+            )
+        except JWTError as err:
+            raise InvalidAuthError(f"Invalid ID token: {err}") from err
+
+        if id_token.get("nonce") != nonce:
+            raise InvalidAuthError("Nonce mismatch in ID token")
+
+        return cast(dict[str, Any], id_token)
+
+    @property
+    def support_mfa(self) -> bool:
+        """Return whether multi-factor auth supported by the auth provider."""
+        return False
 
     async def async_get_or_create_credentials(
         self, flow_result: Mapping[str, str]
     ) -> Credentials:
-        """Get credentials based on the flow result.
-
-        Args:
-            flow_result: The result from the login flow containing user info.
-
-        Returns:
-            Existing or newly created credentials for the user.
-
-        """
+        """Get credentials based on the flow result."""
         subject = flow_result["sub"]
 
-        # Check for existing credentials
         for credential in await self.async_credentials():
             if credential.data.get("sub") == subject:
                 return credential
 
-        # Create new credentials
-        return self.async_create_credentials(
-            {
-                "sub": subject,
-                "email": flow_result.get("email"),
-                "name": flow_result.get("name"),
-            }
-        )
+        return self.async_create_credentials({**flow_result})
 
     async def async_user_meta_for_credentials(
         self, credentials: Credentials
     ) -> UserMeta:
-        """Return extra user metadata for credentials.
-
-        Will be used to populate info when creating a new user.
-        """
-        name = credentials.data.get("name") or credentials.data.get("email")
+        """Return extra user metadata for credentials."""
+        if "preferred_username" in credentials.data:
+            name = credentials.data["preferred_username"]
+        elif "given_name" in credentials.data:
+            name = credentials.data["given_name"]
+        elif "name" in credentials.data:
+            name = credentials.data["name"]
+        elif "email" in credentials.data:
+            name = cast(str, credentials.data["email"]).split("@", 1)[0]
+        else:
+            name = credentials.data["sub"]
         return UserMeta(name=name, is_active=True)
 
 
 class OpenIdConnectLoginFlow(LoginFlow[OpenIdConnectAuthProvider]):
     """Handler for the OpenID Connect login flow."""
 
+    _nonce: str
+    _external_data: dict[str, Any]
+
     def __init__(
         self,
         auth_provider: OpenIdConnectAuthProvider,
-        oauth_impl: OpenIdConnectOAuth2Implementation,
         context: AuthFlowContext | None,
     ) -> None:
         """Initialize the login flow."""
         super().__init__(auth_provider)
-        self._oauth_impl = oauth_impl
         self._context = context
-        self._state: str | None = None
-        self._redirect_uri: str | None = None
 
     async def async_step_init(
         self, user_input: dict[str, str] | None = None
     ) -> AuthFlowResult:
-        """Handle the initial step - redirect to identity provider."""
+        """Handle the initial step."""
+        return await self.async_step_authenticate()
+
+    async def async_step_authenticate(
+        self, user_input: dict[str, Any] | None = None
+    ) -> AuthFlowResult:
+        """Authenticate user using external step."""
+        if user_input:
+            self._external_data = user_input
+            return self.async_external_step_done(next_step_id="authorize")
+
         if self._context is None:
             return self.async_abort(reason="no_context")
 
@@ -405,131 +284,32 @@ class OpenIdConnectLoginFlow(LoginFlow[OpenIdConnectAuthProvider]):
         if not redirect_uri:
             return self.async_abort(reason="no_redirect_uri")
 
-        self._redirect_uri = redirect_uri
-        self._state = secrets.token_urlsafe(32)
-
-        authorize_url = self._oauth_impl.generate_authorize_url(
+        self._nonce = token_hex()
+        url = self._auth_provider.generate_authorize_url(
             redirect_uri=redirect_uri,
-            state=self._state,
+            state=self.flow_id,
+            nonce=self._nonce,
         )
+        return self.async_external_step(step_id="authenticate", url=url)
 
-        return self.async_external_step(step_id="authenticate", url=authorize_url)
-
-    async def async_step_authenticate(
-        self, user_input: dict[str, Any] | None = None
+    async def async_step_authorize(
+        self, user_input: dict[str, str] | None = None
     ) -> AuthFlowResult:
-        """Handle the callback from the identity provider."""
-        if user_input is None:
-            return self.async_abort(reason="no_response")
-
-        # Verify state parameter
-        if user_input.get("state") != self._state:
-            _LOGGER.error("State mismatch in OAuth callback")
-            return self.async_abort(reason="state_mismatch")
-
-        # Check for error response
-        if "error" in user_input:
-            error = user_input["error"]
-            error_description = user_input.get("error_description", "Unknown error")
-            _LOGGER.error("OAuth error: %s - %s", error, error_description)
+        """Authorize user received from external step."""
+        if "error" in self._external_data:
+            _LOGGER.error("OAuth error: %s", self._external_data["error"])
             return self.async_abort(reason="oauth_error")
 
-        # Get authorization code
-        code = user_input.get("code")
-        if not code:
+        if "code" not in self._external_data:
             return self.async_abort(reason="no_code")
 
-        # Exchange code for tokens using the parent class method
-        # We need to provide external_data in the format expected by the parent
-        external_data = {
-            "code": code,
-            "state": {"redirect_uri": self._redirect_uri or ""},
-        }
-
         try:
-            token_response = await self._oauth_impl.async_resolve_external_data(
-                external_data
+            token = await self._auth_provider.async_resolve_external_data(
+                self._external_data
             )
-        except ClientError as err:
-            _LOGGER.error("Token exchange failed: %s", err)
-            return self.async_abort(reason="token_error")
+            id_token = self._auth_provider.decode_id_token(token, self._nonce)
+        except InvalidAuthError as err:
+            _LOGGER.error("Login failed: %s", err)
+            return self.async_abort(reason="invalid_auth")
 
-        # Extract user information
-        try:
-            user_info = await self._extract_user_info(token_response)
-        except OpenIdConnectError as err:
-            _LOGGER.error("Failed to extract user info: %s", err)
-            return self.async_abort(reason="userinfo_error")
-
-        return await self.async_finish(user_info)
-
-    async def _extract_user_info(
-        self, token_response: dict[str, Any]
-    ) -> dict[str, str]:
-        """Extract user information from token response or userinfo endpoint.
-
-        Args:
-            token_response: The token response from the token endpoint.
-
-        Returns:
-            Dictionary containing user information (sub, email, name, etc.).
-
-        Raises:
-            OpenIdConnectError: If user info cannot be extracted.
-
-        Note on ID token signature verification:
-            We decode the ID token without signature verification because:
-            1. The token is received directly from the token endpoint over TLS
-            2. We authenticated to the token endpoint using our client credentials
-            3. Full JWKS verification would require additional complexity
-            4. This approach is common in confidential client scenarios
-
-            For higher security requirements, consider implementing full JWKS
-            verification by fetching the IdP's public keys from the jwks_uri
-            endpoint in the discovery document.
-
-        """
-        user_info: dict[str, Any] = {}
-
-        # Try to decode ID token first
-        id_token = token_response.get("id_token")
-        if id_token:
-            try:
-                # Decode without signature verification - see docstring for rationale
-                decoded = jwt.decode(
-                    id_token,
-                    options={"verify_signature": False},
-                )
-                user_info.update(decoded)
-                _LOGGER.debug("Extracted user info from ID token")
-            except jwt.InvalidTokenError as err:
-                _LOGGER.warning("Failed to decode ID token: %s", err)
-
-        # If we don't have 'sub' claim, try userinfo endpoint
-        if "sub" not in user_info:
-            access_token = token_response.get("access_token")
-            if access_token and self._oauth_impl.userinfo_url:
-                try:
-                    userinfo_response = await self._oauth_impl.async_get_userinfo(
-                        access_token
-                    )
-                    user_info.update(userinfo_response)
-                    _LOGGER.debug("Extracted user info from userinfo endpoint")
-                except OpenIdConnectUserInfoError as err:
-                    _LOGGER.warning("Failed to fetch userinfo: %s", err)
-
-        # Validate we have required claims
-        if "sub" not in user_info:
-            raise OpenIdConnectError("Could not determine user identity (missing 'sub')")
-
-        # Return string values for credential storage
-        return {
-            "sub": str(user_info["sub"]),
-            "email": str(user_info.get("email", "")),
-            "name": str(
-                user_info.get("name")
-                or user_info.get("preferred_username")
-                or user_info.get("email")
-                or ""
-            ),
-        }
+        return await self.async_finish(id_token)
