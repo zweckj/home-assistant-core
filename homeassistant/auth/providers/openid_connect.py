@@ -139,9 +139,12 @@ class OpenIdConnectAuthProvider(AuthProvider):
 
     DEFAULT_TITLE = "OpenID Connect"
 
-    _configuration: dict[str, Any]
-    _jwks: dict[str, Any]
-    _oauth2: OpenIdConnectOAuth2Implementation
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize the auth provider."""
+        super().__init__(*args, **kwargs)
+        self._configuration: dict[str, Any] | None = None
+        self._jwks: dict[str, Any] | None = None
+        self._oauth2: OpenIdConnectOAuth2Implementation | None = None
 
     async def async_get_configuration(self) -> dict[str, Any]:
         """Get discovery document for OpenID."""
@@ -151,6 +154,8 @@ class OpenIdConnectAuthProvider(AuthProvider):
 
     async def async_get_jwks(self) -> dict[str, Any]:
         """Get the keys for ID token verification."""
+        if self._configuration is None:
+            raise InvalidAuthError("Configuration not loaded")
         session = async_get_clientsession(self.hass)
         try:
             resp = await session.get(self._configuration["jwks_uri"])
@@ -163,10 +168,10 @@ class OpenIdConnectAuthProvider(AuthProvider):
         self, context: AuthFlowContext | None
     ) -> OpenIdConnectLoginFlow:
         """Return a flow to login."""
-        if not hasattr(self, "_configuration"):
+        if self._configuration is None:
             self._configuration = await self.async_get_configuration()
 
-        if not hasattr(self, "_jwks"):
+        if self._jwks is None:
             self._jwks = await self.async_get_jwks()
 
         self._oauth2 = OpenIdConnectOAuth2Implementation(
@@ -181,12 +186,16 @@ class OpenIdConnectAuthProvider(AuthProvider):
         self, redirect_uri: str, state: str, nonce: str
     ) -> str:
         """Generate the authorization URL."""
+        if self._oauth2 is None:
+            raise InvalidAuthError("OAuth2 implementation not initialized")
         return self._oauth2.generate_authorize_url(redirect_uri, state, nonce)
 
     async def async_resolve_external_data(
         self, external_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Resolve external data to tokens."""
+        if self._oauth2 is None:
+            raise InvalidAuthError("OAuth2 implementation not initialized")
         return cast(
             dict[str, Any],
             await self._oauth2.async_resolve_external_data(external_data),
@@ -194,6 +203,9 @@ class OpenIdConnectAuthProvider(AuthProvider):
 
     def decode_id_token(self, token: dict[str, Any], nonce: str) -> dict[str, Any]:
         """Decode and verify the OpenID ID token."""
+        if self._configuration is None or self._jwks is None:
+            raise InvalidAuthError("Provider not properly initialized")
+
         algorithms = self._configuration["id_token_signing_alg_values_supported"]
         issuer = self._configuration["issuer"]
 
