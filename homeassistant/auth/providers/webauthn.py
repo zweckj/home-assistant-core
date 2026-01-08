@@ -39,6 +39,8 @@ from ..auth_store import AuthStore
 from ..models import AuthFlowContext, AuthFlowResult, Credentials, UserMeta
 from . import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
 
+REQUIREMENTS = ["webauthn==2.7.0"]
+
 WEBAUTHN_PROVIDER_TYPE: Final = "webauthn"
 
 STORAGE_VERSION: Final = 1
