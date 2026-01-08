@@ -73,6 +73,7 @@ uv==0.9.17
 voluptuous-openapi==0.3.0
 voluptuous-serialize==2.7.0
 voluptuous==0.16.0
+webauthn==2.7.0
 webrtc-models==0.3.0
 yarl==1.22.0
 zeroconf==0.148.0
