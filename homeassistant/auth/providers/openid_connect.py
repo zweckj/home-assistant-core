@@ -6,9 +6,7 @@ It uses PKCE (Proof Key for Code Exchange) for enhanced security.
 
 from __future__ import annotations
 
-import base64
 from collections.abc import Mapping
-import hashlib
 import logging
 import secrets
 from typing import Any, cast
@@ -21,6 +19,9 @@ from yarl import URL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.config_entry_oauth2_flow import (
+    LocalOAuth2ImplementationWithPkce,
+)
 
 from ..auth_store import AuthStore
 from ..models import AuthFlowContext, AuthFlowResult, Credentials, UserMeta
@@ -38,6 +39,7 @@ CONF_SCOPES = "scopes"
 CONF_DISPLAY_NAME = "display_name"
 
 DEFAULT_SCOPES = ["openid", "profile", "email"]
+DOMAIN = "openid_connect"
 
 
 def _validate_endpoint_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -98,54 +100,15 @@ class OpenIdConnectConfigError(OpenIdConnectError):
     """Raised when OpenID Connect configuration is invalid."""
 
 
-class OpenIdConnectTokenError(OpenIdConnectError):
-    """Raised when token exchange fails."""
-
-
 class OpenIdConnectUserInfoError(OpenIdConnectError):
     """Raised when fetching user info fails."""
 
 
-def _generate_code_verifier(length: int = 128) -> str:
-    """Generate a PKCE code verifier.
-
-    Args:
-        length: Length of the code verifier (43-128 characters).
-
-    Returns:
-        A cryptographically random string suitable for use as a code verifier.
-
-    """
-    if not 43 <= length <= 128:
-        msg = "Code verifier length must be between 43 and 128 characters"
-        raise ValueError(msg)
-    return secrets.token_urlsafe(96)[:length]
-
-
-def _compute_code_challenge(code_verifier: str) -> str:
-    """Compute the S256 code challenge from a code verifier.
-
-    Args:
-        code_verifier: The code verifier string.
-
-    Returns:
-        The base64url-encoded SHA256 hash of the code verifier.
-
-    """
-    if not 43 <= len(code_verifier) <= 128:
-        msg = "Code verifier length must be between 43 and 128 characters"
-        raise ValueError(msg)
-
-    hashed = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    encoded = base64.urlsafe_b64encode(hashed)
-    return encoded.decode("ascii").replace("=", "")
-
-
-class OpenIdConnectOAuth2Implementation:
+class OpenIdConnectOAuth2Implementation(LocalOAuth2ImplementationWithPkce):
     """OAuth2 implementation with PKCE for OpenID Connect.
 
-    This class handles the OAuth2 authorization code flow with PKCE,
-    specifically designed for OpenID Connect providers.
+    This class extends LocalOAuth2ImplementationWithPkce with
+    OpenID Connect specific functionality like userinfo endpoint support.
     """
 
     def __init__(
@@ -158,31 +121,30 @@ class OpenIdConnectOAuth2Implementation:
         userinfo_url: str | None,
         scopes: list[str],
     ) -> None:
-        """Initialize the OAuth2 implementation.
-
-        Args:
-            hass: Home Assistant instance.
-            client_id: OAuth2 client ID.
-            client_secret: OAuth2 client secret (can be empty for public clients).
-            authorize_url: Authorization endpoint URL.
-            token_url: Token endpoint URL.
-            userinfo_url: UserInfo endpoint URL (optional).
-            scopes: List of OAuth2 scopes to request.
-
-        """
-        self.hass = hass
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.authorize_url = authorize_url
-        self.token_url = token_url
+        """Initialize the OAuth2 implementation."""
+        super().__init__(
+            hass=hass,
+            domain=DOMAIN,
+            client_id=client_id,
+            authorize_url=authorize_url,
+            token_url=token_url,
+            client_secret=client_secret,
+        )
         self.userinfo_url = userinfo_url
         self.scopes = scopes
 
-        # Generate PKCE code verifier for this session
-        self.code_verifier = _generate_code_verifier()
+    @property
+    def extra_authorize_data(self) -> dict:
+        """Extra data that needs to be appended to the authorize url."""
+        data = {"scope": " ".join(self.scopes)}
+        data.update(super().extra_authorize_data)
+        return data
 
     def generate_authorize_url(self, redirect_uri: str, state: str) -> str:
-        """Generate the authorization URL with PKCE parameters.
+        """Generate the authorization URL with custom state for auth flow.
+
+        This method is used by the auth provider login flow instead of
+        async_generate_authorize_url which is designed for config flows.
 
         Args:
             redirect_uri: The redirect URI for the OAuth2 callback.
@@ -192,63 +154,18 @@ class OpenIdConnectOAuth2Implementation:
             The complete authorization URL.
 
         """
-        code_challenge = _compute_code_challenge(self.code_verifier)
-
-        params = {
-            "response_type": "code",
-            "client_id": self.client_id,
-            "redirect_uri": redirect_uri,
-            "state": state,
-            "scope": " ".join(self.scopes),
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
-        }
-
-        return str(URL(self.authorize_url).with_query(params))
-
-    async def async_resolve_external_data(
-        self, code: str, redirect_uri: str
-    ) -> dict[str, Any]:
-        """Exchange authorization code for tokens.
-
-        Args:
-            code: The authorization code from the OAuth2 callback.
-            redirect_uri: The redirect URI used in the authorization request.
-
-        Returns:
-            The token response containing access_token, id_token, etc.
-
-        Raises:
-            OpenIdConnectTokenError: If token exchange fails.
-
-        """
-        session = async_get_clientsession(self.hass)
-
-        data = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "client_id": self.client_id,
-            "code_verifier": self.code_verifier,
-        }
-
-        if self.client_secret:
-            data["client_secret"] = self.client_secret
-
-        _LOGGER.debug("Exchanging authorization code for tokens")
-
-        try:
-            resp = await session.post(self.token_url, data=data)
-            resp.raise_for_status()
-            return cast(dict[str, Any], await resp.json())
-        except ClientResponseError as err:
-            _LOGGER.error("Token exchange failed with status %s: %s", err.status, err)
-            raise OpenIdConnectTokenError(
-                f"Token exchange failed: {err.status}"
-            ) from err
-        except ClientError as err:
-            _LOGGER.error("Token exchange failed: %s", err)
-            raise OpenIdConnectTokenError(f"Token exchange failed: {err}") from err
+        return str(
+            URL(self.authorize_url)
+            .with_query(
+                {
+                    "response_type": "code",
+                    "client_id": self.client_id,
+                    "redirect_uri": redirect_uri,
+                    "state": state,
+                }
+            )
+            .update_query(self.extra_authorize_data)
+        )
 
     async def async_get_userinfo(self, access_token: str) -> dict[str, Any]:
         """Fetch user information from the userinfo endpoint.
@@ -274,7 +191,6 @@ class OpenIdConnectOAuth2Implementation:
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             resp.raise_for_status()
-            return cast(dict[str, Any], await resp.json())
         except ClientResponseError as err:
             _LOGGER.error("UserInfo request failed with status %s: %s", err.status, err)
             raise OpenIdConnectUserInfoError(
@@ -283,6 +199,8 @@ class OpenIdConnectOAuth2Implementation:
         except ClientError as err:
             _LOGGER.error("UserInfo request failed: %s", err)
             raise OpenIdConnectUserInfoError(f"UserInfo request failed: {err}") from err
+
+        return cast(dict[str, Any], await resp.json())
 
 
 @AUTH_PROVIDERS.register("openid_connect")
@@ -330,16 +248,17 @@ class OpenIdConnectAuthProvider(AuthProvider):
         discovery_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
         session = async_get_clientsession(self.hass)
 
+        _LOGGER.debug("Fetching OIDC discovery document from %s", discovery_url)
         try:
-            _LOGGER.debug("Fetching OIDC discovery document from %s", discovery_url)
             resp = await session.get(discovery_url)
             resp.raise_for_status()
-            discovery_doc = await resp.json()
         except ClientError as err:
             _LOGGER.error("Failed to fetch discovery document: %s", err)
             raise OpenIdConnectConfigError(
                 f"Failed to fetch discovery document: {err}"
             ) from err
+
+        discovery_doc = await resp.json()
 
         # Validate required fields per OpenID Connect Discovery spec
         required_fields = ["authorization_endpoint", "token_endpoint", "issuer"]
@@ -520,13 +439,18 @@ class OpenIdConnectLoginFlow(LoginFlow[OpenIdConnectAuthProvider]):
         if not code:
             return self.async_abort(reason="no_code")
 
+        # Exchange code for tokens using the parent class method
+        # We need to provide external_data in the format expected by the parent
+        external_data = {
+            "code": code,
+            "state": {"redirect_uri": self._redirect_uri or ""},
+        }
+
         try:
-            # Exchange code for tokens
             token_response = await self._oauth_impl.async_resolve_external_data(
-                code=code,
-                redirect_uri=self._redirect_uri or "",
+                external_data
             )
-        except OpenIdConnectTokenError as err:
+        except ClientError as err:
             _LOGGER.error("Token exchange failed: %s", err)
             return self.async_abort(reason="token_error")
 
