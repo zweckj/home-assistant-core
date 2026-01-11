@@ -73,8 +73,17 @@ def async_get_provider(hass: HomeAssistant) -> WebAuthnProvider:
     raise RuntimeError("Provider not found")
 
 
-@dataclass
-class WebAuthnCredential:
+@dataclass(kw_only=True)
+class WebAuthnCredentialMeta:
+    """Class to hold WebAuthn credential metadata."""
+
+    name: str = "Passkey"
+    created_at: float = field(default_factory=time)
+    last_used_at: float = field(default_factory=time)
+
+
+@dataclass(kw_only=True)
+class WebAuthnCredential(WebAuthnCredentialMeta):
     """Class to hold WebAuthn registration data."""
 
     credential_id: str
@@ -82,9 +91,6 @@ class WebAuthnCredential:
     sign_count: int
     credential_device_type: CredentialDeviceType
     credential_backed_up: bool
-    name: str = "Passkey"
-    created_at: float = field(default_factory=time)
-    last_used_at: float = field(default_factory=time)
 
 
 class InvalidAuthError(HomeAssistantError):
@@ -165,18 +171,27 @@ class WebAuthnDataStore:
             for cred_id in user_creds
         ]
 
-    async def async_list_credentials(self, username: str) -> list[WebAuthnCredential]:
-        """Retrieve all registered credentials for a user."""
-        if (user_creds := self._data.get(username)) is None:
-            return []
-        return list(user_creds.values())
-
     async def async_get_user_credential(
         self, username: str, credential_id: str
     ) -> WebAuthnCredential | None:
         """Retrieve data from persistent storage."""
 
         return self._data.get(username, {}).get(credential_id)
+
+    async def async_list_user_credentials_meta(
+        self, username: str
+    ) -> list[WebAuthnCredentialMeta]:
+        """Retrieve the metadata of registered credentials for a user."""
+        if (user_creds := self._data.get(username)) is None:
+            return []
+        return [
+            WebAuthnCredentialMeta(
+                name=cred.name,
+                created_at=cred.created_at,
+                last_used_at=cred.last_used_at,
+            )
+            for cred in user_creds.values()
+        ]
 
 
 @AUTH_PROVIDERS.register(WEBAUTHN_PROVIDER_TYPE)
@@ -365,13 +380,15 @@ class WebAuthnProvider(AuthProvider):
 
         await self.data.async_delete_credential(username, credential_id)
 
-    async def async_list_credentials(self, username: str) -> list[WebAuthnCredential]:
+    async def async_list_credentials_meta(
+        self, username: str
+    ) -> list[WebAuthnCredentialMeta]:
         """List all registered credentials for a user."""
         if self.data is None:
             await self.async_initialize()
             assert self.data is not None
 
-        return await self.data.async_list_credentials(username=username)
+        return await self.data.async_list_user_credentials_meta(username=username)
 
     async def async_rename_credential(
         self,

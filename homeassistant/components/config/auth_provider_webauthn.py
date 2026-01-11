@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 import voluptuous as vol
@@ -12,7 +13,7 @@ from homeassistant.auth.providers import AuthProvider
 from homeassistant.auth.providers.webauthn import (
     CredentialNotFoundError,
     InvalidAuthError,
-    WebAuthnCredential,
+    WebAuthnCredentialMeta,
     async_get_provider,
 )
 from homeassistant.components import websocket_api
@@ -62,11 +63,11 @@ async def websocket_list(
     """List credentials for a user."""
     provider = async_get_provider(hass)
     username = _ensure_valid_user(provider, connection, msg)
-    credentials: list[WebAuthnCredential] = await provider.async_list_credentials(
-        username
-    )
+    credentials: list[
+        WebAuthnCredentialMeta
+    ] = await provider.async_list_credentials_meta(username)
 
-    connection.send_result(msg["id"], credentials)
+    connection.send_result(msg["id"], [asdict(cred) for cred in credentials])
 
 
 @websocket_api.websocket_command(
