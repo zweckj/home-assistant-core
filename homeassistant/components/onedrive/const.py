@@ -28,6 +28,9 @@ OAUTH2_AUTHORIZE: Final = (
 )
 OAUTH2_TOKEN: Final = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 
+# Auth domain prefix for business accounts (includes tenant_id)
+AUTH_DOMAIN_BUSINESS_PREFIX: Final = f"{DOMAIN}_business_"
+
 OAUTH_SCOPES_PERSONAL: Final = [
     "Files.ReadWrite.AppFolder",
     "offline_access",
@@ -39,6 +42,10 @@ OAUTH_SCOPES_BUSINESS: Final = [
     "offline_access",
     "openid",
 ]
+
+# Description placeholder URLs
+ENTRA_URL: Final = "https://entra.microsoft.com/"
+REDIRECT_URL: Final = "https://my.home-assistant.io/redirect/oauth"
 
 DATA_BACKUP_AGENT_LISTENERS: HassKey[list[Callable[[], None]]] = HassKey(
     f"{DOMAIN}.backup_agent_listeners"

@@ -33,14 +33,17 @@ from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2FlowHan
 from homeassistant.helpers.instance_id import async_get as async_get_instance_id
 
 from .const import (
+    AUTH_DOMAIN_BUSINESS_PREFIX,
     CONF_ACCOUNT_TYPE,
     CONF_DELETE_PERMANENTLY,
     CONF_FOLDER_ID,
     CONF_FOLDER_NAME,
     CONF_TENANT_ID,
     DOMAIN,
+    ENTRA_URL,
     OAUTH_SCOPES_BUSINESS,
     OAUTH_SCOPES_PERSONAL,
+    REDIRECT_URL,
     AccountType,
 )
 from .coordinator import OneDriveConfigEntry
@@ -145,7 +148,7 @@ class OneDriveConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         if user_input is not None:
             self._tenant_id = user_input[CONF_TENANT_ID]
             # Import the credential with a unique auth_domain that includes tenant_id
-            auth_domain = f"{DOMAIN}_business_{self._tenant_id}"
+            auth_domain = f"{AUTH_DOMAIN_BUSINESS_PREFIX}{self._tenant_id}"
             await async_import_client_credential(
                 self.hass,
                 DOMAIN,
@@ -168,8 +171,8 @@ class OneDriveConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
                 }
             ),
             description_placeholders={
-                "entra_url": "https://entra.microsoft.com/",
-                "redirect_url": "https://my.home-assistant.io/redirect/oauth",
+                "entra_url": ENTRA_URL,
+                "redirect_url": REDIRECT_URL,
             },
         )
 
