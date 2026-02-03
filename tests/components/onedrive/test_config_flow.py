@@ -13,13 +13,14 @@ from homeassistant.components.onedrive.const import (
     CONF_DELETE_PERMANENTLY,
     CONF_FOLDER_ID,
     CONF_FOLDER_NAME,
+    CONF_TENANT_ID,
     DOMAIN,
     OAUTH2_AUTHORIZE,
     OAUTH2_TOKEN,
     AccountType,
 )
 from homeassistant.config_entries import ConfigFlowResult
-from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
+from homeassistant.const import CONF_ACCESS_TOKEN, CONF_CLIENT_ID, CONF_CLIENT_SECRET, CONF_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import config_entry_oauth2_flow
@@ -137,13 +138,56 @@ async def test_full_flow_business(
         result["flow_id"], {CONF_ACCOUNT_TYPE: AccountType.BUSINESS}
     )
 
-    await _do_get_token(
-        hass,
-        result,
-        hass_client_no_auth,
-        aioclient_mock,
-        scope="Files.ReadWrite.All+offline_access+openid",
+    # Should now show credentials form
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "credentials"
+
+    # Enter business credentials
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_TENANT_ID: "test-tenant-id",
+            CONF_CLIENT_ID: "test-client-id",
+            CONF_CLIENT_SECRET: "test-client-secret",
+        },
     )
+
+    # Now do the OAuth token exchange with tenant-specific URL
+    state = config_entry_oauth2_flow._encode_jwt(
+        hass,
+        {
+            "flow_id": result["flow_id"],
+            "redirect_uri": "https://example.com/auth/external/callback",
+        },
+    )
+
+    tenant_authorize_url = (
+        "https://login.microsoftonline.com/test-tenant-id/oauth2/v2.0/authorize"
+    )
+    scope = "Files.ReadWrite.All+offline_access+openid"
+    assert result["url"] == (
+        f"{tenant_authorize_url}?response_type=code&client_id=test-client-id"
+        "&redirect_uri=https://example.com/auth/external/callback"
+        f"&state={state}&scope={scope}"
+    )
+
+    client = await hass_client_no_auth()
+    resp = await client.get(f"/auth/external/callback?code=abcd&state={state}")
+    assert resp.status == HTTPStatus.OK
+
+    tenant_token_url = (
+        "https://login.microsoftonline.com/test-tenant-id/oauth2/v2.0/token"
+    )
+    aioclient_mock.post(
+        tenant_token_url,
+        json={
+            "refresh_token": "mock-refresh-token",
+            "access_token": "mock-access-token",
+            "type": "Bearer",
+            "expires_in": 60,
+        },
+    )
+
     result = await hass.config_entries.flow.async_configure(result["flow_id"])
 
     assert result["type"] is FlowResultType.FORM

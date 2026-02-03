@@ -11,13 +11,22 @@ from onedrive_personal_sdk.exceptions import OneDriveException
 from onedrive_personal_sdk.models.items import AppRoot, Drive, Folder, ItemUpdate
 import voluptuous as vol
 
+from homeassistant.components.application_credentials import (
+    ClientCredential,
+    async_import_client_credential,
+)
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
     SOURCE_RECONFIGURE,
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
+from homeassistant.const import (
+    CONF_ACCESS_TOKEN,
+    CONF_CLIENT_ID,
+    CONF_CLIENT_SECRET,
+    CONF_TOKEN,
+)
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.config_entry_oauth2_flow import AbstractOAuth2FlowHandler
@@ -28,6 +37,7 @@ from .const import (
     CONF_DELETE_PERMANENTLY,
     CONF_FOLDER_ID,
     CONF_FOLDER_NAME,
+    CONF_TENANT_ID,
     DOMAIN,
     OAUTH_SCOPES_BUSINESS,
     OAUTH_SCOPES_PERSONAL,
@@ -53,6 +63,7 @@ class OneDriveConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         super().__init__()
         self.step_data: dict[str, Any] = {}
         self._account_type: AccountType = AccountType.PERSONAL
+        self._tenant_id: str | None = None
 
     @property
     def logger(self) -> logging.Logger:
@@ -105,6 +116,10 @@ class OneDriveConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         """Ask for account type (personal or business)."""
         if user_input is not None:
             self._account_type = AccountType(user_input[CONF_ACCOUNT_TYPE])
+            if self.is_business_account:
+                # For business accounts, collect credentials manually
+                return await self.async_step_credentials()
+            # For personal accounts, continue with standard OAuth flow
             return await super().async_step_user()
 
         return self.async_show_form(
@@ -121,6 +136,41 @@ class OneDriveConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
                     ),
                 }
             ),
+        )
+
+    async def async_step_credentials(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle manual credential entry for business accounts."""
+        if user_input is not None:
+            self._tenant_id = user_input[CONF_TENANT_ID]
+            # Import the credential with a unique auth_domain that includes tenant_id
+            auth_domain = f"{DOMAIN}_business_{self._tenant_id}"
+            await async_import_client_credential(
+                self.hass,
+                DOMAIN,
+                ClientCredential(
+                    user_input[CONF_CLIENT_ID],
+                    user_input[CONF_CLIENT_SECRET],
+                ),
+                auth_domain,
+            )
+            # Now continue with OAuth flow
+            return await super().async_step_user()
+
+        return self.async_show_form(
+            step_id="credentials",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_TENANT_ID): str,
+                    vol.Required(CONF_CLIENT_ID): str,
+                    vol.Required(CONF_CLIENT_SECRET): str,
+                }
+            ),
+            description_placeholders={
+                "entra_url": "https://entra.microsoft.com/",
+                "redirect_url": "https://my.home-assistant.io/redirect/oauth",
+            },
         )
 
     async def async_oauth_create_entry(

@@ -39,6 +39,20 @@
         "description": "Select the type of OneDrive account you want to set up. Personal accounts use the App Folder, while OneDrive for Business accounts use a folder in the root of your drive.",
         "title": "Select account type"
       },
+      "credentials": {
+        "data": {
+          "tenant_id": "Tenant ID",
+          "client_id": "[%key:common::config_flow::data::client_id%]",
+          "client_secret": "[%key:common::config_flow::data::client_secret%]"
+        },
+        "data_description": {
+          "tenant_id": "The Azure AD tenant ID (directory ID) from the [Microsoft Entra admin center]({entra_url})",
+          "client_id": "The Application (client) ID from the app registration",
+          "client_secret": "The client secret value from the app registration"
+        },
+        "description": "Enter your Azure AD app registration details. You need to create an app registration in the [Microsoft Entra admin center]({entra_url}) with the `Files.ReadWrite.All` API permission and set the redirect URI to `{redirect_url}`.",
+        "title": "OneDrive for Business credentials"
+      },
       "folder_name": {
         "data": {
           "folder_name": "Folder name"
