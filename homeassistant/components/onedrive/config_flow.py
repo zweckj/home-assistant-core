@@ -86,6 +86,14 @@ class OneDriveConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             else "Apps"
         )
 
+    def _get_drive_id(self) -> str:
+        """Get the drive ID based on account type."""
+        if self.is_business_account:
+            assert self.drive is not None
+            return self.drive.id
+        assert self.approot is not None
+        return self.approot.parent_reference.drive_id
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -141,15 +149,8 @@ class OneDriveConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             self.logger.exception("Unknown error")
             return self.async_abort(reason="unknown")
 
-        drive_id = (
-            self.drive.id if self.is_business_account else self.approot.parent_reference.drive_id  # type: ignore[union-attr]
-        )
+        drive_id = self._get_drive_id()
         await self.async_set_unique_id(drive_id)
-
-        if self.source not in (SOURCE_USER, SOURCE_REAUTH, SOURCE_RECONFIGURE):
-            self._abort_if_unique_id_mismatch(
-                reason="wrong_drive",
-            )
 
         if self.source == SOURCE_REAUTH:
             reauth_entry = self._get_reauth_entry()
@@ -159,7 +160,9 @@ class OneDriveConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
                 data=data,
             )
 
-        if self.source != SOURCE_RECONFIGURE:
+        if self.source == SOURCE_RECONFIGURE:
+            self._abort_if_unique_id_mismatch(reason="wrong_drive")
+        else:
             self._abort_if_unique_id_configured()
 
         self.step_data = data
