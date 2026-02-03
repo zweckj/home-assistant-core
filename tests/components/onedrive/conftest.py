@@ -24,10 +24,12 @@ from homeassistant.components.application_credentials import (
     async_import_client_credential,
 )
 from homeassistant.components.onedrive.const import (
+    CONF_ACCOUNT_TYPE,
     CONF_FOLDER_ID,
     CONF_FOLDER_NAME,
     DOMAIN,
-    OAUTH_SCOPES,
+    OAUTH_SCOPES_PERSONAL,
+    AccountType,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
@@ -40,7 +42,7 @@ from tests.common import MockConfigEntry
 @pytest.fixture(name="scopes")
 def mock_scopes() -> list[str]:
     """Fixture to set the scopes present in the OAuth token."""
-    return OAUTH_SCOPES
+    return OAUTH_SCOPES_PERSONAL
 
 
 @pytest.fixture(autouse=True)
@@ -76,9 +78,10 @@ def mock_config_entry(expires_at: int, scopes: list[str]) -> MockConfigEntry:
             },
             CONF_FOLDER_NAME: "backups_123",
             CONF_FOLDER_ID: "my_folder_id",
+            CONF_ACCOUNT_TYPE: AccountType.PERSONAL,
         },
         unique_id="mock_drive_id",
-        minor_version=2,
+        minor_version=3,
     )
 
 

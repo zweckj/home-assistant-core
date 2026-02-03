@@ -9,12 +9,14 @@ import pytest
 
 from homeassistant import config_entries
 from homeassistant.components.onedrive.const import (
+    CONF_ACCOUNT_TYPE,
     CONF_DELETE_PERMANENTLY,
     CONF_FOLDER_ID,
     CONF_FOLDER_NAME,
     DOMAIN,
     OAUTH2_AUTHORIZE,
     OAUTH2_TOKEN,
+    AccountType,
 )
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
@@ -35,6 +37,7 @@ async def _do_get_token(
     result: ConfigFlowResult,
     hass_client_no_auth: ClientSessionGenerator,
     aioclient_mock: AiohttpClientMocker,
+    scope: str = "Files.ReadWrite.AppFolder+offline_access+openid",
 ) -> None:
     state = config_entry_oauth2_flow._encode_jwt(
         hass,
@@ -43,8 +46,6 @@ async def _do_get_token(
             "redirect_uri": "https://example.com/auth/external/callback",
         },
     )
-
-    scope = "Files.ReadWrite.AppFolder+offline_access+openid"
 
     assert result["url"] == (
         f"{OAUTH2_AUTHORIZE}?response_type=code&client_id={CLIENT_ID}"
@@ -81,6 +82,15 @@ async def test_full_flow(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "account_type"
+
+    # Select personal account type
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCOUNT_TYPE: AccountType.PERSONAL}
+    )
+
     await _do_get_token(hass, result, hass_client_no_auth, aioclient_mock)
     result = await hass.config_entries.flow.async_configure(result["flow_id"])
 
@@ -102,6 +112,55 @@ async def test_full_flow(
     assert result["data"][CONF_TOKEN]["refresh_token"] == "mock-refresh-token"
     assert result["data"][CONF_FOLDER_NAME] == "myFolder"
     assert result["data"][CONF_FOLDER_ID] == "my_folder_id"
+    assert result["data"][CONF_ACCOUNT_TYPE] == AccountType.PERSONAL
+
+
+@pytest.mark.usefixtures("current_request_with_host")
+async def test_full_flow_business(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    mock_setup_entry: AsyncMock,
+    mock_onedrive_client_init: MagicMock,
+) -> None:
+    """Check full flow for business account."""
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "account_type"
+
+    # Select business account type
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCOUNT_TYPE: AccountType.BUSINESS}
+    )
+
+    await _do_get_token(
+        hass,
+        result,
+        hass_client_no_auth,
+        aioclient_mock,
+        scope="Files.ReadWrite.All+offline_access+openid",
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"])
+
+    assert result["type"] is FlowResultType.FORM
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_FOLDER_NAME: "myBusinessFolder"}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert len(mock_setup_entry.mock_calls) == 1
+    assert result["title"] == "John Doe's OneDrive"
+    assert result["result"].unique_id == "mock_drive_id"
+    assert result["data"][CONF_TOKEN][CONF_ACCESS_TOKEN] == "mock-access-token"
+    assert result["data"][CONF_TOKEN]["refresh_token"] == "mock-refresh-token"
+    assert result["data"][CONF_FOLDER_NAME] == "myBusinessFolder"
+    assert result["data"][CONF_FOLDER_ID] == "my_folder_id"
+    assert result["data"][CONF_ACCOUNT_TYPE] == AccountType.BUSINESS
 
 
 @pytest.mark.usefixtures("current_request_with_host")
@@ -120,6 +179,12 @@ async def test_full_flow_with_owner_not_found(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
+
+    # Select personal account type
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCOUNT_TYPE: AccountType.PERSONAL}
+    )
+
     await _do_get_token(hass, result, hass_client_no_auth, aioclient_mock)
     result = await hass.config_entries.flow.async_configure(result["flow_id"])
 
@@ -156,6 +221,12 @@ async def test_error_during_folder_creation(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
+
+    # Select personal account type
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCOUNT_TYPE: AccountType.PERSONAL}
+    )
+
     await _do_get_token(hass, result, hass_client_no_auth, aioclient_mock)
     result = await hass.config_entries.flow.async_configure(result["flow_id"])
 
@@ -205,6 +276,12 @@ async def test_flow_errors(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
+
+    # Select personal account type
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCOUNT_TYPE: AccountType.PERSONAL}
+    )
+
     await _do_get_token(hass, result, hass_client_no_auth, aioclient_mock)
     result = await hass.config_entries.flow.async_configure(result["flow_id"])
 
@@ -226,6 +303,12 @@ async def test_already_configured(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
+
+    # Select personal account type
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCOUNT_TYPE: AccountType.PERSONAL}
+    )
+
     await _do_get_token(hass, result, hass_client_no_auth, aioclient_mock)
     result = await hass.config_entries.flow.async_configure(result["flow_id"])
 

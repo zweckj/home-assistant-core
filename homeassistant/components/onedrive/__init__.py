@@ -28,7 +28,14 @@ from homeassistant.helpers.config_entry_oauth2_flow import (
 from homeassistant.helpers.instance_id import async_get as async_get_instance_id
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_FOLDER_ID, CONF_FOLDER_NAME, DATA_BACKUP_AGENT_LISTENERS, DOMAIN
+from .const import (
+    CONF_ACCOUNT_TYPE,
+    CONF_FOLDER_ID,
+    CONF_FOLDER_NAME,
+    DATA_BACKUP_AGENT_LISTENERS,
+    DOMAIN,
+    AccountType,
+)
 from .coordinator import (
     OneDriveConfigEntry,
     OneDriveRuntimeData,
@@ -52,9 +59,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -> 
     """Set up OneDrive from a config entry."""
     client, get_access_token = await _get_onedrive_client(hass, entry)
 
-    # get approot, will be created automatically if it does not exist
-    approot = await _handle_item_operation(client.get_approot, "approot")
+    is_business = entry.data.get(CONF_ACCOUNT_TYPE) == AccountType.BUSINESS
     folder_name = entry.data[CONF_FOLDER_NAME]
+
+    # For personal accounts, get approot (will be created automatically if not exists)
+    # For business accounts, use root folder
+    if is_business:
+        parent_id = "root"
+    else:
+        approot = await _handle_item_operation(client.get_approot, "approot")
+        parent_id = approot.id
 
     try:
         backup_folder = await _handle_item_operation(
@@ -64,7 +78,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -> 
     except NotFoundError:
         _LOGGER.debug("Creating backup folder %s", folder_name)
         backup_folder = await _handle_item_operation(
-            lambda: client.create_folder(parent_id=approot.id, name=folder_name),
+            lambda: client.create_folder(parent_id=parent_id, name=folder_name),
             folder_name,
         )
         hass.config_entries.async_update_entry(
@@ -139,7 +153,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -
         # This means the user has downgraded from a future version
         return False
 
-    if (version := entry.version) == 1 and (minor_version := entry.minor_version) == 1:
+    version = entry.version
+    minor_version = entry.minor_version
+
+    if version == 1 and minor_version == 1:
         _LOGGER.debug(
             "Migrating OneDrive config entry from version %s.%s", version, minor_version
         )
@@ -164,6 +181,23 @@ async def async_migrate_entry(hass: HomeAssistant, entry: OneDriveConfigEntry) -
             minor_version=2,
         )
         _LOGGER.debug("Migration to version 1.2 successful")
+        minor_version = 2
+
+    if version == 1 and minor_version == 2:
+        _LOGGER.debug(
+            "Migrating OneDrive config entry from version %s.%s", version, minor_version
+        )
+        # Add account_type for existing entries (all are personal accounts)
+        hass.config_entries.async_update_entry(
+            entry,
+            data={
+                **entry.data,
+                CONF_ACCOUNT_TYPE: AccountType.PERSONAL,
+            },
+            minor_version=3,
+        )
+        _LOGGER.debug("Migration to version 1.3 successful")
+
     return True
 
 
