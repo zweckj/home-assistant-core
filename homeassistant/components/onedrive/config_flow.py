@@ -14,7 +14,6 @@ import voluptuous as vol
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
     SOURCE_RECONFIGURE,
-    SOURCE_USER,
     ConfigFlowResult,
     OptionsFlow,
 )
