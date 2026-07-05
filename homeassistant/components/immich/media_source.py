@@ -1,14 +1,19 @@
 """Immich as a media source."""
 
 from logging import getLogger
-from typing import override
+from typing import Any, override
 
 from aiohttp.web import HTTPNotFound, Request, Response, StreamResponse
 from aioimmich.assets.models import ImmichAsset
 from aioimmich.exceptions import ImmichError, ImmichForbiddenError
 
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.media_player import BrowseError, MediaClass
+from homeassistant.components.media_player import (
+    BrowseError,
+    MediaClass,
+    SearchMedia,
+    SearchMediaQuery,
+)
 from homeassistant.components.media_source import (
     BrowseMediaSource,
     MediaSource,
@@ -67,14 +72,20 @@ class ImmichMediaSource(MediaSource):
             raise BrowseError(
                 translation_domain=DOMAIN, translation_key="not_configured"
             )
+        can_search = False
+        if item.identifier:
+            can_search = ImmichMediaSourceIdentifier(item.identifier).collection != (
+                "people"
+            )
         return BrowseMediaSource(
             domain=DOMAIN,
-            identifier=None,
+            identifier=item.identifier,
             media_class=MediaClass.DIRECTORY,
             media_content_type=MediaClass.IMAGE,
             title="Immich",
             can_play=False,
             can_expand=True,
+            can_search=can_search,
             children_media_class=MediaClass.DIRECTORY,
             children=[
                 *await self._async_build_immich(item, entries),
@@ -100,6 +111,7 @@ class ImmichMediaSource(MediaSource):
                     title=entry.title,
                     can_play=False,
                     can_expand=True,
+                    can_search=True,
                 )
                 for entry in entries
             ]
@@ -127,6 +139,7 @@ class ImmichMediaSource(MediaSource):
                     title=collection.split("|", maxsplit=1)[0],
                     can_play=False,
                     can_expand=True,
+                    can_search=True,
                 )
                 for collection in ("albums", "favorites|favorites", "people", "tags")
             ]
@@ -157,6 +170,7 @@ class ImmichMediaSource(MediaSource):
                         title=album.album_name,
                         can_play=False,
                         can_expand=True,
+                        can_search=True,
                         thumbnail=f"/immich/{identifier.unique_id}/{album.album_thumbnail_asset_id}/thumbnail/image/jpg",
                     )
                     for album in albums
@@ -184,6 +198,7 @@ class ImmichMediaSource(MediaSource):
                         title=tag.name,
                         can_play=False,
                         can_expand=True,
+                        can_search=True,
                     )
                     for tag in tags
                 ]
@@ -210,6 +225,7 @@ class ImmichMediaSource(MediaSource):
                         title=person.name,
                         can_play=False,
                         can_expand=True,
+                        can_search=True,
                         thumbnail=f"/immich/{identifier.unique_id}/{person.person_id}/person/image/jpg",
                     )
                     for person in people
@@ -350,6 +366,69 @@ class ImmichMediaSource(MediaSource):
             ),
             identifier.mime_type,
         )
+
+    async def async_search_media(
+        self, item: MediaSourceItem, query: SearchMediaQuery
+    ) -> SearchMedia:
+        """Search media."""
+        LOGGER.debug("search started from: %s", item.identifier)
+        LOGGER.debug("search parameters: %s", query)
+
+        identifier = ImmichMediaSourceIdentifier(item.identifier)
+        entry: ImmichConfigEntry | None = (
+            self.hass.config_entries.async_entry_for_domain_unique_id(
+                DOMAIN, identifier.unique_id
+            )
+        )
+        if entry is None:
+            return SearchMedia(result=[])
+        immich_api = entry.runtime_data.api
+
+        search_args: dict[str, Any] = {"query": query.search_query}
+        if identifier.collection == "albums" and (album_id := identifier.collection_id):
+            search_args["album_ids"] = [album_id]
+
+        try:
+            assets = await immich_api.search.async_smart_search(**search_args)
+        except ImmichError:
+            return SearchMedia(result=[])
+
+        results: list[BrowseMediaSource] = []
+        for asset in assets:
+            if not (mime_type := asset.original_mime_type) or not mime_type.startswith(
+                ("image/", "video/")
+            ):
+                continue
+
+            if mime_type.startswith("image/"):
+                media_class = MediaClass.IMAGE
+                can_play = False
+                thumb_mime_type = mime_type
+            else:
+                media_class = MediaClass.VIDEO
+                can_play = True
+                thumb_mime_type = "image/jpeg"
+
+            results.append(
+                BrowseMediaSource(
+                    domain=DOMAIN,
+                    identifier=(
+                        f"{identifier.unique_id}|"
+                        f"{identifier.collection}|"
+                        f"{identifier.collection_id}|"
+                        f"{asset.asset_id}|"
+                        f"{asset.original_file_name}|"
+                        f"{mime_type}"
+                    ),
+                    media_class=media_class,
+                    media_content_type=mime_type,
+                    title=asset.original_file_name,
+                    can_play=can_play,
+                    can_expand=False,
+                    thumbnail=f"/immich/{identifier.unique_id}/{asset.asset_id}/thumbnail/{thumb_mime_type}",
+                )
+            )
+        return SearchMedia(result=results)
 
 
 class ImmichMediaView(HomeAssistantView):
