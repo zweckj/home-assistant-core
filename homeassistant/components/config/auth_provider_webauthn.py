@@ -1,7 +1,5 @@
 """Offer API to configure the Home Assistant auth provider."""
 
-from __future__ import annotations
-
 from dataclasses import asdict
 from typing import Any
 
@@ -9,7 +7,6 @@ import voluptuous as vol
 from webauthn.helpers.options_to_json_dict import options_to_json_dict
 from webauthn.helpers.structs import PublicKeyCredentialCreationOptions
 
-from homeassistant.auth.providers import AuthProvider
 from homeassistant.auth.providers.webauthn import (
     CredentialNotFoundError,
     InvalidAuthError,
@@ -31,24 +28,6 @@ def async_setup(hass: HomeAssistant) -> bool:
     return True
 
 
-def _ensure_valid_user(
-    provider: AuthProvider,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> str:
-    """Ensure that the user is valid and return the username."""
-    username = ""
-    for credential in connection.user.credentials:
-        if credential.auth_provider_type == provider.type:
-            username = str(credential.data["username"])
-            break
-    if not username:
-        connection.send_error(
-            msg["id"], "credentials_not_found", "Credentials not found"
-        )
-    return username
-
-
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "config/auth_provider/webauthn/list",
@@ -62,10 +41,9 @@ async def websocket_list(
 ) -> None:
     """List credentials for a user."""
     provider = async_get_provider(hass)
-    username = _ensure_valid_user(provider, connection, msg)
     credentials: list[
         WebAuthnCredentialMeta
-    ] = await provider.async_list_credentials_meta(username)
+    ] = await provider.async_list_credentials_meta(connection.user.id)
 
     connection.send_result(msg["id"], [asdict(cred) for cred in credentials])
 
@@ -82,10 +60,17 @@ async def websocket_register(
     msg: dict[str, Any],
 ) -> None:
     """Start registration of new credentials."""
+    if connection.user.system_generated:
+        connection.send_error(
+            msg["id"],
+            "system_generated",
+            "Cannot add credentials to a system generated user.",
+        )
+        return
+
     provider = async_get_provider(hass)
-    username = _ensure_valid_user(provider, connection, msg)
     options: PublicKeyCredentialCreationOptions = (
-        await provider.async_start_registration(username)
+        await provider.async_start_registration(connection.user)
     )
 
     connection.send_result(msg["id"], options_to_json_dict(options))
@@ -105,11 +90,11 @@ async def websocket_register_verify(
 ) -> None:
     """Verify registration of new credentials."""
     provider = async_get_provider(hass)
-    username = _ensure_valid_user(provider, connection, msg)
     try:
-        await provider.async_verify_registration(username, msg["credential"])
+        await provider.async_verify_registration(connection.user, msg["credential"])
     except InvalidAuthError as err:
         connection.send_error(msg["id"], "invalid_auth", str(err))
+        return
     connection.send_result(msg["id"])
 
 
@@ -128,9 +113,8 @@ async def websocket_delete(
     """Delete a credential."""
 
     provider = async_get_provider(hass)
-    username = _ensure_valid_user(provider, connection, msg)
     try:
-        await provider.async_delete_credential(username, msg["credential_id"])
+        await provider.async_delete_credential(connection.user.id, msg["credential_id"])
     except CredentialNotFoundError as err:
         connection.send_error(msg["id"], "credential_not_found", str(err))
         return
@@ -152,11 +136,11 @@ async def websocket_rename(
 ) -> None:
     """Rename a credential."""
     provider = async_get_provider(hass)
-    username = _ensure_valid_user(provider, connection, msg)
     try:
         await provider.async_rename_credential(
-            username, msg["credential_id"], msg["name"]
+            connection.user.id, msg["credential_id"], msg["name"]
         )
     except CredentialNotFoundError as err:
         connection.send_error(msg["id"], "credential_not_found", str(err))
+        return
     connection.send_result(msg["id"])
