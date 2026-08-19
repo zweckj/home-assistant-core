@@ -146,7 +146,7 @@ class WebAuthnDataStore:
 
     async def async_delete_credential(self, user_id: str, credential_id: str) -> None:
         """Delete credential from persistent storage."""
-        if (self._data.get(user_id, {}).pop(credential_id, None)) is None:
+        if self._data.get(user_id, {}).pop(credential_id, None) is None:
             raise CredentialNotFoundError("Credential not found.")
         await self._store.async_save(self._data)
 
@@ -175,29 +175,24 @@ class WebAuthnDataStore:
             registration.last_used_at = time()
             await self._store.async_save(self._data)
 
-    async def async_get_user_registered_credentials(
+    def get_registered_credentials(
         self, user_id: str
     ) -> list[PublicKeyCredentialDescriptor]:
         """Retrieve allowed credentials for a user."""
-        user_creds = self._data.get(user_id, {})
         return [
             PublicKeyCredentialDescriptor(id=base64url_to_bytes(cred_id))
-            for cred_id in user_creds
+            for cred_id in self._data.get(user_id, {})
         ]
 
-    async def async_get_user_credential(
+    def get_credential(
         self, user_id: str, credential_id: str
     ) -> WebAuthnCredential | None:
         """Retrieve data from persistent storage."""
 
         return self._data.get(user_id, {}).get(credential_id)
 
-    async def async_list_user_credentials_meta(
-        self, user_id: str
-    ) -> list[WebAuthnCredentialMeta]:
+    def list_credentials_meta(self, user_id: str) -> list[WebAuthnCredentialMeta]:
         """Retrieve the metadata of registered credentials for a user."""
-        if (user_creds := self._data.get(user_id)) is None:
-            return []
         return [
             WebAuthnCredentialMeta(
                 credential_id=cred.credential_id,
@@ -205,7 +200,7 @@ class WebAuthnDataStore:
                 created_at=cred.created_at,
                 last_used_at=cred.last_used_at,
             )
-            for cred in user_creds.values()
+            for cred in self._data.get(user_id, {}).values()
         ]
 
 
@@ -245,6 +240,14 @@ class WebAuthnProvider(AuthProvider):
             await data.async_load()
             self.data = data
 
+    async def _async_get_data(self) -> WebAuthnDataStore:
+        """Return the data store, loading it if needed."""
+        if self.data is None:
+            await self.async_initialize()
+            assert self.data is not None
+
+        return self.data
+
     @override
     async def async_login_flow(
         self, context: AuthFlowContext | None
@@ -257,9 +260,7 @@ class WebAuthnProvider(AuthProvider):
     ) -> PublicKeyCredentialCreationOptions:
         """Register a new WebAuthn credential."""
 
-        if self.data is None:
-            await self.async_initialize()
-            assert self.data is not None
+        data = await self._async_get_data()
 
         # Do we have a list of pub key algorithms to support?
         options = generate_registration_options(
@@ -270,9 +271,7 @@ class WebAuthnProvider(AuthProvider):
             user_id=user.id.encode(),
             # Only ever shown in the authenticator's account picker.
             user_name=user.name or user.id,
-            exclude_credentials=await self.data.async_get_user_registered_credentials(
-                user.id
-            ),
+            exclude_credentials=data.get_registered_credentials(user.id),
             authenticator_selection=AuthenticatorSelectionCriteria(
                 resident_key=ResidentKeyRequirement.REQUIRED,
                 user_verification=UserVerificationRequirement.REQUIRED,
@@ -307,10 +306,7 @@ class WebAuthnProvider(AuthProvider):
         except WebAuthnException as err:
             raise InvalidAuthError("Registration failed.") from err
 
-        # Store the credential information
-        if self.data is None:
-            await self.async_initialize()
-            assert self.data is not None
+        data = await self._async_get_data()
 
         web_authn_credential = WebAuthnCredential(
             credential_id=bytes_to_base64url(verification.credential_id),
@@ -322,7 +318,7 @@ class WebAuthnProvider(AuthProvider):
             credential_backed_up=verification.credential_backed_up,
         )
 
-        await self.data.async_add_credential(user.id, web_authn_credential)
+        await data.async_add_credential(user.id, web_authn_credential)
         await self._async_link_credentials(user)
 
     async def _async_link_credentials(self, user: User) -> None:
@@ -365,11 +361,9 @@ class WebAuthnProvider(AuthProvider):
         except UnicodeDecodeError as err:
             raise InvalidAuthError("Invalid user handle.") from err
 
-        if self.data is None:
-            await self.async_initialize()
-            assert self.data is not None
+        data = await self._async_get_data()
 
-        registration = await self.data.async_get_user_credential(user_id, parsed.id)
+        registration = data.get_credential(user_id, parsed.id)
         if registration is None:
             raise InvalidAuthError("No registered credentials found for user.")
 
@@ -389,7 +383,7 @@ class WebAuthnProvider(AuthProvider):
             raise InvalidAuthError("Authentication failed.") from err
 
         # Update the sign count and other info
-        await self.data.async_update_user_registration(
+        await data.async_update_user_registration(
             user_id=user_id,
             credential_id=bytes_to_base64url(response.credential_id),
             new_sign_count=response.new_sign_count,
@@ -400,21 +394,15 @@ class WebAuthnProvider(AuthProvider):
 
     async def async_delete_credential(self, user_id: str, credential_id: str) -> None:
         """Delete a registered credential."""
-        if self.data is None:
-            await self.async_initialize()
-            assert self.data is not None
-
-        await self.data.async_delete_credential(user_id, credential_id)
+        data = await self._async_get_data()
+        await data.async_delete_credential(user_id, credential_id)
 
     async def async_list_credentials_meta(
         self, user_id: str
     ) -> list[WebAuthnCredentialMeta]:
         """List all registered credentials for a user."""
-        if self.data is None:
-            await self.async_initialize()
-            assert self.data is not None
-
-        return await self.data.async_list_user_credentials_meta(user_id=user_id)
+        data = await self._async_get_data()
+        return data.list_credentials_meta(user_id)
 
     async def async_rename_credential(
         self,
@@ -423,11 +411,8 @@ class WebAuthnProvider(AuthProvider):
         new_name: str,
     ) -> None:
         """Rename a registered credential for a user."""
-        if self.data is None:
-            await self.async_initialize()
-            assert self.data is not None
-
-        await self.data.async_rename_credential(user_id, credential_id, new_name)
+        data = await self._async_get_data()
+        await data.async_rename_credential(user_id, credential_id, new_name)
 
     @override
     async def async_get_or_create_credentials(
