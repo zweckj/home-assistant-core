@@ -35,7 +35,7 @@ async def test_constructor_loads_info_from_config(hass: HomeAssistant) -> None:
     with patch("hass_nabucasa.Cloud.initialize"):
         result = await async_setup_component(
             hass,
-            "cloud",
+            DOMAIN,
             {
                 "http": {},
                 "cloud": {
@@ -45,7 +45,6 @@ async def test_constructor_loads_info_from_config(hass: HomeAssistant) -> None:
                     "region": "test-region",
                     "api_server": "test-api-server",
                     "relayer_server": "test-relayer-server",
-                    "accounts_server": "test-acounts-server",
                     "acme_server": "test-acme-server",
                     "remotestate_server": "test-remotestate-server",
                     "discovery_service_actions": {
@@ -63,7 +62,6 @@ async def test_constructor_loads_info_from_config(hass: HomeAssistant) -> None:
     assert cl.region == "test-region"
     assert cl.relayer_server == "test-relayer-server"
     assert cl.iot.ws_server_url == "wss://test-relayer-server/websocket"
-    assert cl.accounts_server == "test-acounts-server"
     assert cl.acme_server == "test-acme-server"
     assert cl.api_server == "test-api-server"
     assert cl.remotestate_server == "test-remotestate-server"
@@ -140,7 +138,7 @@ async def test_setup_existing_cloud_user(
     with patch("hass_nabucasa.Cloud.initialize"):
         result = await async_setup_component(
             hass,
-            "cloud",
+            DOMAIN,
             {
                 "http": {},
                 "cloud": {
@@ -250,7 +248,7 @@ async def test_async_get_or_create_cloudhook(
     set_cloud_prefs: Callable[[dict[str, Any]], Coroutine[Any, Any, None]],
 ) -> None:
     """Test async_get_or_create_cloudhook."""
-    assert await async_setup_component(hass, "cloud", {"cloud": {}})
+    assert await async_setup_component(hass, DOMAIN, {"cloud": {}})
     await hass.async_block_till_done()
     await cloud.login("test-user", "test-pass")
 
@@ -320,7 +318,7 @@ async def test_async_listen_cloudhook_change(
     set_cloud_prefs: Callable[[dict[str, Any]], Coroutine[Any, Any, None]],
 ) -> None:
     """Test async_listen_cloudhook_change."""
-    assert await async_setup_component(hass, "cloud", {"cloud": {}})
+    assert await async_setup_component(hass, DOMAIN, {"cloud": {}})
     await hass.async_block_till_done()
     await cloud.login("test-user", "test-pass")
 
@@ -411,7 +409,7 @@ async def test_async_listen_cloudhook_change_cloud_setup_later(
     cloud: MagicMock,
     set_cloud_prefs: Callable[[dict[str, Any]], Coroutine[Any, Any, None]],
 ) -> None:
-    """Test async_listen_cloudhook_change works when cloud is set up after listener registration."""
+    """Test cloudhook change listener with late cloud setup."""
     webhook_id = "mock-webhook-id"
     cloudhook_url = "https://cloudhook.nabu.casa/abcdefg"
 
@@ -432,7 +430,7 @@ async def test_async_listen_cloudhook_change_cloud_setup_later(
     assert len(changes) == 0
 
     # Now set up cloud
-    assert await async_setup_component(hass, "cloud", {"cloud": {}})
+    assert await async_setup_component(hass, DOMAIN, {"cloud": {}})
     await hass.async_block_till_done()
     await cloud.login("test-user", "test-pass")
 

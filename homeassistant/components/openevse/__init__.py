@@ -1,30 +1,61 @@
 """The OpenEVSE integration."""
 
-from __future__ import annotations
+from openevsehttp.__main__ import OpenEVSE
+from openevsehttp.exceptions import AuthenticationError
 
-import openevsewifi
-
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, Platform
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryError
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-type OpenEVSEConfigEntry = ConfigEntry[openevsewifi.Charger]
+from .const import DOMAIN
+from .coordinator import OpenEVSEConfigEntry, OpenEVSEDataUpdateCoordinator
+
+PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.NUMBER,
+    Platform.SENSOR,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OpenEVSEConfigEntry) -> bool:
-    """Set up openevse from a config entry."""
+    """Set up OpenEVSE from a config entry."""
+    charger = OpenEVSE(
+        entry.data[CONF_HOST],
+        entry.data.get(CONF_USERNAME),
+        entry.data.get(CONF_PASSWORD),
+        session=async_get_clientsession(hass),
+    )
 
-    entry.runtime_data = openevsewifi.Charger(entry.data[CONF_HOST])
     try:
-        await hass.async_add_executor_job(entry.runtime_data.getStatus)
-    except AttributeError as ex:
-        raise ConfigEntryError("Unable to connect to charger") from ex
+        await charger.test_and_get()
+    except TimeoutError as ex:
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key="communication_error",
+        ) from ex
+    except AuthenticationError as ex:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN,
+            translation_key="authentication_error",
+        ) from ex
 
-    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
+    coordinator = OpenEVSEDataUpdateCoordinator(hass, entry, charger)
+    await coordinator.async_config_entry_first_refresh()
+
+    # Start websocket listener for push updates
+    await coordinator.async_start_websocket()
+
+    entry.runtime_data = coordinator
+
+    # Register websocket cleanup on unload
+    entry.async_on_unload(coordinator.async_stop_websocket)
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: OpenEVSEConfigEntry) -> bool:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR])
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

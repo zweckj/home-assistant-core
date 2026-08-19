@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 import logging
-from typing import Any
+from typing import Any, override
 
 from fressnapftracker import (
     AuthClient,
@@ -31,7 +31,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 STEP_SMS_CODE_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_SMS_CODE): int,
+        vol.Required(CONF_SMS_CODE): str,
     }
 )
 
@@ -75,7 +75,7 @@ class FressnapfTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
         return errors, False
 
     async def _async_verify_sms_code(
-        self, sms_code: int
+        self, sms_code: str
     ) -> tuple[dict[str, str], str | None]:
         """Verify SMS code and return errors and access_token."""
         errors: dict[str, str] = {}
@@ -96,6 +96,7 @@ class FressnapfTrackerConfigFlow(ConfigFlow, domain=DOMAIN):
             return errors, verification_response.user_token.access_token
         return errors, None
 
+    @override
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:

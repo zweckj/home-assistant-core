@@ -1,15 +1,11 @@
 """Module to handle installing requirements."""
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Iterable
 import contextlib
 import logging
 import os
 from typing import Any
-
-from packaging.requirements import Requirement
 
 from .core import HomeAssistant, callback
 from .exceptions import HomeAssistantError
@@ -35,7 +31,7 @@ DISCOVERY_INTEGRATIONS: dict[str, Iterable[str]] = {
 }
 DEPRECATED_PACKAGES: dict[str, tuple[str, str]] = {
     # old_package_name: (reason, breaks_in_ha_version)
-    "pyserial-asyncio": ("should be replaced by pyserial-asyncio-fast", "2026.7"),
+    "pyserial-asyncio": ("should be replaced by serialx", "2027.2"),
 }
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +65,7 @@ async def async_process_requirements(
     """Install the requirements for a component or platform.
 
     This method is a coroutine. It will raise RequirementsNotFound
-    if an requirement can't be satisfied.
+    if a requirement can't be satisfied.
     """
     await _async_get_manager(hass).async_process_requirements(
         name, requirements, is_built_in
@@ -256,12 +252,17 @@ class RequirementsManager:
         """Install the requirements for a component or platform.
 
         This method is a coroutine. It will raise RequirementsNotFound
-        if an requirement can't be satisfied.
+        if a requirement can't be satisfied.
         """
         if DEPRECATED_PACKAGES or self.hass.config.skip_pip_packages:
             all_requirements = {
-                requirement_string: Requirement(requirement_string)
+                requirement_string: requirement_details
                 for requirement_string in requirements
+                if (
+                    requirement_details := pkg_util.parse_requirement_safe(
+                        requirement_string
+                    )
+                )
             }
             if DEPRECATED_PACKAGES:
                 for requirement_string, requirement_details in all_requirements.items():
@@ -272,9 +273,12 @@ class RequirementsManager:
                             "" if is_built_in else "custom ",
                             name,
                             f"has requirement '{requirement_string}' which {reason}",
-                            f"This will stop working in Home Assistant {breaks_in_ha_version}, please"
-                            if breaks_in_ha_version
-                            else "Please",
+                            (
+                                "This will stop working in Home Assistant "
+                                f"{breaks_in_ha_version}, please"
+                                if breaks_in_ha_version
+                                else "Please"
+                            ),
                             async_suggest_report_issue(
                                 self.hass, integration_domain=name
                             ),

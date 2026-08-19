@@ -1,11 +1,12 @@
 # serializer version: 1
 # name: test_all_entities[sensor.overseerr_audio_issues-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -22,6 +23,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Audio issues',
     'options': dict({
     }),
     'original_device_class': None,
@@ -39,8 +41,8 @@
 # name: test_all_entities[sensor.overseerr_audio_issues-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Audio issues',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Audio issues',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_audio_issues',
@@ -52,11 +54,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_available_requests-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -73,6 +76,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Available requests',
     'options': dict({
     }),
     'original_device_class': None,
@@ -90,9 +94,9 @@
 # name: test_all_entities[sensor.overseerr_available_requests-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Available requests',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
-      'unit_of_measurement': 'requests',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Available requests',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: 'requests',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_available_requests',
@@ -104,11 +108,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_closed_issues-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -125,6 +130,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Closed issues',
     'options': dict({
     }),
     'original_device_class': None,
@@ -142,8 +148,8 @@
 # name: test_all_entities[sensor.overseerr_closed_issues-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Closed issues',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Closed issues',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_closed_issues',
@@ -155,11 +161,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_declined_requests-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -176,6 +183,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Declined requests',
     'options': dict({
     }),
     'original_device_class': None,
@@ -193,9 +201,9 @@
 # name: test_all_entities[sensor.overseerr_declined_requests-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Declined requests',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
-      'unit_of_measurement': 'requests',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Declined requests',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: 'requests',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_declined_requests',
@@ -207,11 +215,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_movie_requests-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -228,6 +237,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Movie requests',
     'options': dict({
     }),
     'original_device_class': None,
@@ -245,9 +255,9 @@
 # name: test_all_entities[sensor.overseerr_movie_requests-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Movie requests',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
-      'unit_of_measurement': 'requests',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Movie requests',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: 'requests',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_movie_requests',
@@ -259,11 +269,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_open_issues-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -280,6 +291,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Open issues',
     'options': dict({
     }),
     'original_device_class': None,
@@ -297,8 +309,8 @@
 # name: test_all_entities[sensor.overseerr_open_issues-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Open issues',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Open issues',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_open_issues',
@@ -310,11 +322,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_pending_requests-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -331,6 +344,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Pending requests',
     'options': dict({
     }),
     'original_device_class': None,
@@ -348,9 +362,9 @@
 # name: test_all_entities[sensor.overseerr_pending_requests-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Pending requests',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
-      'unit_of_measurement': 'requests',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Pending requests',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: 'requests',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_pending_requests',
@@ -362,11 +376,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_processing_requests-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -383,6 +398,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Processing requests',
     'options': dict({
     }),
     'original_device_class': None,
@@ -400,9 +416,9 @@
 # name: test_all_entities[sensor.overseerr_processing_requests-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Processing requests',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
-      'unit_of_measurement': 'requests',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Processing requests',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: 'requests',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_processing_requests',
@@ -414,11 +430,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_subtitle_issues-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -435,6 +452,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Subtitle issues',
     'options': dict({
     }),
     'original_device_class': None,
@@ -452,8 +470,8 @@
 # name: test_all_entities[sensor.overseerr_subtitle_issues-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Subtitle issues',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Subtitle issues',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_subtitle_issues',
@@ -465,11 +483,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_total_issues-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -486,6 +505,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Total issues',
     'options': dict({
     }),
     'original_device_class': None,
@@ -503,8 +523,8 @@
 # name: test_all_entities[sensor.overseerr_total_issues-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Total issues',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Total issues',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_total_issues',
@@ -516,11 +536,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_total_requests-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -537,6 +558,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Total requests',
     'options': dict({
     }),
     'original_device_class': None,
@@ -554,9 +576,9 @@
 # name: test_all_entities[sensor.overseerr_total_requests-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Total requests',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
-      'unit_of_measurement': 'requests',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Total requests',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: 'requests',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_total_requests',
@@ -568,11 +590,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_tv_requests-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -589,6 +612,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'TV requests',
     'options': dict({
     }),
     'original_device_class': None,
@@ -606,9 +630,9 @@
 # name: test_all_entities[sensor.overseerr_tv_requests-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr TV requests',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
-      'unit_of_measurement': 'requests',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr TV requests',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: 'requests',
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_tv_requests',
@@ -620,11 +644,12 @@
 # ---
 # name: test_all_entities[sensor.overseerr_video_issues-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': dict({
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'config_entry_id': <ANY>,
     'config_subentry_id': <ANY>,
@@ -641,6 +666,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Video issues',
     'options': dict({
     }),
     'original_device_class': None,
@@ -658,8 +684,8 @@
 # name: test_all_entities[sensor.overseerr_video_issues-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'friendly_name': 'Overseerr Video issues',
-      'state_class': <SensorStateClass.TOTAL: 'total'>,
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Overseerr Video issues',
+      <SensorEntityCapabilityAttribute.STATE_CLASS: 'state_class'>: <SensorStateClass.TOTAL: 'total'>,
     }),
     'context': <ANY>,
     'entity_id': 'sensor.overseerr_video_issues',

@@ -1,8 +1,9 @@
 # serializer version: 1
 # name: test_entities[binary_sensor.test_router_port_10_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -20,6 +21,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 10 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -37,8 +39,8 @@
 # name: test_entities[binary_sensor.test_router_port_10_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 10 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 10 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_10_lan_status',
@@ -50,8 +52,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_10_poe_delivery-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -69,6 +72,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 10 PoE delivery',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.POWER: 'power'>,
@@ -86,8 +90,8 @@
 # name: test_entities[binary_sensor.test_router_port_10_poe_delivery-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'power',
-      'friendly_name': 'Test Router Port 10 PoE delivery',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'power',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 10 PoE delivery',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_10_poe_delivery',
@@ -99,8 +103,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_11_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -118,6 +123,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 11 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -135,8 +141,8 @@
 # name: test_entities[binary_sensor.test_router_port_11_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 11 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 11 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_11_lan_status',
@@ -148,8 +154,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_11_poe_delivery-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -167,6 +174,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 11 PoE delivery',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.POWER: 'power'>,
@@ -184,8 +192,8 @@
 # name: test_entities[binary_sensor.test_router_port_11_poe_delivery-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'power',
-      'friendly_name': 'Test Router Port 11 PoE delivery',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'power',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 11 PoE delivery',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_11_poe_delivery',
@@ -197,8 +205,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_12_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -216,6 +225,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 12 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -233,8 +243,8 @@
 # name: test_entities[binary_sensor.test_router_port_12_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 12 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 12 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_12_lan_status',
@@ -246,8 +256,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_12_poe_delivery-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -265,6 +276,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 12 PoE delivery',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.POWER: 'power'>,
@@ -282,8 +294,8 @@
 # name: test_entities[binary_sensor.test_router_port_12_poe_delivery-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'power',
-      'friendly_name': 'Test Router Port 12 PoE delivery',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'power',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 12 PoE delivery',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_12_poe_delivery',
@@ -295,8 +307,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_1_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -314,6 +327,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 1 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -331,8 +345,8 @@
 # name: test_entities[binary_sensor.test_router_port_1_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 1 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 1 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_1_lan_status',
@@ -344,8 +358,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_2_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -363,6 +378,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 2 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -380,8 +396,8 @@
 # name: test_entities[binary_sensor.test_router_port_2_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 2 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 2 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_2_lan_status',
@@ -393,8 +409,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_4_internet_link-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -412,6 +429,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 4 Internet link',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -429,8 +447,8 @@
 # name: test_entities[binary_sensor.test_router_port_4_internet_link-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 4 Internet link',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 4 Internet link',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_4_internet_link',
@@ -442,8 +460,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_4_online_detection-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -461,6 +480,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 4 online detection',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -478,8 +498,8 @@
 # name: test_entities[binary_sensor.test_router_port_4_online_detection-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 4 online detection',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 4 online detection',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_4_online_detection',
@@ -491,8 +511,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_5_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -510,6 +531,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 5 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -527,8 +549,8 @@
 # name: test_entities[binary_sensor.test_router_port_5_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 5 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 5 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_5_lan_status',
@@ -540,8 +562,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_5_poe_delivery-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -559,6 +582,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 5 PoE delivery',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.POWER: 'power'>,
@@ -576,8 +600,8 @@
 # name: test_entities[binary_sensor.test_router_port_5_poe_delivery-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'power',
-      'friendly_name': 'Test Router Port 5 PoE delivery',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'power',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 5 PoE delivery',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_5_poe_delivery',
@@ -589,8 +613,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_6_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -608,6 +633,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 6 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -625,8 +651,8 @@
 # name: test_entities[binary_sensor.test_router_port_6_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 6 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 6 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_6_lan_status',
@@ -638,8 +664,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_6_poe_delivery-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -657,6 +684,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 6 PoE delivery',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.POWER: 'power'>,
@@ -674,8 +702,8 @@
 # name: test_entities[binary_sensor.test_router_port_6_poe_delivery-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'power',
-      'friendly_name': 'Test Router Port 6 PoE delivery',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'power',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 6 PoE delivery',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_6_poe_delivery',
@@ -687,8 +715,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_7_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -706,6 +735,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 7 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -723,8 +753,8 @@
 # name: test_entities[binary_sensor.test_router_port_7_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 7 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 7 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_7_lan_status',
@@ -736,8 +766,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_7_poe_delivery-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -755,6 +786,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 7 PoE delivery',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.POWER: 'power'>,
@@ -772,8 +804,8 @@
 # name: test_entities[binary_sensor.test_router_port_7_poe_delivery-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'power',
-      'friendly_name': 'Test Router Port 7 PoE delivery',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'power',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 7 PoE delivery',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_7_poe_delivery',
@@ -785,8 +817,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_8_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -804,6 +837,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 8 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -821,8 +855,8 @@
 # name: test_entities[binary_sensor.test_router_port_8_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 8 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 8 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_8_lan_status',
@@ -834,8 +868,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_8_poe_delivery-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -853,6 +888,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 8 PoE delivery',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.POWER: 'power'>,
@@ -870,8 +906,8 @@
 # name: test_entities[binary_sensor.test_router_port_8_poe_delivery-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'power',
-      'friendly_name': 'Test Router Port 8 PoE delivery',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'power',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 8 PoE delivery',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_8_poe_delivery',
@@ -883,8 +919,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_9_lan_status-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -902,6 +939,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 9 LAN status',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.CONNECTIVITY: 'connectivity'>,
@@ -919,8 +957,8 @@
 # name: test_entities[binary_sensor.test_router_port_9_lan_status-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'connectivity',
-      'friendly_name': 'Test Router Port 9 LAN status',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'connectivity',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 9 LAN status',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_9_lan_status',
@@ -932,8 +970,9 @@
 # ---
 # name: test_entities[binary_sensor.test_router_port_9_poe_delivery-entry]
   EntityRegistryEntrySnapshot({
-    'aliases': set({
-    }),
+    'aliases': list([
+      None,
+    ]),
     'area_id': None,
     'capabilities': None,
     'config_entry_id': <ANY>,
@@ -951,6 +990,7 @@
     'labels': set({
     }),
     'name': None,
+    'object_id_base': 'Port 9 PoE delivery',
     'options': dict({
     }),
     'original_device_class': <BinarySensorDeviceClass.POWER: 'power'>,
@@ -968,8 +1008,8 @@
 # name: test_entities[binary_sensor.test_router_port_9_poe_delivery-state]
   StateSnapshot({
     'attributes': ReadOnlyDict({
-      'device_class': 'power',
-      'friendly_name': 'Test Router Port 9 PoE delivery',
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'power',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Test Router Port 9 PoE delivery',
     }),
     'context': <ANY>,
     'entity_id': 'binary_sensor.test_router_port_9_poe_delivery',
