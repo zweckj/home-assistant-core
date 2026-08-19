@@ -2,7 +2,7 @@
 
 from asyncio import Lock
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from time import time
 from typing import Any, Final, NamedTuple, cast, override
 
@@ -131,6 +131,10 @@ class WebAuthnCredential(WebAuthnCredentialMeta):
     credential_device_type: CredentialDeviceType
     credential_backed_up: bool
 
+    def __post_init__(self) -> None:
+        """Restore the device type, which is stored as a plain string."""
+        self.credential_device_type = CredentialDeviceType(self.credential_device_type)
+
 
 class InvalidAuthError(HomeAssistantError):
     """Raised when submitting invalid authentication."""
@@ -148,7 +152,9 @@ class WebAuthnDataStore:
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize WebAuthn data."""
-        self._store = Store[DataType](
+        # Storage round trips through JSON, so credentials go in and come back
+        # out as plain dicts.
+        self._store = Store[dict[str, dict[str, dict[str, Any]]]](
             hass, STORAGE_VERSION, STORAGE_KEY, private=True, atomic_writes=True
         )
         self._data: DataType = {}
@@ -158,7 +164,25 @@ class WebAuthnDataStore:
         if (data := await self._store.async_load()) is None:
             data = {}
 
-        self._data = data
+        self._data = {
+            user_id: {
+                credential_id: WebAuthnCredential(**credential)
+                for credential_id, credential in credentials.items()
+            }
+            for user_id, credentials in data.items()
+        }
+
+    async def _async_save(self) -> None:
+        """Write the credentials back to persistent storage."""
+        await self._store.async_save(
+            {
+                user_id: {
+                    credential_id: asdict(credential)
+                    for credential_id, credential in credentials.items()
+                }
+                for user_id, credentials in self._data.items()
+            }
+        )
 
     async def async_add_credential(
         self, user_id: str, credential: WebAuthnCredential
@@ -167,13 +191,13 @@ class WebAuthnDataStore:
 
         user_creds = self._data.setdefault(user_id, {})
         user_creds[credential.credential_id] = credential
-        await self._store.async_save(self._data)
+        await self._async_save()
 
     async def async_delete_credential(self, user_id: str, credential_id: str) -> None:
         """Delete credential from persistent storage."""
         if self._data.get(user_id, {}).pop(credential_id, None) is None:
             raise CredentialNotFoundError("Credential not found.")
-        await self._store.async_save(self._data)
+        await self._async_save()
 
     async def async_rename_credential(
         self, user_id: str, credential_id: str, new_name: str
@@ -182,13 +206,13 @@ class WebAuthnDataStore:
         if (credential := self._data.get(user_id, {}).get(credential_id)) is None:
             raise CredentialNotFoundError("Credential not found.")
         credential.name = new_name
-        await self._store.async_save(self._data)
+        await self._async_save()
 
     async def async_delete_user_credentials(self, user_id: str) -> None:
         """Delete all credentials of a user from persistent storage."""
         if self._data.pop(user_id, None) is None:
             return
-        await self._store.async_save(self._data)
+        await self._async_save()
 
     async def async_update_user_registration(
         self,
@@ -204,7 +228,7 @@ class WebAuthnDataStore:
             registration.credential_device_type = credential_device_type
             registration.credential_backed_up = credential_backed_up
             registration.last_used_at = time()
-            await self._store.async_save(self._data)
+            await self._async_save()
 
     def get_registered_credentials(
         self, user_id: str
