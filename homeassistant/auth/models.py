@@ -28,6 +28,8 @@ class AuthFlowContext(FlowContext, total=False):
 
     ip_address: IPv4Address | IPv6Address
     redirect_uri: str
+    # Origin of the page driving the flow, as sent by the browser.
+    origin: str
 
 
 class AuthFlowResult(FlowResult[AuthFlowContext, tuple[str, str]], total=False):

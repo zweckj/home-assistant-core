@@ -69,7 +69,7 @@ from http import HTTPStatus
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any, cast
 
-from aiohttp import web
+from aiohttp import hdrs, web
 import voluptuous as vol
 import voluptuous_serialize
 
@@ -370,6 +370,7 @@ class LoginFlowIndexView(LoginFlowBaseView):
                 context=AuthFlowContext(
                     ip_address=ip_address(request.remote),  # type: ignore[arg-type]
                     redirect_uri=redirect_uri,
+                    origin=request.headers.get(hdrs.ORIGIN, ""),
                 ),
             )
         except data_entry_flow.UnknownHandler:

@@ -69,9 +69,13 @@ async def websocket_register(
         return
 
     provider = async_get_provider(hass)
-    options: PublicKeyCredentialCreationOptions = (
-        await provider.async_start_registration(connection.user)
-    )
+    try:
+        options: PublicKeyCredentialCreationOptions = (
+            await provider.async_start_registration(connection.user, connection.origin)
+        )
+    except InvalidAuthError as err:
+        connection.send_error(msg["id"], "invalid_origin", str(err))
+        return
 
     connection.send_result(msg["id"], options_to_json_dict(options))
 

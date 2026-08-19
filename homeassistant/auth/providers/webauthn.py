@@ -29,6 +29,7 @@ from webauthn.helpers.structs import (
     ResidentKeyRequirement,
     UserVerificationRequirement,
 )
+from yarl import URL
 
 from homeassistant.const import CONF_ID
 from homeassistant.core import HomeAssistant, callback
@@ -51,7 +52,6 @@ STORAGE_KEY: Final = "auth_provider.webauthn"
 SIGN_IN_TIMEOUT_MS: Final = 60000
 REGISTER_TIMEOUT_MS: Final = 60000
 
-CONF_RP_ID: Final = "rp_id"
 CONF_RP_NAME: Final = "rp_name"
 CONF_EXPECTED_ORIGIN: Final = "expected_origin"
 CONF_AUTHENTICATION_CREDENTIAL: Final = "authentication_credential"
@@ -69,9 +69,10 @@ def _disallow_id(conf: dict[str, Any]) -> dict[str, Any]:
 CONFIG_SCHEMA = vol.All(
     AUTH_PROVIDER_SCHEMA.extend(
         {
-            vol.Required(CONF_RP_ID): str,
             vol.Required(CONF_RP_NAME, default="Home Assistant"): str,
-            vol.Required(CONF_EXPECTED_ORIGIN): vol.All(cv.ensure_list, [cv.url]),
+            vol.Required(CONF_EXPECTED_ORIGIN): vol.All(
+                cv.ensure_list, vol.Length(min=1), [cv.url]
+            ),
         }
     ),
     _disallow_id,
@@ -92,6 +93,7 @@ class WebAuthnCredentialMeta:
     """Class to hold WebAuthn credential metadata."""
 
     credential_id: str
+    rp_id: str
     name: str = "Passkey"
     created_at: float = field(default_factory=time)
     last_used_at: float = field(default_factory=time)
@@ -105,6 +107,15 @@ class WebAuthnCredential(WebAuthnCredentialMeta):
     sign_count: int
     credential_device_type: CredentialDeviceType
     credential_backed_up: bool
+
+
+@dataclass(kw_only=True, slots=True)
+class PendingCeremony:
+    """A challenge that has been issued, and the relying party it is bound to."""
+
+    challenge: bytes
+    rp_id: str
+    origin: str
 
 
 class InvalidAuthError(HomeAssistantError):
@@ -176,13 +187,14 @@ class WebAuthnDataStore:
             await self._store.async_save(self._data)
 
     async def async_get_user_registered_credentials(
-        self, user_id: str
+        self, user_id: str, rp_id: str
     ) -> list[PublicKeyCredentialDescriptor]:
         """Retrieve allowed credentials for a user."""
         user_creds = self._data.get(user_id, {})
         return [
-            PublicKeyCredentialDescriptor(id=base64url_to_bytes(cred_id))
-            for cred_id in user_creds
+            PublicKeyCredentialDescriptor(id=base64url_to_bytes(cred.credential_id))
+            for cred in user_creds.values()
+            if cred.rp_id == rp_id
         ]
 
     async def async_get_user_credential(
@@ -201,6 +213,7 @@ class WebAuthnDataStore:
         return [
             WebAuthnCredentialMeta(
                 credential_id=cred.credential_id,
+                rp_id=cred.rp_id,
                 name=cred.name,
                 created_at=cred.created_at,
                 last_used_at=cred.last_used_at,
@@ -222,8 +235,17 @@ class WebAuthnProvider(AuthProvider):
         super().__init__(hass, store, config)
         self.data: WebAuthnDataStore | None = None
 
-        # store the challenges for pending registrations for each user
-        self._pending_registration_challenges: dict[str, bytes] = {}
+        # store the pending registration ceremony for each user
+        self._pending_registrations: dict[str, PendingCeremony] = {}
+
+        # a passkey is bound to one relying party, so each allowed origin has
+        # its own set of passkeys
+        self._relying_parties: dict[str, str] = {}
+        for configured in config[CONF_EXPECTED_ORIGIN]:
+            origin = URL(configured).origin()
+            if (host := origin.host) is None:
+                raise ValueError(f"Origin {configured} has no host")
+            self._relying_parties[str(origin)] = host
 
         self._init_lock = Lock()
         self._registration_lock = Lock()
@@ -252,10 +274,28 @@ class WebAuthnProvider(AuthProvider):
         """Return a flow to login."""
         return WebAuthnLoginFlow(self)
 
+    @callback
+    def _async_ceremony_for(self, origin: str | None) -> PendingCeremony:
+        """Return a ceremony bound to the relying party serving this origin."""
+        if not origin:
+            raise InvalidAuthError("Request has no origin.")
+
+        try:
+            normalized = str(URL(origin).origin())
+        except ValueError as err:
+            raise InvalidAuthError(f"Unusable origin {origin}.") from err
+
+        if (rp_id := self._relying_parties.get(normalized)) is None:
+            raise InvalidAuthError(f"Origin {origin} is not allowed.")
+
+        return PendingCeremony(challenge=b"", rp_id=rp_id, origin=normalized)
+
     async def async_start_registration(
-        self, user: User
+        self, user: User, origin: str | None
     ) -> PublicKeyCredentialCreationOptions:
         """Register a new WebAuthn credential."""
+
+        ceremony = self._async_ceremony_for(origin)
 
         if self.data is None:
             await self.async_initialize()
@@ -264,14 +304,14 @@ class WebAuthnProvider(AuthProvider):
         # Do we have a list of pub key algorithms to support?
         options = generate_registration_options(
             rp_name=self.config[CONF_RP_NAME],
-            rp_id=self.config[CONF_RP_ID],
+            rp_id=ceremony.rp_id,
             # The authenticator hands this back as the user handle on login,
             # which is how a passkey identifies its account.
             user_id=user.id.encode(),
             # Only ever shown in the authenticator's account picker.
             user_name=user.name or user.id,
             exclude_credentials=await self.data.async_get_user_registered_credentials(
-                user.id
+                user.id, ceremony.rp_id
             ),
             authenticator_selection=AuthenticatorSelectionCriteria(
                 resident_key=ResidentKeyRequirement.REQUIRED,
@@ -280,8 +320,9 @@ class WebAuthnProvider(AuthProvider):
             timeout=REGISTER_TIMEOUT_MS,
         )
 
+        ceremony.challenge = options.challenge
         async with self._registration_lock:
-            self._pending_registration_challenges[user.id] = options.challenge
+            self._pending_registrations[user.id] = ceremony
 
         self._async_remove_pending_challenge_later(user.id, options.challenge)
         return options
@@ -291,17 +332,17 @@ class WebAuthnProvider(AuthProvider):
     ) -> None:
         """Complete the registration of a new WebAuthn credential."""
         async with self._registration_lock:
-            challenge = self._pending_registration_challenges.pop(user.id, None)
+            ceremony = self._pending_registrations.pop(user.id, None)
 
-        if challenge is None:
+        if ceremony is None:
             raise InvalidAuthError("No pending registration found for user.")
 
         try:
             verification = verify_registration_response(
                 credential=credential,
-                expected_challenge=challenge,
-                expected_rp_id=self.config[CONF_RP_ID],
-                expected_origin=self.config[CONF_EXPECTED_ORIGIN],
+                expected_challenge=ceremony.challenge,
+                expected_rp_id=ceremony.rp_id,
+                expected_origin=ceremony.origin,
                 require_user_verification=True,
             )
         except WebAuthnException as err:
@@ -314,6 +355,7 @@ class WebAuthnProvider(AuthProvider):
 
         web_authn_credential = WebAuthnCredential(
             credential_id=bytes_to_base64url(verification.credential_id),
+            rp_id=ceremony.rp_id,
             credential_public_key=bytes_to_base64url(
                 verification.credential_public_key
             ),
@@ -338,17 +380,22 @@ class WebAuthnProvider(AuthProvider):
             user, self.async_create_credentials({CONF_USER_ID: user.id})
         )
 
-    async def async_start_authentication(self) -> PublicKeyCredentialRequestOptions:
+    async def async_start_authentication(
+        self, origin: str | None
+    ) -> tuple[PublicKeyCredentialRequestOptions, PendingCeremony]:
         """Start the authentication process."""
 
-        return generate_authentication_options(
-            rp_id=self.config[CONF_RP_ID],
+        ceremony = self._async_ceremony_for(origin)
+        options = generate_authentication_options(
+            rp_id=ceremony.rp_id,
             user_verification=UserVerificationRequirement.REQUIRED,
             timeout=SIGN_IN_TIMEOUT_MS,
         )
+        ceremony.challenge = options.challenge
+        return options, ceremony
 
     async def async_verify_authentication(
-        self, credential: dict[str, Any], challenge: bytes
+        self, credential: dict[str, Any], ceremony: PendingCeremony
     ) -> str:
         """Complete the authentication process and return the ID of the user."""
 
@@ -370,15 +417,15 @@ class WebAuthnProvider(AuthProvider):
             assert self.data is not None
 
         registration = await self.data.async_get_user_credential(user_id, parsed.id)
-        if registration is None:
+        if registration is None or registration.rp_id != ceremony.rp_id:
             raise InvalidAuthError("No registered credentials found for user.")
 
         try:
             response = verify_authentication_response(
                 credential=parsed,
-                expected_challenge=challenge,
-                expected_rp_id=self.config[CONF_RP_ID],
-                expected_origin=self.config[CONF_EXPECTED_ORIGIN],
+                expected_challenge=ceremony.challenge,
+                expected_rp_id=ceremony.rp_id,
+                expected_origin=ceremony.origin,
                 credential_public_key=base64url_to_bytes(
                     registration.credential_public_key
                 ),
@@ -464,8 +511,9 @@ class WebAuthnProvider(AuthProvider):
 
         async def remove_challenge(_: Any) -> None:
             async with self._registration_lock:
-                if self._pending_registration_challenges.get(user_id) == challenge:
-                    self._pending_registration_challenges.pop(user_id)
+                pending = self._pending_registrations.get(user_id)
+                if pending is not None and pending.challenge == challenge:
+                    self._pending_registrations.pop(user_id)
 
         async_call_later(
             self.hass,
@@ -477,7 +525,7 @@ class WebAuthnProvider(AuthProvider):
 class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
     """Handler for the login flow."""
 
-    _challenge: bytes
+    _ceremony: PendingCeremony
 
     @override
     async def async_step_init(
@@ -490,15 +538,23 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
         if user_input is not None:
             try:
                 user_id = await self._auth_provider.async_verify_authentication(
-                    user_input[CONF_AUTHENTICATION_CREDENTIAL], self._challenge
+                    user_input[CONF_AUTHENTICATION_CREDENTIAL], self._ceremony
                 )
             except InvalidAuthError:
                 errors["base"] = "invalid_auth"
             else:
                 return await self.async_finish({CONF_USER_ID: user_id})
 
-        options = await self._auth_provider.async_start_authentication()
-        self._challenge = options.challenge
+        try:
+            (
+                options,
+                self._ceremony,
+            ) = await self._auth_provider.async_start_authentication(
+                self.context.get("origin")
+            )
+        except InvalidAuthError:
+            return self.async_abort(reason="unknown_origin")
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
