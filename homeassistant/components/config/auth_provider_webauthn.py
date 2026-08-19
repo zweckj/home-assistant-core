@@ -11,6 +11,7 @@ from homeassistant.auth.providers.webauthn import (
     CredentialNotFoundError,
     InvalidAuthError,
     WebAuthnCredentialMeta,
+    WebAuthnProvider,
     async_get_provider,
 )
 from homeassistant.components import websocket_api
@@ -28,6 +29,22 @@ def async_setup(hass: HomeAssistant) -> bool:
     return True
 
 
+@callback
+def _async_provider(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> WebAuthnProvider | None:
+    """Return the provider, reporting back when it is not configured."""
+    try:
+        return async_get_provider(hass)
+    except RuntimeError:
+        connection.send_error(
+            msg["id"], "not_enabled", "The WebAuthn auth provider is not enabled"
+        )
+        return None
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "config/auth_provider/webauthn/list",
@@ -40,7 +57,9 @@ async def websocket_list(
     msg: dict[str, Any],
 ) -> None:
     """List credentials for a user."""
-    provider = async_get_provider(hass)
+    if (provider := _async_provider(hass, connection, msg)) is None:
+        return
+
     credentials: list[
         WebAuthnCredentialMeta
     ] = await provider.async_list_credentials_meta(connection.user.id)
@@ -68,7 +87,10 @@ async def websocket_register(
         )
         return
 
-    provider = async_get_provider(hass)
+    provider = _async_provider(hass, connection, msg)
+    if provider is None:
+        return
+
     if (origin := connection.origin) is None:
         connection.send_error(msg["id"], "invalid_origin", "Connection has no origin")
         return
@@ -97,7 +119,10 @@ async def websocket_register_verify(
     msg: dict[str, Any],
 ) -> None:
     """Verify registration of new credentials."""
-    provider = async_get_provider(hass)
+    provider = _async_provider(hass, connection, msg)
+    if provider is None:
+        return
+
     if (origin := connection.origin) is None:
         connection.send_error(msg["id"], "invalid_origin", "Connection has no origin")
         return
@@ -126,7 +151,9 @@ async def websocket_delete(
 ) -> None:
     """Delete a credential."""
 
-    provider = async_get_provider(hass)
+    if (provider := _async_provider(hass, connection, msg)) is None:
+        return
+
     try:
         await provider.async_delete_credential(connection.user, msg["credential_id"])
     except CredentialNotFoundError as err:
@@ -149,7 +176,9 @@ async def websocket_rename(
     msg: dict[str, Any],
 ) -> None:
     """Rename a credential."""
-    provider = async_get_provider(hass)
+    if (provider := _async_provider(hass, connection, msg)) is None:
+        return
+
     try:
         await provider.async_rename_credential(
             connection.user.id, msg["credential_id"], msg["name"]
