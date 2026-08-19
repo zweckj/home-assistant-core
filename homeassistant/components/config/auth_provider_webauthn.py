@@ -69,9 +69,17 @@ async def websocket_register(
         return
 
     provider = async_get_provider(hass)
-    options: PublicKeyCredentialCreationOptions = (
-        await provider.async_start_registration(connection.user)
-    )
+    if (origin := connection.origin) is None:
+        connection.send_error(msg["id"], "invalid_origin", "Connection has no origin")
+        return
+
+    try:
+        options: PublicKeyCredentialCreationOptions = (
+            await provider.async_start_registration(connection.user, origin)
+        )
+    except InvalidAuthError as err:
+        connection.send_error(msg["id"], "invalid_origin", str(err))
+        return
 
     connection.send_result(msg["id"], options_to_json_dict(options))
 
@@ -90,8 +98,14 @@ async def websocket_register_verify(
 ) -> None:
     """Verify registration of new credentials."""
     provider = async_get_provider(hass)
+    if (origin := connection.origin) is None:
+        connection.send_error(msg["id"], "invalid_origin", "Connection has no origin")
+        return
+
     try:
-        await provider.async_verify_registration(connection.user, msg["credential"])
+        await provider.async_verify_registration(
+            connection.user, msg["credential"], origin
+        )
     except InvalidAuthError as err:
         connection.send_error(msg["id"], "invalid_auth", str(err))
         return

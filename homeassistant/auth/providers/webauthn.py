@@ -4,7 +4,7 @@ from asyncio import Lock
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from time import time
-from typing import Any, Final, cast, override
+from typing import Any, Final, NamedTuple, cast, override
 
 import voluptuous as vol
 from webauthn import (
@@ -29,13 +29,15 @@ from webauthn.helpers.structs import (
     ResidentKeyRequirement,
     UserVerificationRequirement,
 )
+import yarl
 
 from homeassistant.const import CONF_ID
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.network import is_hass_url
 from homeassistant.helpers.storage import Store
+from homeassistant.util.network import is_ip_address
 
 from ..auth_store import AuthStore
 from ..models import AuthFlowContext, AuthFlowResult, Credentials, User, UserMeta
@@ -51,9 +53,7 @@ STORAGE_KEY: Final = "auth_provider.webauthn"
 SIGN_IN_TIMEOUT_MS: Final = 60000
 REGISTER_TIMEOUT_MS: Final = 60000
 
-CONF_RP_ID: Final = "rp_id"
 CONF_RP_NAME: Final = "rp_name"
-CONF_EXPECTED_ORIGIN: Final = "expected_origin"
 CONF_AUTHENTICATION_CREDENTIAL: Final = "authentication_credential"
 CONF_USER_ID: Final = "user_id"
 
@@ -69,13 +69,36 @@ def _disallow_id(conf: dict[str, Any]) -> dict[str, Any]:
 CONFIG_SCHEMA = vol.All(
     AUTH_PROVIDER_SCHEMA.extend(
         {
-            vol.Required(CONF_RP_ID): str,
-            vol.Required(CONF_RP_NAME, default="Home Assistant"): str,
-            vol.Required(CONF_EXPECTED_ORIGIN): vol.All(cv.ensure_list, [cv.url]),
+            vol.Optional(CONF_RP_NAME, default="Home Assistant"): str,
         }
     ),
     _disallow_id,
 )
+
+
+class _RelyingParty(NamedTuple):
+    """Relying party a WebAuthn ceremony runs for."""
+
+    id: str
+    origin: str
+
+
+@callback
+def _async_relying_party(hass: HomeAssistant, origin: str) -> _RelyingParty:
+    """Return the relying party to run a ceremony for.
+
+    WebAuthn only runs in a secure context and cannot use an IP address as
+    relying party, so anything else is rejected before a ceremony starts.
+    """
+    url = yarl.URL(origin).origin()
+
+    if url.scheme != "https" or url.host is None or is_ip_address(url.host):
+        raise InvalidAuthError(f"Cannot use {origin} for WebAuthn.")
+
+    if not is_hass_url(hass, str(url)):
+        raise InvalidAuthError(f"{origin} is not a known Home Assistant URL.")
+
+    return _RelyingParty(url.host, str(url))
 
 
 @callback
@@ -267,16 +290,16 @@ class WebAuthnProvider(AuthProvider):
         return WebAuthnLoginFlow(self)
 
     async def async_start_registration(
-        self, user: User
+        self, user: User, origin: str
     ) -> PublicKeyCredentialCreationOptions:
         """Register a new WebAuthn credential."""
 
         data = await self._async_get_data()
+        relying_party = _async_relying_party(self.hass, origin)
 
-        # Do we have a list of pub key algorithms to support?
         options = generate_registration_options(
             rp_name=self.config[CONF_RP_NAME],
-            rp_id=self.config[CONF_RP_ID],
+            rp_id=relying_party.id,
             # The authenticator hands this back as the user handle on login,
             # which is how a passkey identifies its account.
             user_id=user.id.encode(),
@@ -297,7 +320,7 @@ class WebAuthnProvider(AuthProvider):
         return options
 
     async def async_verify_registration(
-        self, user: User, credential: dict[str, Any]
+        self, user: User, credential: dict[str, Any], origin: str
     ) -> None:
         """Complete the registration of a new WebAuthn credential."""
         async with self._registration_lock:
@@ -306,12 +329,14 @@ class WebAuthnProvider(AuthProvider):
         if challenge is None:
             raise InvalidAuthError("No pending registration found for user.")
 
+        relying_party = _async_relying_party(self.hass, origin)
+
         try:
             verification = verify_registration_response(
                 credential=credential,
                 expected_challenge=challenge,
-                expected_rp_id=self.config[CONF_RP_ID],
-                expected_origin=self.config[CONF_EXPECTED_ORIGIN],
+                expected_rp_id=relying_party.id,
+                expected_origin=relying_party.origin,
                 require_user_verification=True,
             )
         except WebAuthnException as err:
@@ -358,17 +383,19 @@ class WebAuthnProvider(AuthProvider):
         data = await self._async_get_data()
         await data.async_delete_user_credentials(credentials.data[CONF_USER_ID])
 
-    async def async_start_authentication(self) -> PublicKeyCredentialRequestOptions:
+    async def async_start_authentication(
+        self, origin: str
+    ) -> PublicKeyCredentialRequestOptions:
         """Start the authentication process."""
 
         return generate_authentication_options(
-            rp_id=self.config[CONF_RP_ID],
+            rp_id=_async_relying_party(self.hass, origin).id,
             user_verification=UserVerificationRequirement.REQUIRED,
             timeout=SIGN_IN_TIMEOUT_MS,
         )
 
     async def async_verify_authentication(
-        self, credential: dict[str, Any], challenge: bytes
+        self, credential: dict[str, Any], challenge: bytes, origin: str
     ) -> str:
         """Complete the authentication process and return the ID of the user."""
 
@@ -386,6 +413,7 @@ class WebAuthnProvider(AuthProvider):
             raise InvalidAuthError("Invalid user handle.") from err
 
         data = await self._async_get_data()
+        relying_party = _async_relying_party(self.hass, origin)
 
         registration = data.get_credential(user_id, parsed.id)
         if registration is None:
@@ -395,8 +423,8 @@ class WebAuthnProvider(AuthProvider):
             response = verify_authentication_response(
                 credential=parsed,
                 expected_challenge=challenge,
-                expected_rp_id=self.config[CONF_RP_ID],
-                expected_origin=self.config[CONF_EXPECTED_ORIGIN],
+                expected_rp_id=relying_party.id,
+                expected_origin=relying_party.origin,
                 credential_public_key=base64url_to_bytes(
                     registration.credential_public_key
                 ),
@@ -502,6 +530,9 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
         """Initialize the login flow."""
 
         errors: dict[str, str] = {}
+        # Verified against the client ID before the flow is started.
+        if (redirect_uri := self.context.get("redirect_uri")) is None:
+            raise InvalidAuthError("Flow was started without a redirect URI.")
 
         if user_input is not None:
             # The timeout in the options is only a hint to the client, so the
@@ -511,14 +542,16 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
             else:
                 try:
                     user_id = await self._auth_provider.async_verify_authentication(
-                        user_input[CONF_AUTHENTICATION_CREDENTIAL], self._challenge
+                        user_input[CONF_AUTHENTICATION_CREDENTIAL],
+                        self._challenge,
+                        redirect_uri,
                     )
                 except InvalidAuthError:
                     errors["base"] = "invalid_auth"
                 else:
                     return await self.async_finish({CONF_USER_ID: user_id})
 
-        options = await self._auth_provider.async_start_authentication()
+        options = await self._auth_provider.async_start_authentication(redirect_uri)
         self._challenge = options.challenge
         self._challenge_expires_at = time() + SIGN_IN_TIMEOUT_MS / 1000
         return self.async_show_form(
