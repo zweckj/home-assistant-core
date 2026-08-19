@@ -114,7 +114,7 @@ async def websocket_delete(
 
     provider = async_get_provider(hass)
     try:
-        await provider.async_delete_credential(connection.user.id, msg["credential_id"])
+        await provider.async_delete_credential(connection.user, msg["credential_id"])
     except CredentialNotFoundError as err:
         connection.send_error(msg["id"], "credential_not_found", str(err))
         return

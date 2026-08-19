@@ -159,6 +159,12 @@ class WebAuthnDataStore:
         credential.name = new_name
         await self._store.async_save(self._data)
 
+    async def async_delete_user_credentials(self, user_id: str) -> None:
+        """Delete all credentials of a user from persistent storage."""
+        if self._data.pop(user_id, None) is None:
+            return
+        await self._store.async_save(self._data)
+
     async def async_update_user_registration(
         self,
         user_id: str,
@@ -226,7 +232,12 @@ class WebAuthnProvider(AuthProvider):
     @property
     @override
     def support_mfa(self) -> bool:
-        """Return whether multi-factor auth supported by the auth provider."""
+        """Return whether multi-factor auth supported by the auth provider.
+
+        Passkeys are registered and verified with user verification required, so
+        the authenticator has already checked both possession of the device and a
+        biometric or PIN. Asking for another factor on top would be redundant.
+        """
         return False
 
     @override
@@ -323,16 +334,29 @@ class WebAuthnProvider(AuthProvider):
 
     async def _async_link_credentials(self, user: User) -> None:
         """Give the user credentials for this provider if they have none yet."""
+        if self._async_user_credentials(user) is not None:
+            return
+
+        await self.hass.auth.async_link_user(
+            user, self.async_create_credentials({CONF_USER_ID: user.id})
+        )
+
+    @callback
+    def _async_user_credentials(self, user: User) -> Credentials | None:
+        """Return the credentials the user has for this provider."""
         for credential in user.credentials:
             if (
                 credential.auth_provider_type == self.type
                 and credential.auth_provider_id == self.id
             ):
-                return
+                return credential
 
-        await self.hass.auth.async_link_user(
-            user, self.async_create_credentials({CONF_USER_ID: user.id})
-        )
+        return None
+
+    async def async_will_remove_credentials(self, credentials: Credentials) -> None:
+        """Drop the stored passkeys when the credentials are removed."""
+        data = await self._async_get_data()
+        await data.async_delete_user_credentials(credentials.data[CONF_USER_ID])
 
     async def async_start_authentication(self) -> PublicKeyCredentialRequestOptions:
         """Start the authentication process."""
@@ -392,10 +416,16 @@ class WebAuthnProvider(AuthProvider):
         )
         return user_id
 
-    async def async_delete_credential(self, user_id: str, credential_id: str) -> None:
+    async def async_delete_credential(self, user: User, credential_id: str) -> None:
         """Delete a registered credential."""
         data = await self._async_get_data()
-        await data.async_delete_credential(user_id, credential_id)
+        await data.async_delete_credential(user.id, credential_id)
+
+        # Without a passkey left to sign in with, the credentials are dead weight.
+        if not data.get_registered_credentials(user.id) and (
+            credentials := self._async_user_credentials(user)
+        ):
+            await self.hass.auth.async_remove_credentials(credentials)
 
     async def async_list_credentials_meta(
         self, user_id: str
@@ -463,6 +493,7 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
     """Handler for the login flow."""
 
     _challenge: bytes
+    _challenge_expires_at: float
 
     @override
     async def async_step_init(
@@ -473,17 +504,23 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            try:
-                user_id = await self._auth_provider.async_verify_authentication(
-                    user_input[CONF_AUTHENTICATION_CREDENTIAL], self._challenge
-                )
-            except InvalidAuthError:
+            # The timeout in the options is only a hint to the client, so the
+            # challenge lifetime has to be enforced here as well.
+            if time() > self._challenge_expires_at:
                 errors["base"] = "invalid_auth"
             else:
-                return await self.async_finish({CONF_USER_ID: user_id})
+                try:
+                    user_id = await self._auth_provider.async_verify_authentication(
+                        user_input[CONF_AUTHENTICATION_CREDENTIAL], self._challenge
+                    )
+                except InvalidAuthError:
+                    errors["base"] = "invalid_auth"
+                else:
+                    return await self.async_finish({CONF_USER_ID: user_id})
 
         options = await self._auth_provider.async_start_authentication()
         self._challenge = options.challenge
+        self._challenge_expires_at = time() + SIGN_IN_TIMEOUT_MS / 1000
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
