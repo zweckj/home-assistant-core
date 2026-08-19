@@ -110,6 +110,7 @@ async def websocket_register(
     {
         vol.Required("type"): "config/auth_provider/webauthn/register_verify",
         vol.Required("credential"): object,
+        vol.Optional("name"): str,
     },
 )
 @websocket_api.async_response
@@ -129,7 +130,7 @@ async def websocket_register_verify(
 
     try:
         await provider.async_verify_registration(
-            connection.user, msg["credential"], origin
+            connection.user, msg["credential"], origin, msg.get("name")
         )
     except InvalidAuthError as err:
         connection.send_error(msg["id"], "invalid_auth", str(err))

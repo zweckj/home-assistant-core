@@ -57,6 +57,8 @@ CONF_RP_NAME: Final = "rp_name"
 CONF_AUTHENTICATION_CREDENTIAL: Final = "authentication_credential"
 CONF_USER_ID: Final = "user_id"
 
+DEFAULT_CREDENTIAL_NAME: Final = "Passkey"
+
 
 def _disallow_id(conf: dict[str, Any]) -> dict[str, Any]:
     """Disallow ID in config."""
@@ -115,7 +117,7 @@ class WebAuthnCredentialMeta:
     """Class to hold WebAuthn credential metadata."""
 
     credential_id: str
-    name: str = "Passkey"
+    name: str = DEFAULT_CREDENTIAL_NAME
     created_at: float = field(default_factory=time)
     last_used_at: float = field(default_factory=time)
 
@@ -320,7 +322,11 @@ class WebAuthnProvider(AuthProvider):
         return options
 
     async def async_verify_registration(
-        self, user: User, credential: dict[str, Any], origin: str
+        self,
+        user: User,
+        credential: dict[str, Any],
+        origin: str,
+        name: str | None = None,
     ) -> None:
         """Complete the registration of a new WebAuthn credential."""
         async with self._registration_lock:
@@ -346,6 +352,7 @@ class WebAuthnProvider(AuthProvider):
 
         web_authn_credential = WebAuthnCredential(
             credential_id=bytes_to_base64url(verification.credential_id),
+            name=name or DEFAULT_CREDENTIAL_NAME,
             credential_public_key=bytes_to_base64url(
                 verification.credential_public_key
             ),
