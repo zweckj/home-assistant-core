@@ -15,8 +15,14 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 
-from ..models import AuthFlowContext, AuthFlowResult, Credentials, UserMeta
-from . import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
+from ..models import AuthFlowContext, AuthFlowResult, Credentials, User, UserMeta
+from . import (
+    AUTH_PROVIDER_SCHEMA,
+    AUTH_PROVIDERS,
+    AuthProvider,
+    InvalidStepUp,
+    LoginFlow,
+)
 
 STORAGE_VERSION = 1
 STORAGE_KEY = "auth_provider.homeassistant"
@@ -317,6 +323,43 @@ class HassAuthProvider(AuthProvider):
     async def async_login_flow(self, context: AuthFlowContext | None) -> HassLoginFlow:
         """Return a flow to login."""
         return HassLoginFlow(self)
+
+    @property
+    @override
+    def support_step_up(self) -> bool:
+        """Return that a signed in user can re-verify with their password."""
+        return True
+
+    @override
+    async def async_start_step_up(self, user: User) -> dict[str, Any]:
+        """Return the data needed to build a password proof."""
+        return {}
+
+    @override
+    async def async_verify_step_up(self, user: User, data: Mapping[str, Any]) -> None:
+        """Verify the current password of an already signed in user."""
+        if (username := self.async_get_username(user)) is None:
+            raise InvalidStepUp("User has no credentials for this provider.")
+
+        if not (password := data.get("password")):
+            raise InvalidStepUp("No password provided.")
+
+        try:
+            await self.async_validate_login(username, password)
+        except InvalidAuth as err:
+            raise InvalidStepUp("Invalid password.") from err
+
+    @callback
+    def async_get_username(self, user: User) -> str | None:
+        """Return the username the user is known by with this provider."""
+        for credential in user.credentials:
+            if (
+                credential.auth_provider_type == self.type
+                and credential.auth_provider_id == self.id
+            ):
+                return str(credential.data["username"])
+
+        return None
 
     async def async_validate_login(self, username: str, password: str) -> None:
         """Validate a username and password."""

@@ -301,6 +301,16 @@ class AuthManager:
 
         return user
 
+    @callback
+    def async_get_step_up_providers(self, user: models.User) -> list[AuthProvider]:
+        """Return the providers the user can prove their identity with again."""
+        return [
+            provider
+            for credential in user.credentials
+            if (provider := self._async_get_auth_provider(credential)) is not None
+            and provider.support_step_up
+        ]
+
     async def async_get_or_create_user(
         self, credentials: models.Credentials
     ) -> models.User:

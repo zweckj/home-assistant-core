@@ -45,6 +45,10 @@ AUTH_PROVIDER_SCHEMA = vol.Schema(
 )
 
 
+class InvalidStepUp(HomeAssistantError):
+    """Raised when a step up authentication could not be verified."""
+
+
 class AuthProvider:
     """Provider of user authentication."""
 
@@ -80,6 +84,11 @@ class AuthProvider:
     def support_mfa(self) -> bool:
         """Return whether multi-factor auth supported by the auth provider."""
         return True
+
+    @property
+    def support_step_up(self) -> bool:
+        """Return whether the provider can re-verify an already signed in user."""
+        return False
 
     async def async_credentials(self) -> list[Credentials]:
         """Return all credentials of this provider."""
@@ -122,6 +131,21 @@ class AuthProvider:
         """Return extra user metadata for credentials.
 
         Will be used to populate info when creating a new user.
+        """
+        raise NotImplementedError
+
+    async def async_start_step_up(self, user: User) -> dict[str, Any]:
+        """Return the data the client needs to build a step up proof.
+
+        Only called on providers that report support_step_up.
+        """
+        raise NotImplementedError
+
+    async def async_verify_step_up(self, user: User, data: Mapping[str, Any]) -> None:
+        """Verify that an already signed in user proved their identity again.
+
+        Raise InvalidStepUp when the proof does not hold. Only called on
+        providers that report support_step_up.
         """
         raise NotImplementedError
 

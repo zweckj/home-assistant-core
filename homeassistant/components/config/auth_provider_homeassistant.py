@@ -4,7 +4,7 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.auth.providers import homeassistant as auth_ha
+from homeassistant.auth.providers import InvalidStepUp, homeassistant as auth_ha
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import Unauthorized
@@ -112,21 +112,16 @@ async def websocket_change_password(
         return
 
     provider = auth_ha.async_get_provider(hass)
-    username = None
-    for credential in user.credentials:
-        if credential.auth_provider_type == provider.type:
-            username = credential.data["username"]
-            break
 
-    if username is None:
+    if (username := provider.async_get_username(user)) is None:
         connection.send_error(
             msg["id"], "credentials_not_found", "Credentials not found"
         )
         return
 
     try:
-        await provider.async_validate_login(username, msg["current_password"])
-    except auth_ha.InvalidAuth:
+        await provider.async_verify_step_up(user, {"password": msg["current_password"]})
+    except InvalidStepUp:
         connection.send_error(
             msg["id"], "invalid_current_password", "Invalid current password"
         )
