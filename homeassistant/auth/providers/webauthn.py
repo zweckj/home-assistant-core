@@ -3,6 +3,7 @@
 from asyncio import Lock
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
+import logging
 from time import time
 from typing import Any, Final, NamedTuple, cast, override
 
@@ -44,6 +45,8 @@ from ..models import AuthFlowContext, AuthFlowResult, Credentials, User, UserMet
 from . import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
 
 REQUIREMENTS = ["webauthn==3.0.0"]
+
+_LOGGER = logging.getLogger(__name__)
 
 WEBAUTHN_PROVIDER_TYPE: Final = "webauthn"
 
@@ -342,6 +345,9 @@ class WebAuthnProvider(AuthProvider):
         async with self._registration_lock:
             self._pending_registration_challenges[user.id] = options.challenge
 
+        _LOGGER.debug(
+            "Registration options for %s: %s", user.id, options_to_json(options)
+        )
         self._async_remove_pending_challenge_later(user.id, options.challenge)
         return options
 
@@ -419,14 +425,16 @@ class WebAuthnProvider(AuthProvider):
     ) -> PublicKeyCredentialRequestOptions:
         """Start the authentication process."""
 
-        return generate_authentication_options(
+        options = generate_authentication_options(
             rp_id=_async_relying_party(self.hass, origin).id,
             user_verification=UserVerificationRequirement.REQUIRED,
             timeout=SIGN_IN_TIMEOUT_MS,
         )
+        _LOGGER.debug("Authentication options: %s", options_to_json(options))
+        return options
 
     async def async_verify_authentication(
-        self, credential: dict[str, Any], challenge: bytes, origin: str
+        self, credential: str | dict[str, Any], challenge: bytes, origin: str
     ) -> str:
         """Complete the authentication process and return the ID of the user."""
 
@@ -569,6 +577,7 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
             # The timeout in the options is only a hint to the client, so the
             # challenge lifetime has to be enforced here as well.
             if time() > self._challenge_expires_at:
+                _LOGGER.debug("Passkey login rejected: challenge expired")
                 errors["base"] = "invalid_auth"
             else:
                 try:
@@ -577,7 +586,8 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
                         self._challenge,
                         redirect_uri,
                     )
-                except InvalidAuthError:
+                except InvalidAuthError as err:
+                    _LOGGER.debug("Passkey login rejected: %s", err, exc_info=True)
                     errors["base"] = "invalid_auth"
                 else:
                     return await self.async_finish({CONF_USER_ID: user_id})
@@ -589,7 +599,7 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_AUTHENTICATION_CREDENTIAL): dict,
+                    vol.Required(CONF_AUTHENTICATION_CREDENTIAL): str,
                 }
             ),
             description_placeholders={"webauthn_options": options_to_json(options)},
