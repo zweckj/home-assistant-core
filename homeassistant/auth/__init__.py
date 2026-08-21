@@ -5,6 +5,7 @@ from collections import OrderedDict
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from functools import partial
+import logging
 import time
 from typing import Any, cast, override
 
@@ -26,7 +27,8 @@ from .const import ACCESS_TOKEN_EXPIRATION, GROUP_ID_ADMIN, REFRESH_TOKEN_EXPIRA
 from .mfa_modules import MultiFactorAuthModule, auth_mfa_module_from_config
 from .models import AuthFlowContext, AuthFlowResult
 from .providers import AuthProvider, LoginFlow, auth_provider_from_config
-from .providers.homeassistant import HassAuthProvider
+
+_LOGGER = logging.getLogger(__name__)
 
 EVENT_USER_ADDED = "user_added"
 EVENT_USER_UPDATED = "user_updated"
@@ -72,14 +74,22 @@ async def auth_manager_from_config(
         key = (provider.type, provider.id)
         provider_hash[key] = provider
 
-        if isinstance(provider, HassAuthProvider):
-            # Can be removed in 2026.7 with the legacy mode of
-            # homeassistant auth provider.
-            # We need to initialize the provider to create the repair
-            # if needed as otherwise the provider will be initialized
-            # on first use, which could be rare as users don't
-            # frequently change auth settings
-            await provider.async_initialize()
+    # A provider that cannot initialize must not keep the rest of the auth
+    # system, and with it the only way into the instance, from coming up.
+    results = await asyncio.gather(
+        *(provider.async_initialize() for provider in providers),
+        return_exceptions=True,
+    )
+    for provider, result in zip(providers, results, strict=True):
+        if isinstance(result, Exception):
+            _LOGGER.error(
+                "Error initializing auth provider %s: %s",
+                provider.type,
+                result,
+                exc_info=result,
+            )
+        elif isinstance(result, BaseException):
+            raise result
 
     if module_configs:
         modules = await asyncio.gather(
@@ -185,6 +195,11 @@ class AuthManager:
         self._providers = providers
         self._mfa_modules = mfa_modules
         self.login_flow = AuthManagerFlowManager(hass, self)
+        # Serializes the check that a credential is still new, so two logins
+        # racing on the same one cannot both create a user. Auth providers are
+        # expected to hand out one credential object per identity; this turns
+        # that into one user.
+        self._credential_lock = asyncio.Lock()
         self._revoke_callbacks: dict[str, set[CALLBACK_TYPE]] = {}
         self._expire_callback: CALLBACK_TYPE | None = None
         self._remove_expired_job = HassJob(
@@ -305,42 +320,44 @@ class AuthManager:
         self, credentials: models.Credentials
     ) -> models.User:
         """Get or create a user."""
-        if not credentials.is_new:
-            user = await self.async_get_user_by_credentials(credentials)
-            if user is None:
-                raise ValueError("Unable to find the user.")
+        async with self._credential_lock:
+            if not credentials.is_new:
+                user = await self.async_get_user_by_credentials(credentials)
+                if user is None:
+                    raise ValueError("Unable to find the user.")
+                return user
+
+            auth_provider = self._async_get_auth_provider(credentials)
+
+            if auth_provider is None:
+                raise RuntimeError("Credential with unknown provider encountered")
+
+            info = await auth_provider.async_user_meta_for_credentials(credentials)
+
+            user = await self._store.async_create_user(
+                credentials=credentials,
+                name=info.name,
+                is_active=info.is_active,
+                group_ids=[GROUP_ID_ADMIN if info.group is None else info.group],
+                local_only=info.local_only,
+            )
+
+            self.hass.bus.async_fire(EVENT_USER_ADDED, {"user_id": user.id})
+
             return user
-
-        auth_provider = self._async_get_auth_provider(credentials)
-
-        if auth_provider is None:
-            raise RuntimeError("Credential with unknown provider encountered")
-
-        info = await auth_provider.async_user_meta_for_credentials(credentials)
-
-        user = await self._store.async_create_user(
-            credentials=credentials,
-            name=info.name,
-            is_active=info.is_active,
-            group_ids=[GROUP_ID_ADMIN if info.group is None else info.group],
-            local_only=info.local_only,
-        )
-
-        self.hass.bus.async_fire(EVENT_USER_ADDED, {"user_id": user.id})
-
-        return user
 
     async def async_link_user(
         self, user: models.User, credentials: models.Credentials
     ) -> None:
         """Link credentials to an existing user."""
-        linked_user = await self.async_get_user_by_credentials(credentials)
-        if linked_user == user:
-            return
-        if linked_user is not None:
-            raise ValueError("Credential is already linked to a user")
+        async with self._credential_lock:
+            linked_user = await self.async_get_user_by_credentials(credentials)
+            if linked_user == user:
+                return
+            if linked_user is not None:
+                raise ValueError("Credential is already linked to a user")
 
-        await self._store.async_link_user(user, credentials)
+            await self._store.async_link_user(user, credentials)
 
     async def async_remove_user(self, user: models.User) -> None:
         """Remove a user."""

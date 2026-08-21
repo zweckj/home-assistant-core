@@ -128,7 +128,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from logging import getLogger
-from typing import Any, cast
+from typing import Any, Literal, cast
 import uuid
 
 from aiohttp import web
@@ -151,9 +151,10 @@ from homeassistant.components.http.auth import (
 from homeassistant.components.http.ban import log_invalid_auth
 from homeassistant.components.http.data_validator import RequestDataValidator
 from homeassistant.components.http.view import HomeAssistantView
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2AuthorizeCallbackView
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
@@ -162,24 +163,26 @@ from . import indieauth, login_flow, mfa_setup_flow
 
 DOMAIN = "auth"
 
-type StoreResultType = Callable[[str, Credentials], str]
-type RetrieveResultType = Callable[[str, str], Credentials | None]
+type AuthCodePurpose = Literal["authorize", "link_user"]
+type StoreResultType = Callable[[str, Credentials, AuthCodePurpose], str]
+type RetrieveResultType = Callable[[str, str, AuthCodePurpose], Credentials | None]
 DATA_STORE: HassKey[StoreResultType] = HassKey(DOMAIN)
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 DELETE_CURRENT_TOKEN_DELAY = 2
+AUTH_CODE_EXPIRATION = timedelta(minutes=10)
 
 
 def create_auth_code(
     hass: HomeAssistant, client_id: str, credential: Credentials
 ) -> str:
     """Create an authorization code to fetch tokens."""
-    return hass.data[DATA_STORE](client_id, credential)
+    return hass.data[DATA_STORE](client_id, credential, "authorize")
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Component to allow users to login."""
-    store_result, retrieve_result = _create_auth_code_store()
+    store_result, retrieve_result = _create_auth_code_store(hass)
 
     hass.data[DATA_STORE] = store_result
 
@@ -290,7 +293,7 @@ class TokenView(HomeAssistantView):
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 
-        credential = self._retrieve_auth(client_id, code)
+        credential = self._retrieve_auth(client_id, code, "authorize")
 
         if credential is None or not isinstance(credential, Credentials):
             return self.json(
@@ -298,7 +301,13 @@ class TokenView(HomeAssistantView):
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 
-        user = await hass.auth.async_get_or_create_user(credential)
+        try:
+            user = await hass.auth.async_get_or_create_user(credential)
+        except InvalidAuthError as exc:
+            return self.json(
+                {"error": "access_denied", "error_description": str(exc)},
+                status_code=HTTPStatus.FORBIDDEN,
+            )
 
         if user_access_error := async_user_not_allowed_do_auth(hass, user):
             return self.json(
@@ -317,6 +326,7 @@ class TokenView(HomeAssistantView):
                 refresh_token, request.remote
             )
         except InvalidAuthError as exc:
+            hass.auth.async_remove_refresh_token(refresh_token)
             return self.json(
                 {"error": "access_denied", "error_description": str(exc)},
                 status_code=HTTPStatus.FORBIDDEN,
@@ -421,7 +431,9 @@ class LinkUserView(HomeAssistantView):
         hass = request.app[KEY_HASS]
         user: User = request["hass_user"]
 
-        credentials = self._retrieve_credentials(data["client_id"], data["code"])
+        credentials = self._retrieve_credentials(
+            data["client_id"], data["code"], "link_user"
+        )
 
         if credentials is None:
             return self.json_message("Invalid code", status_code=HTTPStatus.BAD_REQUEST)
@@ -439,40 +451,79 @@ class LinkUserView(HomeAssistantView):
 
 
 @callback
-def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
+def _create_auth_code_store(
+    hass: HomeAssistant,
+) -> tuple[StoreResultType, RetrieveResultType]:
     """Create an in memory store."""
-    temp_results: dict[tuple[str, str], tuple[datetime, Credentials]] = {}
+    temp_results: dict[
+        tuple[str, str],
+        tuple[datetime, Credentials, AuthCodePurpose, CALLBACK_TYPE],
+    ] = {}
+
+    async def async_cleanup(credentials: Credentials) -> None:
+        """Let the provider clean up after its last unused code expires."""
+        if any(stored[1] is credentials for stored in temp_results.values()):
+            return
+        if provider := hass.auth.get_auth_provider(
+            credentials.auth_provider_type, credentials.auth_provider_id
+        ):
+            await provider.async_auth_code_expired(credentials)
 
     @callback
-    def store_result(client_id: str, result: Credentials) -> str:
+    def store_result(
+        client_id: str,
+        result: Credentials,
+        purpose: AuthCodePurpose,
+    ) -> str:
         """Store flow result and return a code to retrieve it."""
         if not isinstance(result, Credentials):
             raise TypeError("result has to be a Credentials instance")
 
         code = uuid.uuid4().hex
-        temp_results[(client_id, code)] = (
+        key = (client_id, code)
+
+        async def async_expire(_: datetime) -> None:
+            if (stored := temp_results.pop(key, None)) is not None:
+                await async_cleanup(stored[1])
+
+        cancel_expiration = async_call_later(hass, AUTH_CODE_EXPIRATION, async_expire)
+        temp_results[key] = (
             dt_util.utcnow(),
             result,
+            purpose,
+            cancel_expiration,
         )
         return code
 
     @callback
-    def retrieve_result(client_id: str, code: str) -> Credentials | None:
+    def retrieve_result(
+        client_id: str,
+        code: str,
+        purpose: AuthCodePurpose,
+    ) -> Credentials | None:
         """Retrieve flow result."""
         key = (client_id, code)
 
-        if key not in temp_results:
+        if (stored := temp_results.get(key)) is None:
             return None
 
-        created, result = temp_results.pop(key)
+        created, result, stored_purpose, cancel_expiration = stored
+        if stored_purpose != purpose:
+            return None
+
+        temp_results.pop(key)
+        cancel_expiration()
 
         # OAuth 4.2.1
         # The authorization code MUST expire shortly after it is issued to
         # mitigate the risk of leaks.  A maximum authorization code lifetime of
         # 10 minutes is RECOMMENDED.
-        if dt_util.utcnow() - created < timedelta(minutes=10):
+        if dt_util.utcnow() - created < AUTH_CODE_EXPIRATION:
             return result
 
+        hass.async_create_task(
+            async_cleanup(result), "Clean up expired authorization code"
+        )
         return None
 
     return store_result, retrieve_result

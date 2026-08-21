@@ -3,7 +3,7 @@
 from datetime import timedelta
 from http import HTTPStatus
 import logging
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
@@ -171,35 +171,126 @@ async def test_auth_code_checks_local_only_user(
     assert error["error"] == "access_denied"
 
 
+async def test_auth_code_provider_rejection_removes_refresh_token(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a failed code exchange does not leave an unusable refresh token."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    code = (await resp.json())["result"]
+
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider.async_validate_refresh_token",
+        side_effect=InvalidAuthError("Invalid access"),
+    ):
+        resp = await client.post(
+            "/auth/token",
+            data={
+                "client_id": CLIENT_ID,
+                "grant_type": "authorization_code",
+                "code": code,
+            },
+        )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+    users = await hass.auth.async_get_users()
+    user = next(
+        user
+        for user in users
+        if any(
+            credentials.auth_provider_type == "insecure_example"
+            for credentials in user.credentials
+        )
+    )
+    assert user.refresh_tokens == {}
+
+
 def test_auth_code_store_expiration(
-    mock_credential, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    mock_credential: Credentials,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """Test that the auth code store will not return expired tokens."""
-    store, retrieve = auth._create_auth_code_store()
+    store, retrieve = auth._create_auth_code_store(hass)
     client_id = "bla"
     now = utcnow()
 
     freezer.move_to(now)
-    code = store(client_id, mock_credential)
+    code = store(client_id, mock_credential, "authorize")
 
     freezer.move_to(now + timedelta(minutes=10))
-    assert retrieve(client_id, code) is None
+    assert retrieve(client_id, code, "authorize") is None
 
     freezer.move_to(now)
-    code = store(client_id, mock_credential)
+    code = store(client_id, mock_credential, "authorize")
 
     freezer.move_to(now + timedelta(minutes=9, seconds=59))
-    assert retrieve(client_id, code) == mock_credential
+    assert retrieve(client_id, code, "authorize") == mock_credential
 
 
-def test_auth_code_store_requires_credentials(mock_credential) -> None:
+def test_auth_code_store_separates_code_purposes(
+    hass: HomeAssistant,
+    mock_credential: Credentials,
+) -> None:
+    """Test that login and account-linking codes are not interchangeable."""
+    store, retrieve = auth._create_auth_code_store(hass)
+    client_id = "bla"
+
+    login_code = store(client_id, mock_credential, "authorize")
+    link_code = store(client_id, mock_credential, "link_user")
+
+    assert retrieve(client_id, login_code, "authorize") == mock_credential
+    assert retrieve(client_id, link_code, "authorize") is None
+    assert retrieve(client_id, link_code, "link_user") == mock_credential
+
+
+async def test_auth_code_store_expires_unused_code(
+    hass: HomeAssistant,
+    mock_credential: Credentials,
+) -> None:
+    """Test an unused code expires and its provider can clean up state."""
+    provider = AsyncMock()
+    with (
+        patch(
+            "homeassistant.components.auth.async_call_later"
+        ) as mock_async_call_later,
+        patch.object(hass.auth, "get_auth_provider", return_value=provider),
+    ):
+        store, retrieve = auth._create_auth_code_store(hass)
+        code = store("bla", mock_credential, "authorize")
+        expire = mock_async_call_later.call_args.args[2]
+        await expire(utcnow())
+
+    assert retrieve("bla", code, "authorize") is None
+    provider.async_auth_code_expired.assert_awaited_once_with(mock_credential)
+
+
+def test_auth_code_store_requires_credentials(
+    hass: HomeAssistant, mock_credential: Credentials
+) -> None:
     """Test we require credentials."""
-    store, _retrieve = auth._create_auth_code_store()
+    store, _retrieve = auth._create_auth_code_store(hass)
 
     with pytest.raises(TypeError):
-        store(None, MockUser())
+        store(None, MockUser(), "authorize")
 
-    store(None, mock_credential)
+    store(None, mock_credential, "authorize")
 
 
 async def test_ws_current_user(

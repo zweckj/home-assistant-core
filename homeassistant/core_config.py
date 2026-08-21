@@ -362,7 +362,7 @@ async def async_process_ha_core_config(hass: HomeAssistant, config: dict) -> Non
     # Only load auth during startup.
     if not hasattr(hass, "auth"):
         if (auth_conf := config.get(CONF_AUTH_PROVIDERS)) is None:
-            auth_conf = [{"type": "homeassistant"}]
+            auth_conf = [{"type": "homeassistant"}, {"type": "oidc"}]
 
         mfa_conf = config.get(
             CONF_AUTH_MFA_MODULES,
