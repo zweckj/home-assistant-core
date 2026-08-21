@@ -50,6 +50,7 @@ class OidcConfig:
     issuer: str
     client_id: str
     client_secret: str | None = None
+    name: str | None = None
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
     username_claim: str = DEFAULT_USERNAME_CLAIM
     display_name_claim: str = DEFAULT_DISPLAY_NAME_CLAIM

@@ -148,6 +148,14 @@ class OidcAuthProvider(AuthProvider):
         return self.data is not None and self.data.config is not None
 
     @property
+    @override
+    def name(self) -> str:
+        """Return the name the login screen offers this provider under."""
+        if self.is_configured and (name := self.oidc_config.name):
+            return name
+        return super().name
+
+    @property
     def oidc_config(self) -> OidcConfig:
         """Return the settings, which every login and session implies exist."""
         if self.data is None or self.data.config is None:

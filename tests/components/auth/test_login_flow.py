@@ -1053,3 +1053,29 @@ async def test_oidc_provider_hidden_until_configured(
 
     resp = await client.get("/auth/providers")
     assert [prv["type"] for prv in (await resp.json())["providers"]] == ["oidc"]
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("Contoso ID", "Contoso ID"),
+        (None, "OpenID Connect"),
+    ],
+    ids=["configured", "default"],
+)
+async def test_oidc_provider_is_offered_under_its_name(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    name: str | None,
+    expected: str,
+) -> None:
+    """Test the login screen can offer a recognisable name to sign in with."""
+    client = await async_setup_auth(hass, aiohttp_client, [{"type": "oidc"}])
+    await hass.auth.auth_providers[0].async_set_config(
+        OidcConfig(issuer=_OIDC_ISSUER, client_id="home-assistant", name=name)
+    )
+
+    resp = await client.get("/auth/providers")
+
+    assert [prv["name"] for prv in (await resp.json())["providers"]] == [expected]

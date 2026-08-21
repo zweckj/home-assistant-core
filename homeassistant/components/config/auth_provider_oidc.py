@@ -20,11 +20,16 @@ from homeassistant.auth.providers.oidc.const import (
     DEFAULT_USERNAME_CLAIM,
     MAX_REVALIDATE_INTERVAL,
     MIN_REVALIDATE_INTERVAL,
+    PROVIDER_TYPE,
 )
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 from homeassistant.helpers.typing import VolDictType
+
+# Matched on the credential rather than by importing the provider, so the two
+# stay independent of one another.
+PASSWORD_PROVIDER_TYPE = "homeassistant"
 
 
 @callback
@@ -34,6 +39,7 @@ def async_setup(hass: HomeAssistant) -> bool:
     websocket_api.async_register_command(hass, websocket_update)
     websocket_api.async_register_command(hass, websocket_delete)
     websocket_api.async_register_command(hass, websocket_test)
+    websocket_api.async_register_command(hass, websocket_unlink)
     return True
 
 
@@ -59,10 +65,20 @@ def _scopes(value: list[str]) -> list[str]:
     return value
 
 
+def _name(value: Any) -> str | None:
+    """Validate the name the login screen offers the provider under."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not (name := value.strip()):
+        raise vol.Invalid("must be a name")
+    return name
+
+
 CONFIG_SCHEMA: VolDictType = {
     vol.Required("issuer"): vol.All(str, _https_url),
     vol.Required("client_id"): str,
     vol.Optional("client_secret"): vol.Any(str, None),
+    vol.Optional("name", default=None): _name,
     vol.Optional("scopes", default=lambda: list(DEFAULT_SCOPES)): vol.All(
         [str], vol.Length(min=1), _scopes
     ),
@@ -122,6 +138,7 @@ def _config_to_dict(config: OidcConfig | None) -> dict[str, Any] | None:
         "client_id": config.client_id,
         # The secret is write only, the UI only needs to know it is set.
         "client_secret_set": bool(config.client_secret),
+        "name": config.name,
         "scopes": config.scopes,
         "username_claim": config.username_claim,
         "display_name_claim": config.display_name_claim,
@@ -197,6 +214,7 @@ async def websocket_update(
         issuer=msg["issuer"],
         client_id=msg["client_id"],
         client_secret=client_secret,
+        name=msg["name"],
         scopes=msg["scopes"],
         username_claim=msg["username_claim"],
         display_name_claim=msg["display_name_claim"],
@@ -224,6 +242,57 @@ async def websocket_delete(
         return
 
     await provider.async_set_config(None)
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "config/auth_provider/oidc/unlink"}
+)
+@websocket_api.async_response
+async def websocket_unlink(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Detach the caller's own identity from their Home Assistant account."""
+    if (provider := _async_provider(hass, connection, msg)) is None:
+        return
+
+    # An unconfigured provider cannot sign anybody in, so nothing could relink.
+    if provider.is_configured and provider.oidc_config.allow_auto_create:
+        connection.send_error(
+            msg["id"],
+            "auto_create_enabled",
+            "Signing in again would link the account straight back",
+        )
+        return
+
+    user = connection.user
+    linked = [
+        credentials
+        for credentials in user.credentials
+        if credentials.auth_provider_type == PROVIDER_TYPE
+    ]
+    if not linked:
+        connection.send_error(
+            msg["id"], "not_linked", "This account has no identity provider login"
+        )
+        return
+
+    if not any(
+        credentials.auth_provider_type == PASSWORD_PROVIDER_TYPE
+        for credentials in user.credentials
+    ):
+        connection.send_error(
+            msg["id"],
+            "no_other_login",
+            "Set a password before removing the identity provider login",
+        )
+        return
+
+    for credentials in linked:
+        await hass.auth.async_remove_credentials(credentials)
+
     connection.send_result(msg["id"])
 
 
