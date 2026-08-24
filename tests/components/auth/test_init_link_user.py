@@ -90,6 +90,45 @@ async def test_link_user(
     assert len(info["user"].credentials) == 1
 
 
+async def test_link_user_flow_does_not_mark_a_successful_login(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test creating a linking code does not reset failed-login tracking."""
+    with patch(
+        "homeassistant.components.auth.login_flow.process_success_login"
+    ) as process_success_login:
+        await async_get_code(hass, aiohttp_client)
+
+    process_success_login.assert_not_called()
+
+
+async def test_link_user_code_cannot_be_exchanged_for_tokens(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test an account-linking code cannot create a new login session."""
+    info = await async_get_code(hass, aiohttp_client)
+    client = info["client"]
+    code = info["code"]
+
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+        },
+    )
+    assert resp.status == HTTPStatus.BAD_REQUEST
+
+    resp = await client.post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": code},
+        headers={"authorization": f"Bearer {info['access_token']}"},
+    )
+    assert resp.status == HTTPStatus.OK
+    assert len(info["user"].credentials) == 1
+
+
 async def test_link_user_invalid_client_id(
     hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
 ) -> None:

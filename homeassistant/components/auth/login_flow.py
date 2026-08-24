@@ -22,7 +22,12 @@ Pass in parameter 'client_id' and 'redirect_url' validate by indieauth.
 Pass in parameter 'handler' to specify the auth provider to use. Auth providers
 are identified by type and id.
 
-The default 'type' is 'authorize'.
+Pass in parameter 'type' to say what the resulting authorization code is for.
+The default is 'authorize', which mints a code for POST /auth/token to exchange
+for tokens. Use 'link_user' to attach the credentials to the user who is already
+signed in; that code is only redeemable at POST /auth/link_user, and a provider
+may allow the login purely so it can be linked even when it would refuse to
+create a new user.
 
 {
     "client_id": "https://hassbian.local:8123/",
@@ -64,18 +69,20 @@ an authorization code.
 }
 """
 
-from collections.abc import Callable
+import hmac
 from http import HTTPStatus
 from ipaddress import ip_address
+import secrets
 from typing import TYPE_CHECKING, Any, cast
 
 from aiohttp import web
 import voluptuous as vol
 import voluptuous_serialize
+from yarl import URL
 
 from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager, InvalidAuthError
-from homeassistant.auth.models import AuthFlowContext, AuthFlowResult, Credentials
+from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
 from homeassistant.components import onboarding
 from homeassistant.components.http import KEY_HASS
 from homeassistant.components.http.auth import async_user_not_allowed_do_auth
@@ -97,23 +104,44 @@ from homeassistant.util.network import is_local
 from . import indieauth
 
 if TYPE_CHECKING:
+    from homeassistant.auth.providers.oidc import OidcAuthProvider
     from homeassistant.auth.providers.trusted_networks import (
         TrustedNetworksAuthProvider,
     )
 
     from . import StoreResultType
 
+OIDC_CALLBACK_PATH = "/auth/oidc/callback"
+BROWSER_TOKEN_COOKIE_PREFIX = "hass_login_browser_"
+AUTH_COOKIE_PATH = "/auth"
+# Matches how long a login may stay parked at the identity provider.
+BROWSER_TOKEN_EXPIRATION = 300
+
 
 @callback
-def async_setup(
-    hass: HomeAssistant, store_result: Callable[[str, Credentials], str]
-) -> None:
+def _browser_token_cookie(flow_id: str) -> str:
+    """Return the browser-token cookie name for a login flow."""
+    return f"{BROWSER_TOKEN_COOKIE_PREFIX}{flow_id}"
+
+
+@callback
+def _async_oidc_provider(hass: HomeAssistant) -> OidcAuthProvider | None:
+    """Return the OpenID Connect auth provider if it is enabled."""
+    for provider in hass.auth.auth_providers:
+        if provider.type == "oidc":
+            return cast("OidcAuthProvider", provider)
+    return None
+
+
+@callback
+def async_setup(hass: HomeAssistant, store_result: StoreResultType) -> None:
     """Component to allow users to login."""
     hass.http.register_view(WellKnownOAuthInfoView)
     hass.http.register_view(WellKnownProtectedResourceView)
     hass.http.register_view(AuthProvidersView)
     hass.http.register_view(LoginFlowIndexView(hass.auth.login_flow, store_result))
     hass.http.register_view(LoginFlowResourceView(hass.auth.login_flow, store_result))
+    hass.http.register_view(OidcCallbackView(hass.auth.login_flow))
 
 
 class WellKnownOAuthInfoView(HomeAssistantView):
@@ -226,6 +254,13 @@ class AuthProvidersView(HomeAssistantView):
                     # trusted_network authenticator is setup
                     continue
 
+            if (
+                provider.type == "oidc"
+                and not cast("OidcAuthProvider", provider).is_configured
+            ):
+                # Nothing to log in against until an administrator sets it up
+                continue
+
             providers.append(
                 {
                     "name": provider.name,
@@ -307,7 +342,7 @@ class LoginFlowBaseView(HomeAssistantView):
             return self.json_message("Invalid redirect URI", HTTPStatus.FORBIDDEN)
 
         result.pop("data")
-        result.pop("context")
+        link_user = result.pop("context").get("link_user", False)
 
         result_obj = result.pop("result")
 
@@ -321,9 +356,14 @@ class LoginFlowBaseView(HomeAssistantView):
                 f"Login blocked: {user_access_error}", HTTPStatus.FORBIDDEN
             )
 
-        process_success_login(request)
+        if not link_user:
+            process_success_login(request)
         # We overwrite the Credentials object with the string code to retrieve it.
-        result["result"] = self._store_result(client_id, result_obj)  # type: ignore[typeddict-item]
+        result["result"] = self._store_result(  # type: ignore[typeddict-item]
+            client_id,
+            result_obj,
+            "link_user" if link_user else "authorize",
+        )
 
         return self.json(result)
 
@@ -346,9 +386,7 @@ class LoginFlowIndexView(LoginFlowBaseView):
                     [vol.Any(str, None)], vol.Length(2, 2), vol.Coerce(tuple)
                 ),
                 vol.Required("redirect_uri"): str,
-                vol.Optional(
-                    "type", default="authorize"
-                ): str,  # not used, kept for backwards compatibility
+                vol.Optional("type", default="authorize"): str,
             }
         )
     )
@@ -362,14 +400,17 @@ class LoginFlowIndexView(LoginFlowBaseView):
             return self.json_message("Invalid client id", HTTPStatus.BAD_REQUEST)
 
         handler: tuple[str, str] = tuple(data["handler"])
+        context = AuthFlowContext(
+            ip_address=ip_address(request.remote),  # type: ignore[arg-type]
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            link_user=data["type"] == "link_user",
+        )
 
         try:
             result = await self._flow_mgr.async_init(
                 handler,
-                context=AuthFlowContext(
-                    ip_address=ip_address(request.remote),  # type: ignore[arg-type]
-                    redirect_uri=redirect_uri,
-                ),
+                context=context,
             )
         except data_entry_flow.UnknownHandler:
             return self.json_message("Invalid handler specified", HTTPStatus.NOT_FOUND)
@@ -378,7 +419,26 @@ class LoginFlowIndexView(LoginFlowBaseView):
                 "Handler does not support init", HTTPStatus.BAD_REQUEST
             )
 
-        return await self._async_flow_result_to_response(request, client_id, result)
+        response = await self._async_flow_result_to_response(request, client_id, result)
+
+        # Only an external step leaves the browser, and only then does the flow
+        # have to be tied back to it when it returns.
+        if result["type"] is data_entry_flow.FlowResultType.EXTERNAL_STEP:
+            # The flow has already run its first step, which must not read this.
+            browser_token = context["browser_token"] = secrets.token_urlsafe(32)
+            response.set_cookie(
+                _browser_token_cookie(result["flow_id"]),
+                browser_token,
+                max_age=BROWSER_TOKEN_EXPIRATION,
+                httponly=True,
+                secure=request.secure,
+                # The identity provider sends the user back with a top level
+                # navigation, which strict same site would strip the cookie from.
+                samesite="Lax",
+                path=AUTH_COOKIE_PATH,
+            )
+
+        return response
 
 
 class LoginFlowResourceView(LoginFlowBaseView):
@@ -386,6 +446,17 @@ class LoginFlowResourceView(LoginFlowBaseView):
 
     url = "/auth/login_flow/{flow_id}"
     name = "api:auth:login_flow:resource"
+
+    def __init__(
+        self,
+        flow_mgr: AuthManagerFlowManager,
+        store_result: StoreResultType,
+    ) -> None:
+        """Initialize the login flow resource view."""
+        super().__init__(flow_mgr, store_result)
+        # A flow may only be advanced one request at a time; a second concurrent
+        # request gets a conflict rather than racing the first one.
+        self._flows_in_progress: set[str] = set()
 
     async def get(self, request: web.Request) -> web.Response:
         """Do not allow getting status of a flow in progress."""
@@ -412,13 +483,42 @@ class LoginFlowResourceView(LoginFlowBaseView):
             flow = self._flow_mgr.async_get(flow_id)
             if flow["context"]["ip_address"] != ip_address(request.remote):  # type: ignore[arg-type]
                 return self.json_message("IP address changed", HTTPStatus.BAD_REQUEST)
-            result = await self._flow_mgr.async_configure(flow_id, data)
+            if flow["context"].get("client_id") != client_id:
+                return self.json_message("Client ID changed", HTTPStatus.BAD_REQUEST)
+            if (expected_token := flow["context"].get("browser_token")) is not None:
+                if flow["step_id"] == "authorize":
+                    return self.json_message(
+                        "External callback required", HTTPStatus.BAD_REQUEST
+                    )
+                presented_token = request.cookies.get(_browser_token_cookie(flow_id))
+                if presented_token is None or not hmac.compare_digest(
+                    expected_token, presented_token
+                ):
+                    return self.json_message(
+                        "Login was not started in this browser",
+                        HTTPStatus.BAD_REQUEST,
+                    )
+            if flow_id in self._flows_in_progress:
+                return self.json_message(
+                    "Flow request already in progress", HTTPStatus.CONFLICT
+                )
+            self._flows_in_progress.add(flow_id)
+            try:
+                result = await self._flow_mgr.async_configure(flow_id, data)
+            finally:
+                self._flows_in_progress.discard(flow_id)
         except data_entry_flow.UnknownFlow:
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
         except vol.Invalid:
             return self.json_message("User input malformed", HTTPStatus.BAD_REQUEST)
 
-        return await self._async_flow_result_to_response(request, client_id, result)
+        response = await self._async_flow_result_to_response(request, client_id, result)
+        if result["type"] in (
+            data_entry_flow.FlowResultType.ABORT,
+            data_entry_flow.FlowResultType.CREATE_ENTRY,
+        ):
+            response.del_cookie(_browser_token_cookie(flow_id), path=AUTH_COOKIE_PATH)
+        return response
 
     async def delete(self, request: web.Request, flow_id: str) -> web.Response:
         """Cancel a flow in progress."""
@@ -427,4 +527,118 @@ class LoginFlowResourceView(LoginFlowBaseView):
         except data_entry_flow.UnknownFlow:
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
 
-        return self.json_message("Flow aborted")
+        response = self.json_message("Flow aborted")
+        response.del_cookie(_browser_token_cookie(flow_id), path=AUTH_COOKIE_PATH)
+        return response
+
+
+class OidcCallbackView(HomeAssistantView):
+    """Receive the redirect back from an OpenID Connect provider."""
+
+    url = OIDC_CALLBACK_PATH
+    name = "api:auth:oidc:callback"
+    requires_auth = False
+
+    def __init__(self, flow_mgr: AuthManagerFlowManager) -> None:
+        """Initialize the callback view."""
+        self._flow_mgr = flow_mgr
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Resume the login flow the identity provider was started for."""
+        hass = request.app[KEY_HASS]
+
+        if (provider := _async_oidc_provider(hass)) is None:
+            return self.json_message(
+                "OpenID Connect is not enabled", HTTPStatus.NOT_FOUND
+            )
+
+        if (state := request.query.get("state")) is None:
+            return self.json_message("Missing state parameter", HTTPStatus.BAD_REQUEST)
+
+        # The state is signed by the provider, so a tampered or expired one
+        # never reaches a flow.
+        if (flow_id := provider.async_decode_state(state)) is None:
+            return self.json_message("Invalid state parameter", HTTPStatus.BAD_REQUEST)
+
+        try:
+            flow = self._flow_mgr.async_get(flow_id)
+        except data_entry_flow.UnknownFlow:
+            return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+
+        if flow["step_id"] != "authorize":
+            return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+
+        try:
+            remote_address = ip_address(request.remote)  # type: ignore[arg-type]
+        except ValueError:
+            return self.json_message("Invalid remote IP", HTTPStatus.BAD_REQUEST)
+
+        # do not allow change ip during login flow
+        if flow["context"]["ip_address"] != remote_address:
+            return self.json_message("IP address changed", HTTPStatus.BAD_REQUEST)
+
+        # The state alone only proves the flow existed. Tying it to a cookie set
+        # when the flow started means a login cannot be finished in a browser
+        # other than the one that began it.
+        expected_token = flow["context"].get("browser_token")
+        presented_token = request.cookies.get(_browser_token_cookie(flow_id))
+        if (
+            not expected_token
+            or not presented_token
+            or not hmac.compare_digest(expected_token, presented_token)
+        ):
+            return self.json_message(
+                "Login was not started in this browser", HTTPStatus.BAD_REQUEST
+            )
+
+        if not await indieauth.verify_redirect_uri(
+            hass,
+            flow["context"]["client_id"],
+            flow["context"]["redirect_uri"],
+        ):
+            return self.json_message("Invalid redirect URI", HTTPStatus.FORBIDDEN)
+
+        # Verifying the redirect URI awaited, so the flow may have been advanced
+        # by a concurrent callback in the meantime.
+        try:
+            if self._flow_mgr.async_get(flow_id)["step_id"] != "authorize":
+                return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+        except data_entry_flow.UnknownFlow:
+            return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+
+        user_input: dict[str, str] = {
+            key: value
+            for key in ("code", "error")
+            if (value := request.query.get(key)) is not None
+        }
+
+        try:
+            await self._flow_mgr.async_configure(flow_id, user_input)
+        except data_entry_flow.UnknownFlow:
+            return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+        except vol.Invalid:
+            return self.json_message("User input malformed", HTTPStatus.BAD_REQUEST)
+
+        location = URL("/auth/authorize").with_query(
+            {
+                "flow_id": flow_id,
+                "client_id": flow["context"]["client_id"],
+                "redirect_uri": flow["context"]["redirect_uri"],
+                "auth_callback": "1",
+            }
+        )
+        response = web.Response(
+            status=HTTPStatus.FOUND, headers={"location": str(location)}
+        )
+        # The finish step still needs the cookie, so give it a fresh budget
+        # rather than whatever is left after the detour to the provider.
+        response.set_cookie(
+            _browser_token_cookie(flow_id),
+            presented_token,
+            max_age=BROWSER_TOKEN_EXPIRATION,
+            httponly=True,
+            secure=request.secure,
+            samesite="Lax",
+            path=AUTH_COOKIE_PATH,
+        )
+        return response
