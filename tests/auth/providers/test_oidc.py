@@ -3,6 +3,7 @@
 import asyncio
 import base64
 from contextlib import suppress
+from dataclasses import replace
 import hashlib
 from ipaddress import ip_address
 import json
@@ -1761,6 +1762,7 @@ async def test_revalidation_rejects_id_token_for_another_subject(
 
 
 async def test_revalidation_keeps_rotated_token_on_transient_validation_error(
+    hass: HomeAssistant,
     provider: oidc_auth.OidcAuthProvider,
 ) -> None:
     """Test token rotation survives a transient refreshed-ID-token failure."""
@@ -1789,7 +1791,8 @@ async def test_revalidation_keeps_rotated_token_on_transient_validation_error(
             side_effect=OidcTransientError("JWKS unavailable"),
         ),
     ):
-        await provider._async_revalidate_sessions(dt_util.utcnow())
+        async_fire_time_changed(hass, dt_util.utcnow() + REVALIDATE_CHECK_INTERVAL)
+        await hass.async_block_till_done()
 
     session = provider.data.sessions[credentials.id]
     assert session.refresh_token == "new-rt"
@@ -2107,6 +2110,75 @@ async def test_reconfiguring_clears_existing_sessions(
     assert manager.async_get_refresh_token(refresh_token.id) is None
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name": "Contoso ID"},
+        {"display_name_claim": "given_name"},
+        {"allow_auto_create": False},
+        {"revalidate_interval": 3600},
+        {"admin_group": "other-admins"},
+    ],
+    ids=["name", "display-name-claim", "auto-create", "interval", "admin-group"],
+)
+async def test_editing_settings_keeps_existing_sessions(
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    change: dict[str, Any],
+) -> None:
+    """Test an edit that keeps the same issuer does not sign everybody out.
+
+    Renaming the provider used to log out every user, revoke their tokens and
+    strip administrator rights the provider had granted.
+    """
+    user = await manager.async_create_user("Alice")
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await manager.async_link_user(user, credentials)
+    await manager.async_update_user(user, group_ids=[GROUP_ID_ADMIN])
+    await provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT, "groups": ["home_assistant_admin"]},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+    refresh_token = await manager.async_create_refresh_token(
+        user, "https://ha.example.com/", credential=credentials
+    )
+
+    await provider.async_set_config(replace(provider.oidc_config, **change))
+
+    assert credentials.id in provider.data.sessions
+    assert manager.async_get_refresh_token(refresh_token.id) is not None
+    assert user.is_admin
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"issuer": "https://other-idp.example.com"},
+        {"client_id": "other-client"},
+        {"client_secret": "rotated"},
+        {"scopes": ["openid", "profile"]},
+    ],
+    ids=["issuer", "client-id", "client-secret", "scopes"],
+)
+@pytest.mark.usefixtures("mock_idp")
+async def test_changing_who_issues_tokens_clears_sessions(
+    provider: oidc_auth.OidcAuthProvider,
+    change: dict[str, Any],
+) -> None:
+    """Test sessions do not survive a change to who issued them."""
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+
+    await provider.async_set_config(replace(provider.oidc_config, **change))
+
+    assert provider.data.sessions == {}
+
+
 async def test_state_is_signed(provider: oidc_auth.OidcAuthProvider) -> None:
     """Test a tampered state parameter is not accepted."""
     state = provider.async_encode_state("the-flow-id")
@@ -2190,6 +2262,29 @@ async def test_store_discards_malformed_data(
 
     assert store.config is None
     assert store.sessions == {}
+
+
+async def test_store_records_that_a_configuration_was_discarded(
+    hass: HomeAssistant,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Test losing settings to corrupt storage is remembered, not just logged."""
+    hass_storage[STORAGE_KEY] = {
+        "version": STORAGE_VERSION,
+        "minor_version": 1,
+        "key": STORAGE_KEY,
+        "data": {"config": {"issuer": 1, "client_id": CLIENT_ID}},
+    }
+    store = OidcStore(hass)
+
+    await store.async_load()
+
+    assert store.config is None
+    assert store.config_discarded
+
+    store.async_set_config(OidcConfig(issuer=ISSUER, client_id=CLIENT_ID))
+
+    assert not store.config_discarded
 
 
 async def test_store_survives_a_restart(

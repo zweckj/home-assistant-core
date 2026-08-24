@@ -1,5 +1,6 @@
 """Offer API to configure the OpenID Connect auth provider."""
 
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -26,6 +27,8 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 from homeassistant.helpers.typing import VolDictType
+
+_LOGGER = logging.getLogger(__name__)
 
 # Matched on the credential rather than by importing the provider, so the two
 # stay independent of one another.
@@ -124,6 +127,12 @@ def _async_redirect_uris(hass: HomeAssistant) -> list[str]:
             continue
         if (uri := f"{base}{AUTH_CALLBACK_PATH}") not in uris:
             uris.append(uri)
+
+    if not uris:
+        _LOGGER.warning(
+            "No URL is configured to build an OIDC redirect URI from, set an"
+            " internal or external URL before registering the client"
+        )
     return uris
 
 
@@ -168,6 +177,9 @@ async def websocket_get(
             "config": _config_to_dict(
                 provider.oidc_config if provider.is_configured else None
             ),
+            # Tells the UI that settings were lost rather than never made.
+            "config_discarded": provider.data is not None
+            and provider.data.config_discarded,
             "redirect_uris": _async_redirect_uris(hass),
         },
     )

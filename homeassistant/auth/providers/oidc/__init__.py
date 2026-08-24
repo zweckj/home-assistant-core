@@ -23,7 +23,7 @@ import jwt
 import voluptuous as vol
 
 from homeassistant.const import CONF_ID
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
@@ -99,6 +99,7 @@ class OidcAuthProvider(AuthProvider):
         self._pending_credentials: WeakValueDictionary[tuple[str, str], Credentials] = (
             WeakValueDictionary()
         )
+        self._unsub_revalidate: CALLBACK_TYPE | None = None
         # Regenerated on restart, which only invalidates in flight logins.
         self._state_secret = secrets.token_hex(32)
 
@@ -126,13 +127,27 @@ class OidcAuthProvider(AuthProvider):
                     data.async_remove_session(credential_id)
             self.data = data
 
-        async_track_time_interval(
-            self.hass,
-            self._async_revalidate_sessions,
-            REVALIDATE_CHECK_INTERVAL,
-            name="OIDC session revalidation",
-            cancel_on_shutdown=True,
-        )
+        self._async_schedule_revalidation()
+
+    @callback
+    def _async_schedule_revalidation(self) -> None:
+        """Run the timer only while there is a provider to revalidate against.
+
+        The provider ships enabled, so an install that never configures it must
+        not pay for a recurring job that would return immediately.
+        """
+        if self.is_configured:
+            if self._unsub_revalidate is None:
+                self._unsub_revalidate = async_track_time_interval(
+                    self.hass,
+                    self._async_revalidate_sessions,
+                    REVALIDATE_CHECK_INTERVAL,
+                    name="OIDC session revalidation",
+                    cancel_on_shutdown=True,
+                )
+        elif self._unsub_revalidate is not None:
+            self._unsub_revalidate()
+            self._unsub_revalidate = None
 
     async def _async_get_data(self) -> OidcStore:
         """Return the data store, loading it if needed."""
@@ -172,6 +187,17 @@ class OidcAuthProvider(AuthProvider):
             if data.config == config:
                 return
 
+            # Sessions only stop meaning anything when who issued them changes.
+            # Renaming the provider must not sign every user out.
+            if (
+                config is not None
+                and data.config is not None
+                and config.trust_key == data.config.trust_key
+            ):
+                data.async_set_config(config)
+                self._async_schedule_revalidation()
+                return
+
             async with self._revalidate_lock:
                 old_client = self.async_client() if data.config is not None else None
                 refresh_tokens = [
@@ -183,6 +209,7 @@ class OidcAuthProvider(AuthProvider):
                 data.async_set_config(config)
                 self._client = None
                 self._pending_credentials.clear()
+                self._async_schedule_revalidation()
 
         if old_client is not None:
             await asyncio.gather(
@@ -449,19 +476,26 @@ class OidcAuthProvider(AuthProvider):
             data = self.data
             config = self.oidc_config
             timestamp = now.timestamp()
+            # Ended together, because ending one walks every user.
+            expired: list[OidcSession] = []
             for session in list(data.sessions.values()):
                 if timestamp < session.refresh_after:
                     continue
-                await self._async_revalidate_session(data, config, session)
+                if await self._async_revalidate_session(data, config, session):
+                    expired.append(session)
+
+            if expired:
+                await self._async_end_sessions(expired)
 
     async def _async_revalidate_session(
         self, data: OidcStore, config: OidcConfig, session: OidcSession
-    ) -> None:
-        """Ask the identity provider whether a session is still valid."""
+    ) -> bool:
+        """Ask the identity provider whether a session is still valid.
+
+        Returns whether the caller has to end it.
+        """
         if session.refresh_token is None:
-            if time.time() >= session.revalidate_after:
-                await self._async_end_session(session)
-            return
+            return time.time() >= session.revalidate_after
 
         try:
             client = self.async_client()
@@ -478,27 +512,22 @@ class OidcAuthProvider(AuthProvider):
                         "Refreshed ID token describes a different subject,"
                         " signing out the OIDC session"
                     )
-                    await self._async_end_session(session)
-                    return
+                    return True
         except OidcInvalidGrantError:
             _LOGGER.info("Identity provider revoked an OIDC session, signing it out")
-            await self._async_end_session(session)
-            return
+            return True
         except OidcTransientError as err:
             _LOGGER.debug("Could not revalidate OIDC session yet: %s", err)
-            return
+            return False
         except OidcError as err:
             _LOGGER.warning("Error revalidating OIDC session: %s", err)
-            return
+            return False
 
         # Only the token and the deadlines move; the identity attributes are read
         # once, while the Home Assistant user is created.
         session.mark_validated(config.revalidate_interval)
         data.async_set_session(session)
-
-    async def _async_end_session(self, session: OidcSession) -> None:
-        """Drop a session and every Home Assistant token that depends on it."""
-        await self._async_end_sessions([session])
+        return False
 
     async def _async_end_sessions(self, sessions: list[OidcSession]) -> None:
         """Drop sessions and every Home Assistant token that depends on them."""

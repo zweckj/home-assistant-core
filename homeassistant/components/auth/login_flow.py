@@ -22,7 +22,12 @@ Pass in parameter 'client_id' and 'redirect_url' validate by indieauth.
 Pass in parameter 'handler' to specify the auth provider to use. Auth providers
 are identified by type and id.
 
-The default 'type' is 'authorize'.
+Pass in parameter 'type' to say what the resulting authorization code is for.
+The default is 'authorize', which mints a code for POST /auth/token to exchange
+for tokens. Use 'link_user' to attach the credentials to the user who is already
+signed in; that code is only redeemable at POST /auth/link_user, and a provider
+may allow the login purely so it can be linked even when it would refuse to
+create a new user.
 
 {
     "client_id": "https://hassbian.local:8123/",
@@ -73,6 +78,7 @@ from typing import TYPE_CHECKING, Any, cast
 from aiohttp import web
 import voluptuous as vol
 import voluptuous_serialize
+from yarl import URL
 
 from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager, InvalidAuthError
@@ -614,7 +620,26 @@ class OidcCallbackView(HomeAssistantView):
         except vol.Invalid:
             return self.json_message("User input malformed", HTTPStatus.BAD_REQUEST)
 
-        return web.Response(
-            status=HTTPStatus.FOUND,
-            headers={"location": f"/auth/authorize?flow_id={flow_id}&auth_callback=1"},
+        location = URL("/auth/authorize").with_query(
+            {
+                "flow_id": flow_id,
+                "client_id": flow["context"]["client_id"],
+                "redirect_uri": flow["context"]["redirect_uri"],
+                "auth_callback": "1",
+            }
         )
+        response = web.Response(
+            status=HTTPStatus.FOUND, headers={"location": str(location)}
+        )
+        # The finish step still needs the cookie, so give it a fresh budget
+        # rather than whatever is left after the detour to the provider.
+        response.set_cookie(
+            _browser_token_cookie(flow_id),
+            presented_token,
+            max_age=BROWSER_TOKEN_EXPIRATION,
+            httponly=True,
+            secure=request.secure,
+            samesite="Lax",
+            path=AUTH_COOKIE_PATH,
+        )
+        return response

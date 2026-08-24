@@ -624,7 +624,14 @@ class OidcClient:
             raise OidcIdTokenError("Access token is not ASCII encoded") from err
 
         if expected is None:
-            _LOGGER.debug("Cannot check at_hash for algorithm %s", algorithm)
+            # Only EdDSA reaches this, because OpenID Connect pins no hash for
+            # it. Logged loudly because a binding the provider offered is going
+            # unchecked.
+            _LOGGER.warning(
+                "ID token carries an at_hash that cannot be checked for"
+                " algorithm %s, the access token binding is unverified",
+                algorithm,
+            )
             return
 
         if not hmac.compare_digest(at_hash, expected):

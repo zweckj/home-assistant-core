@@ -161,6 +161,8 @@ from homeassistant.util.hass_dict import HassKey
 
 from . import indieauth, login_flow, mfa_setup_flow
 
+_LOGGER = getLogger(__name__)
+
 DOMAIN = "auth"
 
 type AuthCodePurpose = Literal["authorize", "link_user"]
@@ -464,10 +466,25 @@ def _create_auth_code_store(
         """Let the provider clean up after its last unused code expires."""
         if any(stored[1] is credentials for stored in temp_results.values()):
             return
-        if provider := hass.auth.get_auth_provider(
+        provider = hass.auth.get_auth_provider(
             credentials.auth_provider_type, credentials.auth_provider_id
-        ):
+        )
+        if provider is None:
+            _LOGGER.warning(
+                "Cannot clean up after an expired %s authorization code, the"
+                " provider is gone; it may still hold the session",
+                credentials.auth_provider_type,
+            )
+            return
+        try:
             await provider.async_auth_code_expired(credentials)
+        except Exception:
+            # Detached from any caller, so a failure would otherwise leave a
+            # session behind the provider with no trace of why.
+            _LOGGER.exception(
+                "Error cleaning up after an expired %s authorization code",
+                credentials.auth_provider_type,
+            )
 
     @callback
     def store_result(

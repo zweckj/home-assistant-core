@@ -600,11 +600,39 @@ async def test_oidc_callback_resumes_the_flow(
     location = URL(resp.headers["location"])
     assert location.path == "/auth/authorize"
     assert location.query["auth_callback"] == "1"
+    # The authorize page needs to know where to send the user afterwards.
+    assert location.query["client_id"] == CLIENT_ID
+    assert location.query["redirect_uri"] == CLIENT_REDIRECT_URI
     # The authorization code is never handed out by this view.
     assert "code" not in location.query
 
     flow_id = location.query["flow_id"]
     assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "finish"
+
+
+async def test_oidc_callback_renews_the_browser_cookie(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test the finish step gets a full cookie budget after the provider detour.
+
+    A slow login at the provider would otherwise use up the cookie before the
+    frontend posts the last step.
+    """
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+
+    resp = await client.get(
+        f"/auth/oidc/callback?code=the-code&state={state}", allow_redirects=False
+    )
+
+    assert resp.status == 302
+    flow_id = URL(resp.headers["location"]).query["flow_id"]
+    cookie = resp.cookies[f"hass_login_browser_{flow_id}"]
+    assert cookie["max-age"] == "300"
+    assert cookie["path"] == "/auth"
+    assert cookie["httponly"]
 
 
 async def test_oidc_complete_http_login(

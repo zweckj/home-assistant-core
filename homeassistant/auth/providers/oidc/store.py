@@ -58,6 +58,15 @@ class OidcConfig:
     allow_auto_create: bool = False
     revalidate_interval: int = DEFAULT_REVALIDATE_INTERVAL
 
+    @property
+    def trust_key(self) -> tuple[str, str, str | None, tuple[str, ...]]:
+        """Return the fields that decide who issued the existing sessions.
+
+        A change to any of them makes what was issued before it meaningless;
+        everything else is applied without signing anybody out.
+        """
+        return (self.issuer, self.client_id, self.client_secret, tuple(self.scopes))
+
     def username_from(self, claims: Mapping[str, Any]) -> str | None:
         """Return the username a set of claims maps to."""
         return _claim_as_str(claims.get(self.username_claim))
@@ -176,6 +185,9 @@ class OidcStore:
         )
         self.config: OidcConfig | None = None
         self.sessions: dict[str, OidcSession] = {}
+        # A discarded configuration looks exactly like never having had one, so
+        # the difference is kept for the UI to report.
+        self.config_discarded = False
 
     async def async_load(self) -> None:
         """Load the stored data."""
@@ -184,6 +196,7 @@ class OidcStore:
             return
         if not isinstance(data, Mapping):
             _LOGGER.error("Discarding unreadable OIDC storage")
+            self.config_discarded = True
             return
 
         if (raw_config := data.get("config")) is not None:
@@ -191,6 +204,7 @@ class OidcStore:
                 self.config = _config_from_dict(raw_config)
             except TypeError:
                 _LOGGER.exception("Discarding unreadable OIDC configuration")
+                self.config_discarded = True
 
         if self.config is None:
             return
@@ -229,6 +243,7 @@ class OidcStore:
     def async_set_config(self, config: OidcConfig | None) -> None:
         """Replace the provider configuration."""
         self.config = config
+        self.config_discarded = False
         if config is None:
             self.sessions.clear()
         self.async_schedule_save()

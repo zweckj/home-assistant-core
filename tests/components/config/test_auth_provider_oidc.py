@@ -64,6 +64,30 @@ async def test_get_without_configuration(
 
     assert result["success"]
     assert result["result"]["config"] is None
+    assert result["result"]["config_discarded"] is False
+
+
+async def test_get_reports_a_discarded_configuration(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+) -> None:
+    """Test settings lost to corrupt storage are distinguishable from none.
+
+    Both leave the provider unconfigured, so without this an administrator
+    cannot tell that single sign-on stopped working.
+    """
+    assert oidc_provider.data is not None
+    oidc_provider.data.config_discarded = True
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id({"type": "config/auth_provider/oidc/get"})
+
+    result = await client.receive_json()
+
+    assert result["success"]
+    assert result["result"]["config"] is None
+    assert result["result"]["config_discarded"] is True
 
 
 async def test_get_returns_redirect_uris(
