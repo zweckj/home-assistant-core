@@ -95,7 +95,10 @@ def _async_relying_party(hass: HomeAssistant, origin: str) -> _RelyingParty:
     WebAuthn only runs in a secure context and cannot use an IP address as
     relying party, so anything else is rejected before a ceremony starts.
     """
-    url = yarl.URL(origin).origin()
+    try:
+        url = yarl.URL(origin).origin()
+    except ValueError as err:
+        raise InvalidAuthError(f"Cannot use {origin} for WebAuthn.") from err
 
     if url.scheme != "https" or url.host is None or is_ip_address(url.host):
         raise InvalidAuthError(f"Cannot use {origin} for WebAuthn.")
@@ -120,6 +123,7 @@ class WebAuthnCredentialMeta:
     """Class to hold WebAuthn credential metadata."""
 
     credential_id: str
+    rp_id: str
     name: str = DEFAULT_CREDENTIAL_NAME
     created_at: float = field(default_factory=time)
     last_used_at: float = field(default_factory=time)
@@ -255,6 +259,7 @@ class WebAuthnDataStore:
             WebAuthnCredentialMeta(
                 credential_id=cred.credential_id,
                 name=cred.name,
+                rp_id=cred.rp_id,
                 created_at=cred.created_at,
                 last_used_at=cred.last_used_at,
             )
@@ -383,6 +388,7 @@ class WebAuthnProvider(AuthProvider):
         web_authn_credential = WebAuthnCredential(
             credential_id=bytes_to_base64url(verification.credential_id),
             name=name or DEFAULT_CREDENTIAL_NAME,
+            rp_id=relying_party.id,
             credential_public_key=bytes_to_base64url(
                 verification.credential_public_key
             ),
@@ -495,21 +501,21 @@ class WebAuthnProvider(AuthProvider):
             await self.hass.auth.async_remove_credentials(credentials)
 
     async def async_list_credentials_meta(
-        self, user_id: str
+        self, user: User
     ) -> list[WebAuthnCredentialMeta]:
         """List all registered credentials for a user."""
         data = await self._async_get_data()
-        return data.list_credentials_meta(user_id)
+        return data.list_credentials_meta(user.id)
 
     async def async_rename_credential(
         self,
-        user_id: str,
+        user: User,
         credential_id: str,
         new_name: str,
     ) -> None:
         """Rename a registered credential for a user."""
         data = await self._async_get_data()
-        await data.async_rename_credential(user_id, credential_id, new_name)
+        await data.async_rename_credential(user.id, credential_id, new_name)
 
     @override
     async def async_get_or_create_credentials(
@@ -569,9 +575,10 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
         """Initialize the login flow."""
 
         errors: dict[str, str] = {}
-        # Verified against the client ID before the flow is started.
+        # Client supplied and only validated once the flow finishes, so the
+        # origin it carries is checked again for every ceremony.
         if (redirect_uri := self.context.get("redirect_uri")) is None:
-            raise InvalidAuthError("Flow was started without a redirect URI.")
+            return self.async_abort(reason="missing_redirect_uri")
 
         if user_input is not None:
             # The timeout in the options is only a hint to the client, so the
@@ -592,7 +599,12 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
                 else:
                     return await self.async_finish({CONF_USER_ID: user_id})
 
-        options = await self._auth_provider.async_start_authentication(redirect_uri)
+        try:
+            options = await self._auth_provider.async_start_authentication(redirect_uri)
+        except InvalidAuthError as err:
+            _LOGGER.debug("Cannot offer a passkey login: %s", err)
+            return self.async_abort(reason="invalid_origin")
+
         self._challenge = options.challenge
         self._challenge_expires_at = time() + SIGN_IN_TIMEOUT_MS / 1000
         return self.async_show_form(

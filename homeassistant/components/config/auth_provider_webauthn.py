@@ -1,4 +1,4 @@
-"""Offer API to configure the Home Assistant auth provider."""
+"""Offer API to configure the WebAuthn auth provider."""
 
 from dataclasses import asdict
 from typing import Any
@@ -62,7 +62,7 @@ async def websocket_list(
 
     credentials: list[
         WebAuthnCredentialMeta
-    ] = await provider.async_list_credentials_meta(connection.user.id)
+    ] = await provider.async_list_credentials_meta(connection.user)
 
     connection.send_result(msg["id"], [asdict(cred) for cred in credentials])
 
@@ -182,7 +182,7 @@ async def websocket_rename(
 
     try:
         await provider.async_rename_credential(
-            connection.user.id, msg["credential_id"], msg["name"]
+            connection.user, msg["credential_id"], msg["name"]
         )
     except CredentialNotFoundError as err:
         connection.send_error(msg["id"], "credential_not_found", str(err))
