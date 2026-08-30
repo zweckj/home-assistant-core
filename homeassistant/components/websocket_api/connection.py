@@ -55,6 +55,7 @@ class ActiveConnection:
         "hass",
         "last_id",
         "logger",
+        "origin",
         "refresh_token_id",
         "remote",
         "send_message",
@@ -71,6 +72,7 @@ class ActiveConnection:
         user: User,
         refresh_token: RefreshToken | None,
         remote: str | None,
+        origin: str | None = None,
     ) -> None:
         """Initialize an active connection."""
         self.logger = logger
@@ -79,6 +81,8 @@ class ActiveConnection:
         self.user = user
         self.refresh_token_id = refresh_token.id if refresh_token else None
         self.remote = remote
+        # Origin of the page that opened the connection, as sent in the handshake.
+        self.origin = origin
         self.subscriptions: dict[Hashable, Callable[[], Any]] = {}
         self.last_id = 0
         self.can_coalesce = False
