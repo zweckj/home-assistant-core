@@ -75,7 +75,7 @@ async def auth_manager_from_config(
         provider_hash[key] = provider
 
     # A provider that cannot initialize must not keep the rest of the auth
-    # system, and with it the only way into the instance, from coming up.
+    # system, and with it every way into the instance, from coming up.
     results = await asyncio.gather(
         *(provider.async_initialize() for provider in providers),
         return_exceptions=True,
@@ -196,9 +196,7 @@ class AuthManager:
         self._mfa_modules = mfa_modules
         self.login_flow = AuthManagerFlowManager(hass, self)
         # Serializes the check that a credential is still new, so two logins
-        # racing on the same one cannot both create a user. Auth providers are
-        # expected to hand out one credential object per identity; this turns
-        # that into one user.
+        # racing on the same one cannot both create a user.
         self._credential_lock = asyncio.Lock()
         self._revoke_callbacks: dict[str, set[CALLBACK_TYPE]] = {}
         self._expire_callback: CALLBACK_TYPE | None = None
@@ -316,6 +314,16 @@ class AuthManager:
 
         return user
 
+    @callback
+    def async_get_step_up_providers(self, user: models.User) -> list[AuthProvider]:
+        """Return the providers the user can prove their identity with again."""
+        return [
+            provider
+            for credential in user.credentials
+            if (provider := self._async_get_auth_provider(credential)) is not None
+            and provider.support_step_up
+        ]
+
     async def async_get_or_create_user(
         self, credentials: models.Credentials
     ) -> models.User:
@@ -422,12 +430,46 @@ class AuthManager:
 
     async def async_remove_credentials(self, credentials: models.Credentials) -> None:
         """Remove credentials."""
-        provider = self._async_get_auth_provider(credentials)
-
-        if provider is not None and hasattr(provider, "async_will_remove_credentials"):
+        if (provider := self._async_get_auth_provider(credentials)) is not None:
             await provider.async_will_remove_credentials(credentials)
 
         await self._store.async_remove_credentials(credentials)
+
+    @callback
+    def async_has_other_login_method(
+        self, user: models.User, credentials: models.Credentials
+    ) -> bool:
+        """Test if the user can still log in without the given credentials.
+
+        Credentials of a provider that is no longer configured cannot be logged
+        in with, so they do not count as a login method.
+        """
+        return any(
+            credential.id != credentials.id
+            and self.get_auth_provider(
+                credential.auth_provider_type, credential.auth_provider_id
+            )
+            is not None
+            for credential in user.credentials
+        )
+
+    async def async_remove_refresh_tokens_for_credentials(
+        self, credentials: models.Credentials
+    ) -> None:
+        """Remove every refresh token that was issued for these credentials.
+
+        Refusing to issue new tokens is not revocation, so a provider that ends
+        a session has to take the tokens it already handed out with it.
+        """
+        if (user := await self.async_get_user_by_credentials(credentials)) is None:
+            return
+
+        for refresh_token in list(user.refresh_tokens.values()):
+            if (
+                refresh_token.credential is not None
+                and refresh_token.credential.id == credentials.id
+            ):
+                self.async_remove_refresh_token(refresh_token)
 
     async def async_enable_user_mfa(
         self, user: models.User, mfa_module_id: str, data: Any

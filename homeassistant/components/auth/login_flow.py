@@ -81,7 +81,7 @@ import voluptuous as vol
 from yarl import URL
 
 from homeassistant import data_entry_flow
-from homeassistant.auth import AuthManagerFlowManager, InvalidAuthError
+from homeassistant.auth import AuthManagerFlowManager
 from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
 from homeassistant.components import onboarding
 from homeassistant.components.http import KEY_HASS
@@ -105,9 +105,6 @@ from . import indieauth
 
 if TYPE_CHECKING:
     from homeassistant.auth.providers.oidc import OidcAuthProvider
-    from homeassistant.auth.providers.trusted_networks import (
-        TrustedNetworksAuthProvider,
-    )
 
     from . import StoreResultType
 
@@ -237,37 +234,17 @@ class AuthProvidersView(HomeAssistantView):
             )
 
         cloud_connection = is_cloud_connection(hass)
+        context = AuthFlowContext(ip_address=remote_address)
 
-        providers = []
-        for provider in hass.auth.auth_providers:
-            if provider.type == "trusted_networks":
-                if cloud_connection:
-                    # Skip quickly as trusted networks are not available on cloud
-                    continue
-
-                try:
-                    cast("TrustedNetworksAuthProvider", provider).async_validate_access(
-                        remote_address
-                    )
-                except InvalidAuthError:
-                    # Not a trusted network, so we don't expose that
-                    # trusted_network authenticator is setup
-                    continue
-
-            if (
-                provider.type == "oidc"
-                and not cast("OidcAuthProvider", provider).is_configured
-            ):
-                # Nothing to log in against until an administrator sets it up
-                continue
-
-            providers.append(
-                {
-                    "name": provider.name,
-                    "id": provider.id,
-                    "type": provider.type,
-                }
-            )
+        providers = [
+            {
+                "name": provider.name,
+                "id": provider.id,
+                "type": provider.type,
+            }
+            for provider in hass.auth.auth_providers
+            if provider.async_can_start_login(context)
+        ]
 
         preselect_remember_me = not cloud_connection and is_local(remote_address)
 

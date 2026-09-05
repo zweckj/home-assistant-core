@@ -45,6 +45,10 @@ AUTH_PROVIDER_SCHEMA = vol.Schema(
 )
 
 
+class InvalidStepUpError(HomeAssistantError):
+    """Raised when a step up authentication could not be verified."""
+
+
 class AuthProvider:
     """Provider of user authentication."""
 
@@ -81,6 +85,11 @@ class AuthProvider:
         """Return whether multi-factor auth supported by the auth provider."""
         return True
 
+    @property
+    def support_step_up(self) -> bool:
+        """Return whether the provider can re-verify an already signed in user."""
+        return False
+
     async def async_credentials(self) -> list[Credentials]:
         """Return all credentials of this provider."""
         users = await self.store.async_get_users()
@@ -110,6 +119,15 @@ class AuthProvider:
         """
         raise NotImplementedError
 
+    @callback
+    def async_can_start_login(self, context: AuthFlowContext) -> bool:
+        """Return if a login with this provider can be started here.
+
+        A provider that says no is left off the login screen, so this must not
+        reveal that a provider nobody can use is configured.
+        """
+        return True
+
     async def async_get_or_create_credentials(
         self, flow_result: Mapping[str, str]
     ) -> Credentials:
@@ -125,8 +143,26 @@ class AuthProvider:
         """
         raise NotImplementedError
 
+    async def async_start_step_up(self, user: User) -> dict[str, Any]:
+        """Return the data the client needs to build a step up proof.
+
+        Only called on providers that report support_step_up.
+        """
+        raise NotImplementedError
+
+    async def async_verify_step_up(self, user: User, data: Mapping[str, Any]) -> None:
+        """Verify that an already signed in user proved their identity again.
+
+        Raise InvalidStepUpError when the proof does not hold. Only called on
+        providers that report support_step_up.
+        """
+        raise NotImplementedError
+
     async def async_initialize(self) -> None:
         """Initialize the auth provider."""
+
+    async def async_will_remove_credentials(self, credentials: Credentials) -> None:
+        """Clean up provider owned data before credentials are removed."""
 
     async def async_auth_code_expired(self, credentials: Credentials) -> None:
         """Clean up provider state after an unused authorization code expires."""

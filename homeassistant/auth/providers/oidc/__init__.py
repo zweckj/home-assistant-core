@@ -265,6 +265,12 @@ class OidcAuthProvider(AuthProvider):
         """Return a flow to login."""
         return OidcLoginFlow(self)
 
+    @callback
+    @override
+    def async_can_start_login(self, context: AuthFlowContext) -> bool:
+        """Return if an administrator has set up an identity provider yet."""
+        return self.is_configured
+
     @override
     async def async_get_or_create_credentials(
         self, flow_result: Mapping[str, str]
@@ -309,6 +315,7 @@ class OidcAuthProvider(AuthProvider):
             local_only=False,
         )
 
+    @override
     async def async_will_remove_credentials(self, credentials: Credentials) -> None:
         """Drop the identity provider session when the credentials are removed."""
         await self._async_remove_credentials_session(credentials)
