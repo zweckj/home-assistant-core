@@ -47,6 +47,7 @@ Extracting a shared token-request helper would be a reasonable follow-up PR.
 - Automatic account creation is off by default. The provisioning check necessarily runs after the code exchange, so a login carrying the `link_user` context still gets credentials for `/auth/link_user` to attach. Without that carve-out nobody could get in on a fresh install.
 - Linking compares nothing: whatever identity authenticates at the provider is attached to the signed-in account, and the Home Assistant display name is left alone.
 - `config/auth_provider/oidc/unlink` detaches the caller's own identity. It is not admin-only, since linking is self-service too, but it refuses unless the account also has a password login, and refuses while `allow_auto_create` is on because the next sign-in would relink. The password is matched on `Credentials.auth_provider_type` rather than by importing that provider, so the two stay independent.
+- A stored password only counts as a fallback while its provider is still loaded, so unlinking cannot strand an account behind a login method that was taken out of the configuration. That is the last-usable-login rule, and it has to be the same rule everywhere: any provider that lets a user delete a credential owes the same check, or the account can be locked out from the other side.
 
 ## Claims
 
@@ -91,6 +92,15 @@ Credentials are only checked during login, which yields a long-lived refresh tok
 - A lock guards overlapping passes: `async_track_time_interval` reschedules before running, so a slow provider could otherwise refresh a session twice and burn a rotating token.
 - Replacing any configuration invalidates existing sessions and local tokens. In-flight logins are tied to the configuration generation that started them.
 
+## What ending a session reaches
+
+Ending a session removes it and every Home Assistant token derived from it, through the same `async_remove_refresh_token` path an ordinary revocation takes, so open connections close with it. That is narrower than deactivating the account, deliberately.
+
+- Disabling somebody at the identity provider does not deactivate their Home Assistant user. A local password or a passkey remains a login method of its own, long-lived access tokens are exempt by design, and tokens carrying no credential are never selected because nothing ties them to this provider. Offboarding that has to close every door means removing the user, not the link.
+- How quickly a revocation upstream is noticed follows from the interval: at the 24 hour default the first refresh attempt lands after twelve hours. Shorten it where a tighter bound matters. A refresh that succeeds proves the grant still works, not that the account is still entitled to anything.
+- One session is stored per Home Assistant credential rather than per browser or device, and a new login replaces the token that credential shares. Signing out therefore cannot be aimed at a single device.
+- Permission to link a credential is not assurance at sign-in. Neither is a successful revalidation. Step-up authentication is a separate concern and must not be folded into this lifecycle.
+
 ## Transport and token security
 
 - Every discovery endpoint must be HTTPS, including `userinfo_endpoint` and `revocation_endpoint`, which carry bearer and refresh tokens.
@@ -108,3 +118,4 @@ Credentials are only checked during login, which yields a long-lived refresh tok
 ## Known gaps
 
 - Back-channel and front-channel logout are not implemented; sign out is driven by revalidation.
+- The last-usable-login check is per provider. Two removals running concurrently in different providers can each count the other as the fallback.

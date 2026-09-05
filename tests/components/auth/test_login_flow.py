@@ -1,24 +1,33 @@
 """Tests for the login flow."""
 
 import asyncio
+from datetime import timedelta
 from http import HTTPStatus
 from ipaddress import ip_address
+import time
 from typing import Any
 from unittest.mock import patch
 
+from aiohttp import ClientWebSocketResponse, WSMsgType
 from aiohttp.test_utils import TestClient
 import pytest
 from yarl import URL
 
 from homeassistant.auth.providers.oidc import OidcAuthProvider
-from homeassistant.auth.providers.oidc.client import TokenResponse
+from homeassistant.auth.providers.oidc.client import OidcTransientError, TokenResponse
 from homeassistant.auth.providers.oidc.store import OidcConfig
+from homeassistant.components.websocket_api import (
+    auth as websocket_auth,
+    http as websocket_http,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
+from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 
 from . import BASE_CONFIG, async_setup_auth
 
-from tests.common import CLIENT_ID, CLIENT_REDIRECT_URI
+from tests.common import CLIENT_ID, CLIENT_REDIRECT_URI, async_fire_time_changed
 from tests.test_util.aiohttp import AiohttpClientMocker
 from tests.typing import ClientSessionGenerator
 
@@ -699,6 +708,161 @@ async def test_oidc_complete_http_login(
     refresh_token = hass.auth.async_validate_access_token(tokens["access_token"])
     assert refresh_token is not None
     assert refresh_token.user.name == "Alice"
+
+
+_OIDC_CLAIMS = {
+    "iss": _OIDC_ISSUER,
+    "sub": "user-1234",
+    "name": "Alice",
+    "preferred_username": "alice",
+}
+
+
+async def _oidc_sign_in(hass: HomeAssistant, client: TestClient, **claims: Any) -> str:
+    """Complete a browser login and return a Home Assistant access token."""
+    provider = hass.auth.auth_providers[0]
+    assert isinstance(provider, OidcAuthProvider)
+    await provider.async_set_config(
+        OidcConfig(
+            issuer=_OIDC_ISSUER,
+            client_id="home-assistant",
+            allow_auto_create=True,
+        )
+    )
+    state = await _start_oidc_login(client)
+    oidc_client = provider.async_client()
+
+    with (
+        patch.object(
+            oidc_client,
+            "async_exchange_code",
+            return_value=TokenResponse(
+                access_token="idp-access-token",
+                id_token="id-token",
+                refresh_token="idp-refresh-token",
+            ),
+        ),
+        patch.object(
+            oidc_client, "async_verify_id_token", return_value=_OIDC_CLAIMS | claims
+        ),
+    ):
+        resp = await client.get(
+            f"/auth/oidc/callback?code=the-code&state={state}", allow_redirects=False
+        )
+        flow_id = URL(resp.headers["location"]).query["flow_id"]
+        resp = await client.post(
+            f"/auth/login_flow/{flow_id}", json={"client_id": CLIENT_ID}
+        )
+
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": (await resp.json())["result"],
+        },
+    )
+    assert resp.status == HTTPStatus.OK
+    return (await resp.json())["access_token"]
+
+
+async def _authenticated_socket(
+    client: TestClient, access_token: str
+) -> ClientWebSocketResponse:
+    """Return a WebSocket connection authenticated with an access token."""
+    websocket = await client.ws_connect(websocket_http.URL)
+    assert (await websocket.receive_json())["type"] == websocket_auth.TYPE_AUTH_REQUIRED
+    await websocket.send_json(
+        {"type": websocket_auth.TYPE_AUTH, "access_token": access_token}
+    )
+    assert (await websocket.receive_json())["type"] == websocket_auth.TYPE_AUTH_OK
+    return websocket
+
+
+async def _fire_event(websocket: ClientWebSocketResponse, message_id: int) -> Any:
+    """Run a command over the connection that only an administrator may run."""
+    await websocket.send_json(
+        {"id": message_id, "type": "fire_event", "event_type": "test_event"}
+    )
+    return await websocket.receive_json()
+
+
+async def test_oidc_withdrawing_admin_reaches_an_open_connection(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test a demotion takes effect on a connection that is already open.
+
+    A connection holds on to the user it authenticated as, and that user caches
+    whether it is an administrator, so recording the new groups is not by itself
+    enough to end privileged access.
+    """
+    assert await async_setup_component(hass, "websocket_api", {})
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    # Owners are never demoted, and the first account created owns the instance.
+    await hass.auth.async_create_user("Owner")
+    access_token = await _oidc_sign_in(hass, client, groups=["home_assistant_admin"])
+    websocket = await _authenticated_socket(client, access_token)
+    assert (await _fire_event(websocket, 1))["success"]
+
+    provider = hass.auth.auth_providers[0]
+    oidc_client = provider.async_client()
+    session = next(iter(provider.data.sessions.values()))
+    session.refresh_after = time.time() - 1
+
+    with (
+        patch.object(
+            oidc_client,
+            "async_refresh_token",
+            return_value=TokenResponse(access_token="at2", id_token="id-token-2"),
+        ),
+        patch.object(
+            oidc_client,
+            "async_verify_id_token",
+            return_value=_OIDC_CLAIMS | {"groups": []},
+        ),
+    ):
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=6))
+        await hass.async_block_till_done()
+
+    result = await _fire_event(websocket, 2)
+    assert not result["success"]
+    assert result["error"]["code"] == "unauthorized"
+
+
+async def test_oidc_deadline_disconnects_an_open_connection(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test the deadline closes a connection the identity provider disowned.
+
+    The Home Assistant refresh token and the access token minted from it both
+    outlive the deadline, so refusing to issue new tokens leaves an established
+    connection alone until the session teardown revokes them.
+    """
+    assert await async_setup_component(hass, "websocket_api", {})
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    access_token = await _oidc_sign_in(hass, client)
+    websocket = await _authenticated_socket(client, access_token)
+
+    provider = hass.auth.auth_providers[0]
+    session = next(iter(provider.data.sessions.values()))
+    session.refresh_after = time.time() - 1
+    session.revalidate_after = time.time() - 1
+
+    with patch.object(
+        provider.async_client(),
+        "async_refresh_token",
+        side_effect=OidcTransientError("Provider is down"),
+    ):
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=6))
+        await hass.async_block_till_done()
+
+    assert not provider.data.sessions
+    assert hass.auth.async_validate_access_token(access_token) is None
+    assert (await websocket.receive()).type is WSMsgType.CLOSE
 
 
 async def test_concurrent_oidc_finish_posts_execute_once(
