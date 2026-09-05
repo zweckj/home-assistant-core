@@ -2625,6 +2625,65 @@ async def test_security_relevant_settings_clear_sessions(
     assert provider.data.sessions == {}
 
 
+async def _start_login(
+    manager: auth.AuthManager, url: str, *, internal: bool
+) -> AuthFlowResult:
+    """Start a login flow with Home Assistant reachable at a given URL."""
+    with (
+        patch("homeassistant.auth.providers.oidc.get_url", return_value=url),
+        patch(
+            "homeassistant.auth.providers.oidc.is_internal_request",
+            return_value=internal,
+        ),
+    ):
+        return await manager.login_flow.async_init(
+            (PROVIDER_TYPE, None),
+            context={
+                "ip_address": ip_address("127.0.0.1"),
+                "redirect_uri": "https://ha.example.com/",
+            },
+        )
+
+
+@pytest.mark.usefixtures("provider", "mock_idp")
+async def test_login_refuses_plain_http_reachable_from_outside(
+    manager: auth.AuthManager,
+) -> None:
+    """Test a login is not started over a connection strangers can read.
+
+    The browser carries the authorization code out and Home Assistant's own
+    tokens back, so plain HTTP would hand both to anyone on the path.
+    """
+    result = await _start_login(manager, "http://ha.example.com", internal=False)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "insecure_transport"
+
+
+@pytest.mark.parametrize(
+    ("url", "internal"),
+    [
+        ("https://ha.example.com", False),
+        ("http://homeassistant.local:8123", True),
+        ("http://192.168.1.10:8123", True),
+    ],
+    ids=["external-https", "internal-hostname", "internal-address"],
+)
+@pytest.mark.usefixtures("provider", "mock_idp")
+async def test_login_starts_over_a_usable_transport(
+    manager: auth.AuthManager,
+    url: str,
+    internal: bool,
+) -> None:
+    """Test HTTPS and the internal URL both remain usable.
+
+    A local install served over plain HTTP is a deliberate exception.
+    """
+    result = await _start_login(manager, url, internal=internal)
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+
+
 async def test_state_is_signed(provider: oidc_auth.OidcAuthProvider) -> None:
     """Test a tampered state parameter is not accepted."""
     state = provider.async_encode_state("the-flow-id")

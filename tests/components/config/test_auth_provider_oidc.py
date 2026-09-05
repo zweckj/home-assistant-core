@@ -472,6 +472,43 @@ async def test_unlink_without_a_linked_account(
     assert result["error"]["code"] == "not_linked"
 
 
+async def test_unlink_ignores_a_password_from_a_disabled_provider(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+    hass_admin_user: MockUser,
+) -> None:
+    """Test a stored password only counts while its provider still exists.
+
+    Removing the identity provider login would otherwise leave an account with
+    a credential nothing can authenticate against.
+    """
+    await oidc_provider.async_set_config(
+        OidcConfig(issuer=ISSUER, client_id=CLIENT_ID, allow_auto_create=False)
+    )
+    credentials = await _link(hass, oidc_provider, hass_admin_user)
+    hass_admin_user.credentials.clear()
+    hass_admin_user.credentials.append(credentials)
+    await hass.auth.async_link_user(
+        hass_admin_user,
+        Credentials(
+            auth_provider_type="homeassistant",
+            auth_provider_id="removed",
+            data={"username": "hello"},
+            is_new=False,
+        ),
+    )
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id({"type": "config/auth_provider/oidc/unlink"})
+
+    result = await client.receive_json()
+
+    assert not result["success"]
+    assert result["error"]["code"] == "no_other_login"
+    assert credentials in hass_admin_user.credentials
+
+
 async def test_unlink_is_allowed_for_non_admins(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,

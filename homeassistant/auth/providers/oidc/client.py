@@ -108,6 +108,10 @@ class OidcIdTokenError(OidcError):
     """Raised when an ID token fails validation."""
 
 
+class OidcInsecureTransportError(OidcError):
+    """Raised when a login would run over a connection that is not private."""
+
+
 def generate_code_verifier() -> str:
     """Return a new PKCE code verifier."""
     return secrets.token_urlsafe(64)

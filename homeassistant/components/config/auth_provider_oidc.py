@@ -291,8 +291,14 @@ async def websocket_unlink(
         )
         return
 
+    # A stored password is only a way back in while its provider is still
+    # enabled, so a disabled one does not count as the remaining login.
     if not any(
         credentials.auth_provider_type == PASSWORD_PROVIDER_TYPE
+        and hass.auth.get_auth_provider(
+            credentials.auth_provider_type, credentials.auth_provider_id
+        )
+        is not None
         for credentials in user.credentials
     ):
         connection.send_error(

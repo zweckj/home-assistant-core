@@ -25,7 +25,11 @@ import voluptuous as vol
 from homeassistant.const import CONF_ID
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.network import NoURLAvailableError, get_url
+from homeassistant.helpers.network import (
+    NoURLAvailableError,
+    get_url,
+    is_internal_request,
+)
 
 from ... import InvalidAuthError
 from ...const import GROUP_ID_ADMIN, GROUP_ID_USER
@@ -42,6 +46,7 @@ from .. import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
 from .client import (
     OidcClient,
     OidcError,
+    OidcInsecureTransportError,
     OidcInvalidGrantError,
     OidcTransientError,
     TokenResponse,
@@ -241,8 +246,19 @@ class OidcAuthProvider(AuthProvider):
 
     @callback
     def async_redirect_uri(self) -> str:
-        """Return the redirect URI to use for the current request."""
-        return f"{get_url(self.hass, require_current_request=True)}{AUTH_CALLBACK_PATH}"
+        """Return the redirect URI to use for the current request.
+
+        A login carries the identity provider's authorization code and, on the
+        way back, Home Assistant's own tokens through the browser. Anything
+        reachable from outside therefore has to be HTTPS; the internal URL is
+        left alone so a local install keeps working over plain HTTP.
+        """
+        url = get_url(self.hass, require_current_request=True)
+        if not url.startswith("https://") and not is_internal_request(self.hass):
+            raise OidcInsecureTransportError(
+                f"Signing in through {url} would expose the tokens, use HTTPS"
+            )
+        return f"{url}{AUTH_CALLBACK_PATH}"
 
     @override
     async def async_login_flow(self, context: AuthFlowContext | None) -> OidcLoginFlow:
@@ -690,6 +706,9 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
             self._redirect_uri = provider.async_redirect_uri()
         except NoURLAvailableError:
             return self.async_abort(reason="no_url_available")
+        except OidcInsecureTransportError as err:
+            _LOGGER.error("Refusing to start an OIDC login: %s", err)
+            return self.async_abort(reason="insecure_transport")
 
         client = provider.async_client()
         try:
