@@ -8,6 +8,7 @@ from webauthn.helpers.options_to_json_dict import options_to_json_dict
 from webauthn.helpers.structs import PublicKeyCredentialCreationOptions
 
 from homeassistant.auth.providers.webauthn import (
+    CredentialAlreadyRegisteredError,
     CredentialNotFoundError,
     InvalidAuthError,
     WebAuthnCredentialMeta,
@@ -134,6 +135,9 @@ async def websocket_register_verify(
         )
     except InvalidAuthError as err:
         connection.send_error(msg["id"], "invalid_auth", str(err))
+        return
+    except CredentialAlreadyRegisteredError as err:
+        connection.send_error(msg["id"], "credential_already_registered", str(err))
         return
     connection.send_result(msg["id"])
 

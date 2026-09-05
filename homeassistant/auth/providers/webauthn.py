@@ -151,6 +151,10 @@ class CredentialNotFoundError(HomeAssistantError):
     """Raised when submitting invalid credential."""
 
 
+class CredentialAlreadyRegisteredError(HomeAssistantError):
+    """Raised when a credential ID is already registered."""
+
+
 type DataType = dict[str, dict[str, WebAuthnCredential]]
 
 
@@ -195,6 +199,14 @@ class WebAuthnDataStore:
         self, user_id: str, credential: WebAuthnCredential
     ) -> None:
         """Store data to persistent storage."""
+
+        # A credential ID registered to any user must be rejected, and nothing
+        # awaits between the check and the insert, so registrations cannot race.
+        if any(
+            credential.credential_id in credentials
+            for credentials in self._data.values()
+        ):
+            raise CredentialAlreadyRegisteredError("Credential is already registered.")
 
         user_creds = self._data.setdefault(user_id, {})
         user_creds[credential.credential_id] = credential
