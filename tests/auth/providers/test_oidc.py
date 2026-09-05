@@ -19,7 +19,7 @@ from yarl import URL
 
 from homeassistant import auth
 from homeassistant.auth import auth_store, models as auth_models
-from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY
+from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY, GROUP_ID_USER
 from homeassistant.auth.models import AuthFlowResult
 from homeassistant.auth.providers import oidc as oidc_auth
 from homeassistant.auth.providers.oidc.client import (
@@ -1909,6 +1909,197 @@ async def test_revalidation_leaves_the_groups_alone(
     session = provider.data.sessions[credentials.id]
     assert session.refresh_token == "rt2"
     assert session.is_admin is True
+
+
+async def _non_owner_user(manager: auth.AuthManager) -> auth_models.User:
+    """Return a user who is not the owner, who is never demoted."""
+    await manager.async_create_user("Owner")
+    return await manager.async_create_user("Alice")
+
+
+async def _linked_admin(
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    *,
+    groups: list[str],
+    extra_group_ids: list[str] | None = None,
+) -> tuple[auth_models.User, auth_models.Credentials]:
+    """Return a user whose administrator rights came from the provider."""
+    user = await _non_owner_user(manager)
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await manager.async_link_user(user, credentials)
+    await manager.async_update_user(
+        user, group_ids=[GROUP_ID_ADMIN, *(extra_group_ids or [])]
+    )
+    await provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT, "groups": groups},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+    provider.data.sessions[credentials.id].refresh_after = time.time() - 1
+    return user, credentials
+
+
+def _refresh_with_groups(
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+    **claims: Any,
+) -> None:
+    """Answer the next refresh with a signed ID token."""
+    mock_idp.post(
+        TOKEN_URL,
+        json={
+            "access_token": "at2",
+            "token_type": "Bearer",
+            "refresh_token": "rt2",
+            "id_token": make_id_token(
+                signing_key, at_hash=expected_at_hash("at2"), **claims
+            ),
+        },
+    )
+
+
+async def test_revalidation_withdraws_admin_the_provider_took_away(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+) -> None:
+    """Test losing the admin group is applied without a new interactive login.
+
+    A refreshed ID token that states the groups is authoritative, so keeping the
+    rights until the user happens to sign in again would leave them stale for as
+    long as the identity provider keeps accepting the refresh.
+    """
+    user, credentials = await _linked_admin(
+        manager, provider, groups=["home_assistant_admin"]
+    )
+    _refresh_with_groups(mock_idp, signing_key, groups=[])
+
+    async_fire_time_changed(hass, dt_util.utcnow() + dt_util.dt.timedelta(minutes=6))
+    await hass.async_block_till_done()
+
+    assert not user.is_admin
+    assert provider.data.sessions[credentials.id].is_admin is False
+
+
+async def test_revalidation_keeps_unrelated_groups_when_withdrawing_admin(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+) -> None:
+    """Test a withdrawal only removes the group the provider granted."""
+    user, _ = await _linked_admin(
+        manager,
+        provider,
+        groups=["home_assistant_admin"],
+        extra_group_ids=[GROUP_ID_READ_ONLY],
+    )
+    _refresh_with_groups(mock_idp, signing_key, groups=[])
+
+    async_fire_time_changed(hass, dt_util.utcnow() + dt_util.dt.timedelta(minutes=6))
+    await hass.async_block_till_done()
+
+    assert not user.is_admin
+    assert [group.id for group in user.groups] == [GROUP_ID_READ_ONLY]
+
+
+async def test_revalidation_grants_admin_the_provider_added(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+) -> None:
+    """Test joining the admin group is applied on the next refresh."""
+    user = await _non_owner_user(manager)
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await manager.async_link_user(user, credentials)
+    await manager.async_update_user(user, group_ids=[GROUP_ID_USER])
+    await provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT, "groups": []},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+    provider.data.sessions[credentials.id].refresh_after = time.time() - 1
+    _refresh_with_groups(mock_idp, signing_key, groups=["home_assistant_admin"])
+
+    async_fire_time_changed(hass, dt_util.utcnow() + dt_util.dt.timedelta(minutes=6))
+    await hass.async_block_till_done()
+
+    assert user.is_admin
+    assert provider.data.sessions[credentials.id].is_admin is True
+
+
+async def test_revalidation_never_demotes_the_owner(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+) -> None:
+    """Test the owner keeps their rights when the provider withdraws them."""
+    user, _ = await _linked_admin(manager, provider, groups=["home_assistant_admin"])
+    user.is_owner = True
+    _refresh_with_groups(mock_idp, signing_key, groups=[])
+
+    async_fire_time_changed(hass, dt_util.utcnow() + dt_util.dt.timedelta(minutes=6))
+    await hass.async_block_till_done()
+
+    assert user.is_admin
+
+
+async def test_revalidation_keeps_admin_the_provider_never_granted(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+) -> None:
+    """Test a locally appointed administrator is not demoted by a refresh."""
+    user = await _non_owner_user(manager)
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await manager.async_link_user(user, credentials)
+    await provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT, "groups": []},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+    await manager.async_update_user(user, group_ids=[GROUP_ID_ADMIN])
+    provider.data.sessions[credentials.id].refresh_after = time.time() - 1
+    _refresh_with_groups(mock_idp, signing_key, groups=[])
+
+    async_fire_time_changed(hass, dt_util.utcnow() + dt_util.dt.timedelta(minutes=6))
+    await hass.async_block_till_done()
+
+    assert user.is_admin
+
+
+async def test_revalidation_without_group_claims_leaves_admin_alone(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+) -> None:
+    """Test an ID token that omits the groups says nothing about entitlement.
+
+    Reading a refresh that carries no group list as an empty one would demote
+    every user of an identity provider that simply leaves them out.
+    """
+    user, credentials = await _linked_admin(
+        manager, provider, groups=["home_assistant_admin"]
+    )
+    _refresh_with_groups(mock_idp, signing_key)
+
+    async_fire_time_changed(hass, dt_util.utcnow() + dt_util.dt.timedelta(minutes=6))
+    await hass.async_block_till_done()
+
+    assert user.is_admin
+    assert provider.data.sessions[credentials.id].is_admin is True
 
 
 async def test_revalidation_signs_out_revoked_users(

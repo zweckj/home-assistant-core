@@ -35,6 +35,7 @@ from ...models import (
     AuthFlowResult,
     Credentials,
     RefreshToken,
+    User,
     UserMeta,
 )
 from .. import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
@@ -50,6 +51,7 @@ from .const import (
     AUTH_CALLBACK_PATH,
     CONF_ISSUER,
     CONF_SUBJECT,
+    GROUPS_CLAIM,
     LOGIN_STATE_EXPIRATION,
     PROVIDER_TYPE,
     REVALIDATE_CHECK_INTERVAL,
@@ -322,14 +324,37 @@ class OidcAuthProvider(AuthProvider):
         """Line the account up with the group memberships of the identity."""
         if credentials.is_new or self.data is None:
             return
-        user = await self.hass.auth.async_get_user_by_credentials(credentials)
+        session = self.data.sessions.get(credentials.id)
+        await self._async_apply_admin_grant(
+            credentials.id,
+            granted_by_provider=session is not None and session.is_admin,
+            grants_admin=self.oidc_config.grants_admin(claims),
+        )
+
+    async def _async_user_for_credential(self, credential_id: str) -> User | None:
+        """Return the user a credential belongs to."""
+        for user in await self.store.async_get_users():
+            if any(credentials.id == credential_id for credentials in user.credentials):
+                return user
+        return None
+
+    async def _async_apply_admin_grant(
+        self,
+        credential_id: str,
+        *,
+        granted_by_provider: bool,
+        grants_admin: bool,
+    ) -> None:
+        """Line a user's groups up with what the identity provider grants.
+
+        ``granted_by_provider`` is the grant as it stood before these claims, so
+        it has to be read before the session is rewritten.
+        """
+        user = await self._async_user_for_credential(credential_id)
         # Demoting the owner could leave the instance without an administrator.
         if user is None or user.is_owner:
             return
 
-        grants_admin = self.oidc_config.grants_admin(claims)
-        session = self.data.sessions.get(credentials.id)
-        granted_by_provider = session is not None and session.is_admin
         group_ids = {group.id for group in user.groups}
         is_admin = GROUP_ID_ADMIN in group_ids
 
@@ -513,6 +538,7 @@ class OidcAuthProvider(AuthProvider):
                         " signing out the OIDC session"
                     )
                     return True
+                await self._async_apply_refreshed_groups(data, config, session, claims)
         except OidcInvalidGrantError:
             _LOGGER.info("Identity provider revoked an OIDC session, signing it out")
             return True
@@ -523,11 +549,38 @@ class OidcAuthProvider(AuthProvider):
             _LOGGER.warning("Error revalidating OIDC session: %s", err)
             return False
 
-        # Only the token and the deadlines move; the identity attributes are read
-        # once, while the Home Assistant user is created.
+        # Only the token and the deadlines move; the display name and username
+        # are read once, while the Home Assistant user is created.
         session.mark_validated(config.revalidate_interval)
         data.async_set_session(session)
         return False
+
+    async def _async_apply_refreshed_groups(
+        self,
+        data: OidcStore,
+        config: OidcConfig,
+        session: OidcSession,
+        claims: Mapping[str, Any],
+    ) -> None:
+        """Apply group memberships a refreshed ID token states.
+
+        Only claims that actually carry the group list are authoritative. An
+        identity provider that leaves them out of refresh responses says nothing
+        about entitlement, so the grant is left for the next interactive login
+        rather than being read as renewed or withdrawn.
+        """
+        if GROUPS_CLAIM not in claims:
+            return
+
+        grants_admin = config.grants_admin(claims)
+        await self._async_apply_admin_grant(
+            session.credential_id,
+            granted_by_provider=session.is_admin,
+            grants_admin=grants_admin,
+        )
+        if session.is_admin != grants_admin:
+            session.is_admin = grants_admin
+            data.async_set_session(session)
 
     async def _async_end_sessions(self, sessions: list[OidcSession]) -> None:
         """Drop sessions and every Home Assistant token that depends on them."""
