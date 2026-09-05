@@ -1,12 +1,15 @@
 """Test auth of websocket API."""
 
+from typing import Any
 from unittest.mock import patch
 
 import aiohttp
 from aiohttp import WSMsgType, web
 import pytest
+import voluptuous as vol
 
 from homeassistant.auth.providers.homeassistant import HassAuthProvider
+from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api import DOMAIN
 from homeassistant.components.websocket_api.auth import (
     TYPE_AUTH,
@@ -270,6 +273,41 @@ async def test_auth_with_invalid_token(
 
         auth_msg = await ws.receive_json()
         assert auth_msg["type"] == TYPE_AUTH_INVALID
+
+
+async def test_auth_records_the_browser_origin(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    hass_access_token: str,
+) -> None:
+    """Test a command can tell which page opened the connection."""
+    assert await async_setup_component(hass, DOMAIN, {})
+    origins: list[str | None] = []
+
+    @websocket_api.websocket_command({vol.Required("type"): "test/origin"})
+    @callback
+    def handle_origin(
+        hass: HomeAssistant,
+        connection: websocket_api.ActiveConnection,
+        msg: dict[str, Any],
+    ) -> None:
+        origins.append(connection.origin)
+        connection.send_result(msg["id"])
+
+    websocket_api.async_register_command(hass, handle_origin)
+
+    client = await hass_client_no_auth()
+    async with client.ws_connect(
+        URL, headers={"Origin": "https://ha.example.com"}
+    ) as ws:
+        await ws.receive_json()
+        await ws.send_json({"type": TYPE_AUTH, "access_token": hass_access_token})
+        assert (await ws.receive_json())["type"] == TYPE_AUTH_OK
+
+        await ws.send_json({"id": 5, "type": "test/origin"})
+        assert (await ws.receive_json())["success"]
+
+    assert origins == ["https://ha.example.com"]
 
 
 async def test_auth_close_after_revoke(

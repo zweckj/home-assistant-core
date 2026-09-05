@@ -496,3 +496,35 @@ async def test_well_known_protected_resource_no_url(
         "/.well-known/oauth-protected-resource",
     )
     assert resp.status == 404
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        ({"Origin": "https://ha.example.com"}, "https://ha.example.com"),
+        ({}, None),
+    ],
+    ids=["sent", "absent"],
+)
+async def test_login_flow_records_the_browser_origin(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    headers: dict[str, str],
+    expected: str | None,
+) -> None:
+    """Test a provider can tell which page the login was started from."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+        headers=headers,
+    )
+
+    assert resp.status == HTTPStatus.OK
+    flow_id = (await resp.json())["flow_id"]
+    assert hass.auth.login_flow.async_get(flow_id)["context"]["origin"] == expected
