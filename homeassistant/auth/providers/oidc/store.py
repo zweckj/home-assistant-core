@@ -59,13 +59,20 @@ class OidcConfig:
     revalidate_interval: int = DEFAULT_REVALIDATE_INTERVAL
 
     @property
-    def trust_key(self) -> tuple[str, str, str | None, tuple[str, ...]]:
-        """Return the fields that decide who issued the existing sessions.
+    def trust_key(self) -> tuple[str, str, str | None, tuple[str, ...], str | None]:
+        """Return the fields an existing session is only meaningful under.
 
-        A change to any of them makes what was issued before it meaningless;
-        everything else is applied without signing anybody out.
+        Who issued it, and the group that decided what it was allowed to do. A
+        change to the mapping is an authorization change, so the grants made
+        under the old one are not carried over.
         """
-        return (self.issuer, self.client_id, self.client_secret, tuple(self.scopes))
+        return (
+            self.issuer,
+            self.client_id,
+            self.client_secret,
+            tuple(self.scopes),
+            self.admin_group,
+        )
 
     def username_from(self, claims: Mapping[str, Any]) -> str | None:
         """Return the username a set of claims maps to."""

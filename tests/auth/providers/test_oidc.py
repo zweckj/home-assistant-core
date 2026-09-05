@@ -2449,9 +2449,8 @@ async def test_reconfiguring_clears_existing_sessions(
         {"display_name_claim": "given_name"},
         {"allow_auto_create": False},
         {"revalidate_interval": 3600},
-        {"admin_group": "other-admins"},
     ],
-    ids=["name", "display-name-claim", "auto-create", "interval", "admin-group"],
+    ids=["name", "display-name-claim", "auto-create", "interval"],
 )
 async def test_editing_settings_keeps_existing_sessions(
     manager: auth.AuthManager,
@@ -2490,15 +2489,16 @@ async def test_editing_settings_keeps_existing_sessions(
         {"client_id": "other-client"},
         {"client_secret": "rotated"},
         {"scopes": ["openid", "profile"]},
+        {"admin_group": "other-admins"},
     ],
-    ids=["issuer", "client-id", "client-secret", "scopes"],
+    ids=["issuer", "client-id", "client-secret", "scopes", "admin-group"],
 )
 @pytest.mark.usefixtures("mock_idp")
-async def test_changing_who_issues_tokens_clears_sessions(
+async def test_security_relevant_settings_clear_sessions(
     provider: oidc_auth.OidcAuthProvider,
     change: dict[str, Any],
 ) -> None:
-    """Test sessions do not survive a change to who issued them."""
+    """Test sessions do not survive a change to who issued or authorized them."""
     credentials = provider.async_create_credentials({"subject": SUBJECT})
     await provider.async_record_session(
         credential_id=credentials.id,
