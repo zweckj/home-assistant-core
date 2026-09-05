@@ -67,14 +67,14 @@ an authorization code.
 from collections.abc import Callable
 from http import HTTPStatus
 from ipaddress import ip_address
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
+from probatio import to_field_list
 import voluptuous as vol
-import voluptuous_serialize
 
 from homeassistant import data_entry_flow
-from homeassistant.auth import AuthManagerFlowManager, InvalidAuthError
+from homeassistant.auth import AuthManagerFlowManager
 from homeassistant.auth.models import AuthFlowContext, AuthFlowResult, Credentials
 from homeassistant.components import onboarding
 from homeassistant.components.http import KEY_HASS
@@ -97,10 +97,6 @@ from homeassistant.util.network import is_local
 from . import indieauth
 
 if TYPE_CHECKING:
-    from homeassistant.auth.providers.trusted_networks import (
-        TrustedNetworksAuthProvider,
-    )
-
     from . import StoreResultType
 
 
@@ -137,12 +133,11 @@ class WellKnownOAuthInfoView(HomeAssistantView):
             "authorization_endpoint": f"{url_prefix}/auth/authorize",
             "token_endpoint": f"{url_prefix}/auth/token",
             "revocation_endpoint": f"{url_prefix}/auth/revoke",
-            # Home Assistant already accepts URL-based client_ids via
-            # IndieAuth without prior registration, which is compatible with
-            # draft-ietf-oauth-client-id-metadata-document. This flag
-            # advertises that support to encourage clients to use it. The
-            # metadata document is not actually fetched as IndieAuth doesn't
-            # require it.
+            # Home Assistant accepts URL-based client_ids via IndieAuth without
+            # prior registration, and discovers allowed redirect URIs from link
+            # tags or a Client ID Metadata Document served at the client_id URL.
+            # This flag advertises that support
+            # (draft-ietf-oauth-client-id-metadata-document).
             "client_id_metadata_document_supported": True,
             "response_types_supported": ["code"],
             "service_documentation": (
@@ -210,30 +205,17 @@ class AuthProvidersView(HomeAssistantView):
             )
 
         cloud_connection = is_cloud_connection(hass)
+        context = AuthFlowContext(ip_address=remote_address)
 
-        providers = []
-        for provider in hass.auth.auth_providers:
-            if provider.type == "trusted_networks":
-                if cloud_connection:
-                    # Skip quickly as trusted networks are not available on cloud
-                    continue
-
-                try:
-                    cast("TrustedNetworksAuthProvider", provider).async_validate_access(
-                        remote_address
-                    )
-                except InvalidAuthError:
-                    # Not a trusted network, so we don't expose that
-                    # trusted_network authenticator is setup
-                    continue
-
-            providers.append(
-                {
-                    "name": provider.name,
-                    "id": provider.id,
-                    "type": provider.type,
-                }
-            )
+        providers = [
+            {
+                "name": provider.name,
+                "id": provider.id,
+                "type": provider.type,
+            }
+            for provider in hass.auth.auth_providers
+            if provider.async_can_start_login(context)
+        ]
 
         preselect_remember_me = not cloud_connection and is_local(remote_address)
 
@@ -259,7 +241,7 @@ def _prepare_result_json(result: AuthFlowResult) -> dict[str, Any]:
     if (schema := result["data_schema"]) is None:
         data["data_schema"] = []
     else:
-        data["data_schema"] = voluptuous_serialize.convert(schema)
+        data["data_schema"] = to_field_list(schema)
 
     return data
 

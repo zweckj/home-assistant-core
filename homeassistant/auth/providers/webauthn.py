@@ -253,6 +253,11 @@ class WebAuthnDataStore:
             registration.last_used_at = time()
             await self._async_save()
 
+    @property
+    def has_credentials(self) -> bool:
+        """Return if anybody has registered a passkey."""
+        return any(self._data.values())
+
     def get_registered_credentials(
         self, user_id: str
     ) -> list[PublicKeyCredentialDescriptor]:
@@ -338,6 +343,12 @@ class WebAuthnProvider(AuthProvider):
     ) -> WebAuthnLoginFlow:
         """Return a flow to login."""
         return WebAuthnLoginFlow(self)
+
+    @callback
+    @override
+    def async_can_start_login(self, context: AuthFlowContext) -> bool:
+        """Return if anybody has a passkey to sign in with."""
+        return self.data is not None and self.data.has_credentials
 
     async def async_start_registration(
         self, user: User, origin: str
@@ -437,31 +448,13 @@ class WebAuthnProvider(AuthProvider):
 
         return None
 
+    @override
     async def async_will_remove_credentials(self, credentials: Credentials) -> None:
         """Drop the stored passkeys when the credentials are removed."""
-        if (
-            user := await self.hass.auth.async_get_user(credentials.data[CONF_USER_ID])
-        ) is not None:
-            self._async_revoke_sessions(user)
+        await self.hass.auth.async_remove_refresh_tokens_for_credentials(credentials)
 
         data = await self._async_get_data()
         await data.async_delete_user_credentials(credentials.data[CONF_USER_ID])
-
-    @callback
-    def _async_revoke_sessions(self, user: User) -> None:
-        """Revoke every session the user signed in to with a passkey.
-
-        All of a user's passkeys share one credential, so a session cannot be
-        traced back to the passkey it was created with. Sessions from other
-        providers are left alone.
-        """
-        for refresh_token in list(user.refresh_tokens.values()):
-            if (
-                (credential := refresh_token.credential) is not None
-                and credential.auth_provider_type == self.type
-                and credential.auth_provider_id == self.id
-            ):
-                self.hass.auth.async_remove_refresh_token(refresh_token)
 
     async def async_start_authentication(
         self, origin: str
@@ -543,8 +536,12 @@ class WebAuthnProvider(AuthProvider):
 
         await data.async_delete_credential(user.id, credential_id)
 
-        # A deleted passkey must not leave the sessions it created behind.
-        self._async_revoke_sessions(user)
+        # Every passkey shares one credential, so a session cannot be traced back
+        # to the key it was created with and they all have to go.
+        if credentials is not None:
+            await self.hass.auth.async_remove_refresh_tokens_for_credentials(
+                credentials
+            )
 
         # Without a passkey left to sign in with, the credentials are dead weight.
         if not data.get_registered_credentials(user.id) and credentials is not None:
