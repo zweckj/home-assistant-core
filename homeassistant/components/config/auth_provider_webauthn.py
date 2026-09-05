@@ -11,6 +11,7 @@ from homeassistant.auth.providers.webauthn import (
     CredentialAlreadyRegisteredError,
     CredentialNotFoundError,
     InvalidAuthError,
+    LastLoginMethodError,
     WebAuthnCredentialMeta,
     WebAuthnProvider,
     async_get_provider,
@@ -163,6 +164,9 @@ async def websocket_delete(
         await provider.async_delete_credential(connection.user, msg["credential_id"])
     except CredentialNotFoundError as err:
         connection.send_error(msg["id"], "credential_not_found", str(err))
+        return
+    except LastLoginMethodError as err:
+        connection.send_error(msg["id"], "last_login_method", str(err))
         return
     connection.send_result(msg["id"])
 

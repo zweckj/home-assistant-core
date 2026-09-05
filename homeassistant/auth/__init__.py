@@ -412,6 +412,24 @@ class AuthManager:
 
         await self._store.async_remove_credentials(credentials)
 
+    @callback
+    def async_has_other_login_method(
+        self, user: models.User, credentials: models.Credentials
+    ) -> bool:
+        """Test if the user can still log in without the given credentials.
+
+        Credentials of a provider that is no longer configured cannot be logged
+        in with, so they do not count as a login method.
+        """
+        return any(
+            credential.id != credentials.id
+            and self.get_auth_provider(
+                credential.auth_provider_type, credential.auth_provider_id
+            )
+            is not None
+            for credential in user.credentials
+        )
+
     async def async_enable_user_mfa(
         self, user: models.User, mfa_module_id: str, data: Any
     ) -> None:

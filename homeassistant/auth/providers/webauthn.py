@@ -155,6 +155,10 @@ class CredentialAlreadyRegisteredError(HomeAssistantError):
     """Raised when a credential ID is already registered."""
 
 
+class LastLoginMethodError(HomeAssistantError):
+    """Raised when deleting a credential would lock the user out."""
+
+
 type DataType = dict[str, dict[str, WebAuthnCredential]]
 
 
@@ -525,15 +529,25 @@ class WebAuthnProvider(AuthProvider):
     async def async_delete_credential(self, user: User, credential_id: str) -> None:
         """Delete a registered credential."""
         data = await self._async_get_data()
+
+        credentials = self._async_user_credentials(user)
+        if (
+            data.get_credential(user.id, credential_id) is not None
+            and len(data.get_registered_credentials(user.id)) == 1
+            and credentials is not None
+            and not self.hass.auth.async_has_other_login_method(user, credentials)
+        ):
+            raise LastLoginMethodError(
+                "Cannot delete the last passkey without another way to log in."
+            )
+
         await data.async_delete_credential(user.id, credential_id)
 
         # A deleted passkey must not leave the sessions it created behind.
         self._async_revoke_sessions(user)
 
         # Without a passkey left to sign in with, the credentials are dead weight.
-        if not data.get_registered_credentials(user.id) and (
-            credentials := self._async_user_credentials(user)
-        ):
+        if not data.get_registered_credentials(user.id) and credentials is not None:
             await self.hass.auth.async_remove_credentials(credentials)
 
     async def async_list_credentials_meta(
