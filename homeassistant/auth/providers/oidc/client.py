@@ -64,6 +64,22 @@ def _compute_at_hash(access_token: str, algorithm: str) -> str | None:
     return base64.urlsafe_b64encode(half).decode("ascii").rstrip("=")
 
 
+type JWKDict = dict[str, Any]
+
+
+def _may_verify_signatures(jwk: JWKDict) -> bool:
+    """Return if a JWK is published for verifying signatures.
+
+    RFC 7517 makes ``use`` and ``key_ops`` optional, so a key that states
+    neither stays usable; one that states something else is taken at its word.
+    """
+    if (use := jwk.get("use")) is not None and use != "sig":
+        return False
+    if (key_ops := jwk.get("key_ops")) is not None:
+        return isinstance(key_ops, list) and "verify" in key_ops
+    return True
+
+
 class OidcError(HomeAssistantError):
     """Base class for OpenID Connect errors."""
 
@@ -184,7 +200,7 @@ class OidcClient:
         self._metadata_fetched_at = 0.0
         self._metadata_lock = asyncio.Lock()
 
-        self._jwks: jwt.PyJWKSet | None = None
+        self._jwks: list[tuple[JWKDict, jwt.PyJWK]] | None = None
         self._jwks_fetched_at = 0.0
         self._jwks_lock = asyncio.Lock()
 
@@ -504,25 +520,31 @@ class OidcClient:
             "The provider offers no ID token signing algorithm we accept"
         )
 
-    async def _async_signing_key(self, kid: str | None) -> Any:
+    async def _async_signing_key(self, kid: str | None) -> tuple[JWKDict, jwt.PyJWK]:
         """Return the public key for a key id, refetching the JWKS if needed."""
-        key = await self._async_lookup_key(kid)
+        entry = await self._async_lookup_key(kid)
 
         # An unknown key id usually means the provider rotated its keys, but the
         # refetch is rate limited so bogus ones cannot hammer the provider.
-        if key is None and (
+        if entry is None and (
             time.time() - self._jwks_fetched_at >= JWKS_REFETCH_COOLDOWN
         ):
-            key = await self._async_lookup_key(kid, force_refresh=True)
+            entry = await self._async_lookup_key(kid, force_refresh=True)
 
-        if key is None:
+        if entry is None:
             raise OidcIdTokenError(f"No key {kid!r} in the provider key set")
 
-        return key
+        raw, _ = entry
+        if not _may_verify_signatures(raw):
+            raise OidcIdTokenError(
+                f"Key {kid!r} is not published for verifying signatures"
+            )
+
+        return entry
 
     async def _async_lookup_key(
         self, kid: str | None, *, force_refresh: bool = False
-    ) -> Any:
+    ) -> tuple[JWKDict, jwt.PyJWK] | None:
         """Return the matching key from the cached key set."""
         async with self._jwks_lock:
             if (
@@ -538,19 +560,25 @@ class OidcClient:
                     or any(not isinstance(key, dict) for key in keys)
                 ):
                     raise OidcIdTokenError("Provider key set is not a JWKS object")
-                try:
-                    self._jwks = jwt.PyJWKSet.from_dict(document)
-                except (jwt.PyJWTError, TypeError, ValueError) as err:
-                    raise OidcIdTokenError(
-                        f"Provider key set is unusable: {err}"
-                    ) from err
+                # Parsed one by one so the JWK metadata stays paired with the key
+                # it belongs to; PyJWKSet drops what it cannot read.
+                parsed: list[tuple[JWKDict, jwt.PyJWK]] = []
+                for key in keys:
+                    try:
+                        parsed.append((key, jwt.PyJWK(key)))
+                    except (jwt.PyJWTError, TypeError, ValueError) as err:
+                        _LOGGER.debug("Ignoring unusable JWK: %s", err)
+                if not parsed:
+                    raise OidcIdTokenError("Provider key set has no usable key")
+                self._jwks = parsed
                 self._jwks_fetched_at = time.time()
 
-            keys = self._jwks.keys
             if kid is not None:
-                return next((key.key for key in keys if key.key_id == kid), None)
+                return next(
+                    (entry for entry in self._jwks if entry[1].key_id == kid), None
+                )
             # A key set with a single key does not have to label it.
-            return keys[0].key if len(keys) == 1 else None
+            return self._jwks[0] if len(self._jwks) == 1 else None
 
     async def async_verify_id_token(
         self,
@@ -573,7 +601,13 @@ class OidcClient:
         if (algorithm := header.get("alg")) not in algorithms:
             raise OidcIdTokenError(f"ID token uses unaccepted algorithm {algorithm!r}")
 
-        key = await self._async_signing_key(header.get("kid"))
+        raw, jwk = await self._async_signing_key(header.get("kid"))
+
+        # Handing PyJWT the JWK binds verification to the algorithm the key
+        # declares. Only when it declares one: PyJWK otherwise derives a default
+        # from the key type, which would reject a provider legitimately signing
+        # RS384 or RS512 with an RSA key that states no algorithm.
+        key: Any = jwk if raw.get("alg") else jwk.key
 
         try:
             claims: dict[str, Any] = jwt.decode(

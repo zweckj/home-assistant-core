@@ -570,6 +570,120 @@ async def test_verify_id_token_rejects_malformed_jwks(
         await client.async_verify_id_token(make_id_token(signing_key))
 
 
+def _jwk(signing_key: rsa.RSAPrivateKey, **overrides: Any) -> dict[str, Any]:
+    """Return the provider's public key with adjusted JWK metadata."""
+    key = json.loads(RSAAlgorithm.to_jwk(signing_key.public_key()))
+    key |= {"kid": KEY_ID, "alg": "RS256", "use": "sig"}
+    return {
+        name: value for name, value in (key | overrides).items() if value is not None
+    }
+
+
+def _client_with_jwk(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    jwk: dict[str, Any],
+    **discovery: Any,
+) -> OidcClient:
+    """Return a client whose provider publishes exactly this key."""
+    aioclient_mock.get(DISCOVERY_URL, json=discovery_document(**discovery))
+    aioclient_mock.get(JWKS_URL, json={"keys": [jwk]})
+    return OidcClient(hass, issuer=ISSUER, client_id=CLIENT_ID)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"use": "enc"},
+        {"key_ops": ["encrypt"]},
+        {"key_ops": "verify"},
+        {"use": 1},
+    ],
+    ids=["encryption-use", "no-verify-operation", "malformed-ops", "malformed-use"],
+)
+async def test_verify_id_token_rejects_a_key_not_published_for_signing(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+    metadata: dict[str, Any],
+) -> None:
+    """Test a key the issuer did not publish for verifying is not trusted.
+
+    The signature is genuine; what is rejected is using a key for a purpose the
+    issuer declared it is not for.
+    """
+    client = _client_with_jwk(hass, aioclient_mock, _jwk(signing_key, **metadata))
+
+    with pytest.raises(OidcIdTokenError, match="not published"):
+        await client.async_verify_id_token(make_id_token(signing_key))
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [{}, {"use": None}, {"key_ops": ["verify"]}, {"use": None, "key_ops": None}],
+    ids=["declared-sig", "no-use", "verify-operation", "no-metadata"],
+)
+async def test_verify_id_token_accepts_a_signing_key(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+    metadata: dict[str, Any],
+) -> None:
+    """Test optional JWK metadata staying absent keeps normal providers working."""
+    client = _client_with_jwk(hass, aioclient_mock, _jwk(signing_key, **metadata))
+
+    claims = await client.async_verify_id_token(make_id_token(signing_key))
+
+    assert claims["sub"] == SUBJECT
+
+
+async def test_verify_id_token_binds_the_algorithm_the_key_declares(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+) -> None:
+    """Test a key declaring one algorithm cannot verify another.
+
+    The provider advertises both, so only the key's own declaration stops the
+    token being accepted under an algorithm it was not published for.
+    """
+    client = _client_with_jwk(
+        hass,
+        aioclient_mock,
+        _jwk(signing_key, alg="RS256"),
+        id_token_signing_alg_values_supported=["RS256", "RS512"],
+    )
+
+    with pytest.raises(OidcIdTokenError):
+        await client.async_verify_id_token(
+            make_id_token(signing_key, algorithm="RS512")
+        )
+
+
+async def test_verify_id_token_allows_any_advertised_algorithm_without_a_declaration(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+) -> None:
+    """Test a key that declares no algorithm is not pinned to a guessed one.
+
+    Binding the derived default would refuse providers that legitimately sign
+    RS384 or RS512 with an RSA key whose JWK states no algorithm.
+    """
+    client = _client_with_jwk(
+        hass,
+        aioclient_mock,
+        _jwk(signing_key, alg=None),
+        id_token_signing_alg_values_supported=["RS256", "RS512"],
+    )
+
+    claims = await client.async_verify_id_token(
+        make_id_token(signing_key, algorithm="RS512")
+    )
+
+    assert claims["sub"] == SUBJECT
+
+
 async def test_token_request_reports_invalid_grant(
     client: OidcClient, aioclient_mock: AiohttpClientMocker
 ) -> None:
