@@ -1,5 +1,6 @@
 """Tests for the Home Assistant auth module."""
 
+import asyncio
 from datetime import timedelta
 import time
 from typing import Any
@@ -1399,3 +1400,140 @@ async def test_access_token_from_the_future(mock_hass) -> None:
     with freeze_time(now + timedelta(days=365)):
         rt = manager.async_validate_access_token(access_token)
         assert rt.id == refresh_token.id
+
+
+_EXAMPLE_PROVIDER = "homeassistant.auth.providers.insecure_example.ExampleAuthProvider"
+
+
+async def test_every_provider_is_initialized(mock_hass) -> None:
+    """Test providers are initialized before anybody tries to log in."""
+    with patch(f"{_EXAMPLE_PROVIDER}.async_initialize") as mock_initialize:
+        await auth.auth_manager_from_config(
+            mock_hass,
+            [
+                {"type": "insecure_example", "users": []},
+                {"type": "insecure_example", "id": "another", "users": []},
+            ],
+            [],
+        )
+
+    assert mock_initialize.call_count == 2
+
+
+async def test_a_provider_that_cannot_initialize_is_not_fatal(
+    mock_hass, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test a broken provider leaves the other ways into the instance working."""
+    with patch(f"{_EXAMPLE_PROVIDER}.async_initialize", side_effect=ValueError("boom")):
+        manager = await auth.auth_manager_from_config(
+            mock_hass, [{"type": "insecure_example", "users": []}], []
+        )
+
+    assert "Error initializing auth provider insecure_example" in caplog.text
+    assert len(manager.auth_providers) == 1
+
+
+async def test_concurrent_logins_with_one_credential_create_one_user(
+    mock_hass,
+) -> None:
+    """Test a credential used twice at once does not end up with two users."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    meta = auth_models.UserMeta(name="Test Name", is_active=True)
+
+    async def slow_meta(
+        _provider: Any, _credentials: Credentials
+    ) -> auth_models.UserMeta:
+        # Yields, so a second login can run in between without the lock.
+        await asyncio.sleep(0)
+        return meta
+
+    with patch(f"{_EXAMPLE_PROVIDER}.async_user_meta_for_credentials", slow_meta):
+        first, second = await asyncio.gather(
+            manager.async_get_or_create_user(credentials),
+            manager.async_get_or_create_user(credentials),
+        )
+
+    assert first is second
+    assert len(await manager.async_get_users()) == 1
+
+
+async def test_has_other_login_method(mock_hass) -> None:
+    """Test what counts as another way into an account."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+    second = manager.auth_providers[0].async_create_credentials({"username": "second"})
+    user.credentials.append(second)
+    assert manager.async_has_other_login_method(user, credentials) is True
+
+    # A credential of a provider that is no longer configured cannot be used.
+    user.credentials.remove(second)
+    user.credentials.append(
+        Credentials(
+            auth_provider_type="insecure_example",
+            auth_provider_id="removed",
+            data={},
+        )
+    )
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+
+async def test_get_step_up_providers(mock_hass) -> None:
+    """Test only the providers a user can re-verify with are offered."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass,
+        [{"type": "homeassistant"}, {"type": "insecure_example", "users": []}],
+        [],
+    )
+    hass_provider, example_provider = manager.auth_providers
+    user = MockUser().add_to_auth_manager(manager)
+
+    assert manager.async_get_step_up_providers(user) == []
+
+    # The example provider cannot re-verify anybody.
+    user.credentials.append(
+        example_provider.async_create_credentials({"username": "test-user"})
+    )
+    assert manager.async_get_step_up_providers(user) == []
+
+    user.credentials.append(
+        hass_provider.async_create_credentials({"username": "test-user"})
+    )
+    assert manager.async_get_step_up_providers(user) == [hass_provider]
+
+
+async def test_remove_refresh_tokens_for_credentials(mock_hass) -> None:
+    """Test only the tokens issued for the given credentials are removed."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+
+    from_credentials = await manager.async_create_refresh_token(
+        user, CLIENT_ID, credential=credentials
+    )
+    unrelated = await manager.async_create_refresh_token(
+        user, "https://elsewhere.example.com/"
+    )
+
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+
+    assert manager.async_get_refresh_token(from_credentials.id) is None
+    assert manager.async_get_refresh_token(unrelated.id) is unrelated
