@@ -34,8 +34,8 @@ Extracting a shared token-request helper would be a reasonable follow-up PR.
 - Fetching userinfo only when it is needed does not weaken that: 5.3.2 governs how a response is used, not whether one is requested. The comparison is a plain `!=` on decoded strings — the code point equality Core 14 mandates. Unicode normalization must not be applied.
 - Automatic account creation is off by default. The provisioning check necessarily runs after the code exchange, so a login carrying the `link_user` context still gets credentials for `/auth/link_user` to attach. Without that carve-out nobody could get in on a fresh install.
 - Linking compares nothing: whatever identity authenticates at the provider is attached to the signed-in account, and the Home Assistant display name is left alone.
-- `config/auth_provider/oidc/unlink` detaches the caller's own identity. It is not admin-only, since linking is self-service too, but it refuses unless the account also has a password login, and refuses while `allow_auto_create` is on because the next sign-in would relink. The password is matched on `Credentials.auth_provider_type` rather than by importing that provider, so the two stay independent.
-- A stored password only counts as a fallback while its provider is still loaded, so unlinking cannot strand an account behind a login method that was taken out of the configuration. That is the last-usable-login rule, and it has to be the same rule everywhere: any provider that lets a user delete a credential owes the same check, or the account can be locked out from the other side.
+- `config/auth_provider/oidc/unlink` detaches the caller's own identity. It is not admin-only, since linking is self-service too, but it refuses while `allow_auto_create` is on because the next sign-in would relink.
+- Unlinking also refuses unless the account keeps a login it can still use, which is `AuthManager.async_has_other_login_method`, not a rule of this provider's own. A credential whose provider is no longer configured does not count, and neither does another identity from this provider when every one of them is being detached at once. Any provider that lets a user delete a credential owes the same check, or an account can be locked out from the other side.
 
 ### Binding a login to its browser
 
@@ -133,4 +133,5 @@ Ending a session removes it and every Home Assistant token derived from it, thro
 
 - Back-channel and front-channel logout are not implemented; sign out is driven by revalidation.
 - The last-usable-login check is per provider. Two removals running concurrently in different providers can each count the other as the fallback.
+- Step up authentication is not offered. Proving an identity again means a full browser redirect to the identity provider, so `support_step_up` stays off and a sensitive action has to be confirmed with another provider the account is linked to.
 

@@ -655,15 +655,14 @@ class OidcAuthProvider(AuthProvider):
         for credential_id in credential_ids:
             data.async_remove_session(credential_id)
 
+        for credentials in await self.async_credentials():
+            if credentials.id in credential_ids:
+                await self.hass.auth.async_remove_refresh_tokens_for_credentials(
+                    credentials
+                )
+
         for user in await self.store.async_get_users():
             user_credential_ids = {credentials.id for credentials in user.credentials}
-            for refresh_token in list(user.refresh_tokens.values()):
-                if (
-                    refresh_token.credential is not None
-                    and refresh_token.credential.id in credential_ids
-                ):
-                    self.hass.auth.async_remove_refresh_token(refresh_token)
-
             if (
                 user.is_owner
                 or not user_credential_ids & admin_credential_ids

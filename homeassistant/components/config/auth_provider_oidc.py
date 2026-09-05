@@ -30,10 +30,6 @@ from homeassistant.helpers.typing import VolDictType
 
 _LOGGER = logging.getLogger(__name__)
 
-# Matched on the credential rather than by importing the provider, so the two
-# stay independent of one another.
-PASSWORD_PROVIDER_TYPE = "homeassistant"
-
 
 @callback
 def async_setup(hass: HomeAssistant) -> bool:
@@ -291,20 +287,13 @@ async def websocket_unlink(
         )
         return
 
-    # A stored password is only a way back in while its provider is still
-    # enabled, so a disabled one does not count as the remaining login.
-    if not any(
-        credentials.auth_provider_type == PASSWORD_PROVIDER_TYPE
-        and hass.auth.get_auth_provider(
-            credentials.auth_provider_type, credentials.auth_provider_id
-        )
-        is not None
-        for credentials in user.credentials
-    ):
+    # A stored login only counts while its provider is still enabled, so a
+    # disabled one does not count as the remaining way in.
+    if not hass.auth.async_has_other_login_method(user, *linked):
         connection.send_error(
             msg["id"],
             "no_other_login",
-            "Set a password before removing the identity provider login",
+            "Add another login method before removing the identity provider login",
         )
         return
 

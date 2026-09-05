@@ -6,6 +6,7 @@ import pytest
 
 from homeassistant.auth import models as auth_models
 from homeassistant.auth.models import Credentials
+from homeassistant.auth.providers import insecure_example
 from homeassistant.auth.providers.oidc import OidcAuthProvider
 from homeassistant.auth.providers.oidc.client import TokenResponse
 from homeassistant.auth.providers.oidc.store import OidcConfig
@@ -427,6 +428,76 @@ async def test_unlink_needs_another_way_in(
     assert not result["success"]
     assert result["error"]["code"] == "no_other_login"
     assert credentials in user.credentials
+
+
+async def test_unlink_counts_any_other_configured_login(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+) -> None:
+    """Test the login left behind does not have to be a password."""
+    await oidc_provider.async_set_config(
+        OidcConfig(issuer=ISSUER, client_id=CLIENT_ID, allow_auto_create=False)
+    )
+    user = await hass.auth.async_create_user("Alice")
+    credentials = await _link(hass, oidc_provider, user)
+    example = insecure_example.ExampleAuthProvider(
+        hass, hass.auth._store, {"type": "insecure_example", "users": []}
+    )
+    hass.auth._providers[(example.type, example.id)] = example
+    other_login = example.async_create_credentials({"username": "alice"})
+    await hass.auth.async_link_user(user, other_login)
+    # Connecting through the other login, since unlinking ends OIDC sessions.
+    refresh_token = await hass.auth.async_create_refresh_token(
+        user, TEST_CLIENT_ID, credential=other_login
+    )
+
+    client = await hass_ws_client(
+        hass, hass.auth.async_create_access_token(refresh_token)
+    )
+    await client.send_json_auto_id({"type": "config/auth_provider/oidc/unlink"})
+
+    result = await client.receive_json()
+
+    assert result["success"]
+    assert credentials not in user.credentials
+
+
+async def test_unlink_refuses_when_the_only_other_login_is_also_oidc(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+) -> None:
+    """Test detaching every identity at once cannot strand the account."""
+    await oidc_provider.async_set_config(
+        OidcConfig(issuer=ISSUER, client_id=CLIENT_ID, allow_auto_create=False)
+    )
+    user = await hass.auth.async_create_user("Alice")
+    first = await _link(hass, oidc_provider, user)
+    second = oidc_provider.async_create_credentials(
+        {"issuer": ISSUER, "subject": "another-subject"}
+    )
+    await hass.auth.async_link_user(user, second)
+    await oidc_provider.async_record_session(
+        credential_id=first.id,
+        claims={"sub": SUBJECT},
+        tokens=TokenResponse(access_token="at"),
+    )
+    refresh_token = await hass.auth.async_create_refresh_token(
+        user, TEST_CLIENT_ID, credential=first
+    )
+
+    client = await hass_ws_client(
+        hass, hass.auth.async_create_access_token(refresh_token)
+    )
+    await client.send_json_auto_id({"type": "config/auth_provider/oidc/unlink"})
+
+    result = await client.receive_json()
+
+    assert not result["success"]
+    assert result["error"]["code"] == "no_other_login"
+    assert first in user.credentials
+    assert second in user.credentials
 
 
 async def test_unlink_refused_while_auto_create_is_on(
