@@ -143,14 +143,18 @@ class AuthProvider:
         """
         raise NotImplementedError
 
-    async def async_start_step_up(self, user: User) -> dict[str, Any]:
+    async def async_start_step_up(
+        self, user: User, context: AuthFlowContext | None
+    ) -> dict[str, Any]:
         """Return the data the client needs to build a step up proof.
 
         Only called on providers that report support_step_up.
         """
         raise NotImplementedError
 
-    async def async_verify_step_up(self, user: User, data: Mapping[str, Any]) -> None:
+    async def async_verify_step_up(
+        self, user: User, data: Mapping[str, Any], context: AuthFlowContext | None
+    ) -> None:
         """Verify that an already signed in user proved their identity again.
 
         Raise InvalidStepUpError when the proof does not hold. Only called on
