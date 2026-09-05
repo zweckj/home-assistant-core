@@ -2187,6 +2187,147 @@ async def test_revalidation_keeps_session_on_transient_error(
     assert manager.async_get_refresh_token(refresh_token.id) is refresh_token
 
 
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (503, {}),
+        (400, {"error": "invalid_client"}),
+    ],
+    ids=["transient", "generic"],
+)
+async def test_revalidation_ends_a_session_past_its_deadline(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    mock_idp: AiohttpClientMocker,
+    status: int,
+    body: dict[str, Any],
+) -> None:
+    """Test the deadline terminates access even while refreshes keep failing.
+
+    Refusing to mint new tokens is not revocation: the Home Assistant tokens
+    already issued have to go, which is what closes existing connections.
+    """
+    user = await _non_owner_user(manager)
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await manager.async_link_user(user, credentials)
+    await provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+    refresh_token = await manager.async_create_refresh_token(
+        user, "https://ha.example.com/", credential=credentials
+    )
+    session = provider.data.sessions[credentials.id]
+    session.refresh_after = time.time() - 1
+    session.revalidate_after = time.time() - 1
+
+    mock_idp.post(TOKEN_URL, status=status, json=body)
+    async_fire_time_changed(hass, dt_util.utcnow() + dt_util.dt.timedelta(minutes=6))
+    await hass.async_block_till_done()
+
+    assert credentials.id not in provider.data.sessions
+    assert manager.async_get_refresh_token(refresh_token.id) is None
+
+
+async def test_expiry_is_not_delayed_by_a_slow_identity_provider(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+) -> None:
+    """Test one stuck refresh cannot hold up another session's deadline.
+
+    The worker walks sessions serially, so tying revocation to that walk would
+    let an unresponsive identity provider extend everybody's access.
+    """
+    slow = provider.async_create_credentials({"subject": "slow-user"})
+    await provider.async_record_session(
+        credential_id=slow.id,
+        claims={"sub": "slow-user"},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+    provider.data.sessions[slow.id].refresh_after = time.time() - 1
+
+    user = await _non_owner_user(manager)
+    expired = provider.async_create_credentials({"subject": SUBJECT})
+    await manager.async_link_user(user, expired)
+    await provider.async_record_session(
+        credential_id=expired.id,
+        claims={"sub": SUBJECT},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+    refresh_token = await manager.async_create_refresh_token(
+        user, "https://ha.example.com/", credential=expired
+    )
+    provider.data.sessions[expired.id].revalidate_after = time.time() - 1
+
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+
+    async def hang(_: str) -> oidc_auth.TokenResponse:
+        refresh_started.set()
+        await release_refresh.wait()
+        return oidc_auth.TokenResponse(access_token="at2")
+
+    with patch.object(provider.async_client(), "async_refresh_token", side_effect=hang):
+        stuck = asyncio.create_task(
+            provider._async_revalidate_sessions(dt_util.utcnow())
+        )
+        await refresh_started.wait()
+
+        # The next tick arrives while the previous pass is still waiting.
+        await provider._async_revalidate_sessions(dt_util.utcnow())
+
+        assert expired.id not in provider.data.sessions
+        assert manager.async_get_refresh_token(refresh_token.id) is None
+
+        release_refresh.set()
+        await stuck
+
+
+async def test_revalidation_does_not_overwrite_a_newer_login(
+    provider: oidc_auth.OidcAuthProvider,
+) -> None:
+    """Test a slow refresh cannot undo a login that finished while it ran."""
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="old-rt"),
+    )
+    provider.data.sessions[credentials.id].refresh_after = time.time() - 1
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+
+    async def refresh(_: str) -> oidc_auth.TokenResponse:
+        refresh_started.set()
+        await release_refresh.wait()
+        return oidc_auth.TokenResponse(access_token="at2", refresh_token="stale-rt")
+
+    with patch.object(
+        provider.async_client(), "async_refresh_token", side_effect=refresh
+    ):
+        revalidate = asyncio.create_task(
+            provider._async_revalidate_sessions(dt_util.utcnow())
+        )
+        await refresh_started.wait()
+        renewed = asyncio.create_task(
+            provider.async_record_session(
+                credential_id=credentials.id,
+                claims={"sub": SUBJECT},
+                tokens=oidc_auth.TokenResponse(
+                    access_token="at3", refresh_token="new-rt"
+                ),
+            )
+        )
+        await asyncio.sleep(0)
+        release_refresh.set()
+        await asyncio.gather(revalidate, renewed)
+
+    assert provider.data.sessions[credentials.id].refresh_token == "new-rt"
+
+
 async def test_removing_credentials_drops_the_session(
     hass: HomeAssistant,
     manager: auth.AuthManager,

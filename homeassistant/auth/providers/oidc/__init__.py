@@ -485,9 +485,14 @@ class OidcAuthProvider(AuthProvider):
             )
 
     async def _async_revalidate_sessions(self, now: datetime) -> None:
-        """Check every session that is due against the identity provider."""
+        """Enforce the deadlines and refresh whatever is due."""
         if not self.is_configured or self.data is None:
             return
+
+        # Runs before, and independently of, the lock below. A deadline that has
+        # already passed must not be postponed by an identity provider that is
+        # slow to answer somebody else's refresh.
+        await self._async_expire_sessions()
 
         # A slow identity provider can make a pass outlast the interval, and
         # refreshing the same session twice would burn a rotating refresh token.
@@ -512,6 +517,34 @@ class OidcAuthProvider(AuthProvider):
             if expired:
                 await self._async_end_sessions(expired)
 
+    async def _async_expire_sessions(self) -> None:
+        """End every session whose deadline has passed.
+
+        Purely local, so the bound on how long a withdrawn session keeps its
+        Home Assistant tokens is the worker interval rather than however long the
+        identity provider takes to respond.
+        """
+        assert self.data is not None
+        now = time.time()
+        if expired := [
+            session
+            for session in self.data.sessions.values()
+            if now >= session.revalidate_after
+        ]:
+            _LOGGER.info(
+                "Ending %s OIDC session(s) that reached their deadline", len(expired)
+            )
+            await self._async_end_sessions(expired)
+
+    @callback
+    def _async_session_is_current(self, data: OidcStore, session: OidcSession) -> bool:
+        """Return if the store still holds this exact session.
+
+        A new login or a teardown puts a different object in its place, so
+        identity is what tells a worker that its result is stale.
+        """
+        return data.sessions.get(session.credential_id) is session
+
     async def _async_revalidate_session(
         self, data: OidcStore, config: OidcConfig, session: OidcSession
     ) -> bool:
@@ -525,6 +558,8 @@ class OidcAuthProvider(AuthProvider):
         try:
             client = self.async_client()
             tokens = await client.async_refresh_token(session.refresh_token)
+            if not self._async_session_is_current(data, session):
+                return False
             if tokens.refresh_token:
                 session.refresh_token = tokens.refresh_token
                 data.async_set_session(session)
@@ -543,10 +578,15 @@ class OidcAuthProvider(AuthProvider):
             _LOGGER.info("Identity provider revoked an OIDC session, signing it out")
             return True
         except OidcTransientError as err:
+            # Retried only while the grace window lasts; a provider that stays
+            # unreachable must not keep a session alive past its deadline.
             _LOGGER.debug("Could not revalidate OIDC session yet: %s", err)
-            return False
+            return time.time() >= session.revalidate_after
         except OidcError as err:
             _LOGGER.warning("Error revalidating OIDC session: %s", err)
+            return time.time() >= session.revalidate_after
+
+        if not self._async_session_is_current(data, session):
             return False
 
         # Only the token and the deadlines move; the display name and username
