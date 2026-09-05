@@ -1478,6 +1478,8 @@ async def test_has_other_login_method(mock_hass) -> None:
     second = manager.auth_providers[0].async_create_credentials({"username": "second"})
     user.credentials.append(second)
     assert manager.async_has_other_login_method(user, credentials) is True
+    # Removing both at once would leave nothing to log in with.
+    assert manager.async_has_other_login_method(user, credentials, second) is False
 
     # A credential of a provider that is no longer configured cannot be used.
     user.credentials.remove(second)

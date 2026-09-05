@@ -437,15 +437,16 @@ class AuthManager:
 
     @callback
     def async_has_other_login_method(
-        self, user: models.User, credentials: models.Credentials
+        self, user: models.User, *credentials: models.Credentials
     ) -> bool:
         """Test if the user can still log in without the given credentials.
 
         Credentials of a provider that is no longer configured cannot be logged
         in with, so they do not count as a login method.
         """
+        removed = {removed_credentials.id for removed_credentials in credentials}
         return any(
-            credential.id != credentials.id
+            credential.id not in removed
             and self.get_auth_provider(
                 credential.auth_provider_type, credential.auth_provider_id
             )
