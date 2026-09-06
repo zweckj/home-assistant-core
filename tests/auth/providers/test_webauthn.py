@@ -1,6 +1,8 @@
 """Test the WebAuthn auth provider."""
 
 from ipaddress import ip_address
+import time
+from unittest.mock import patch
 
 import pytest
 from webauthn.helpers.structs import CredentialDeviceType
@@ -11,7 +13,10 @@ from homeassistant.core import HomeAssistant
 
 from tests.common import CLIENT_ID
 
+ORIGIN = "https://ha.example.com"
 CONTEXT = AuthFlowContext(ip_address=ip_address("192.168.1.10"))
+STEP_UP_CONTEXT = AuthFlowContext(ip_address=ip_address("192.168.1.10"), origin=ORIGIN)
+RELYING_PARTY = webauthn._RelyingParty("ha.example.com", ORIGIN)
 
 
 @pytest.fixture
@@ -137,3 +142,141 @@ async def test_deleting_the_last_passkey_drops_the_credentials(
     assert credentials not in user.credentials
     assert provider.data is not None
     assert provider.data.list_credentials_meta(user.id) == []
+
+
+@pytest.mark.parametrize("context", [None, CONTEXT])
+async def test_start_step_up_needs_an_origin(
+    hass: HomeAssistant,
+    provider: webauthn.WebAuthnProvider,
+    context: AuthFlowContext | None,
+) -> None:
+    """Test a passkey ceremony cannot start without an origin to run it for."""
+    user, _ = await _linked_user(hass, provider, "credential-1")
+
+    with pytest.raises(webauthn.InvalidAuthError):
+        await provider.async_start_step_up(user, context)
+
+
+async def test_start_step_up_offers_the_users_passkeys(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test starting a step up scopes the ceremony to the user's own passkeys."""
+    user, _ = await _linked_user(hass, provider, "credential-1", "credential-2")
+
+    with patch(f"{webauthn.__name__}._async_relying_party", return_value=RELYING_PARTY):
+        options = await provider.async_start_step_up(user, STEP_UP_CONTEXT)
+
+    assert len(options["allowCredentials"]) == 2
+    assert user.id in provider._pending_step_up_challenges
+
+
+@pytest.mark.parametrize("context", [None, CONTEXT])
+async def test_verify_step_up_needs_an_origin(
+    hass: HomeAssistant,
+    provider: webauthn.WebAuthnProvider,
+    context: AuthFlowContext | None,
+) -> None:
+    """Test a passkey proof is rejected when there is no origin to check it."""
+    user, _ = await _linked_user(hass, provider, "credential-1")
+
+    with pytest.raises(webauthn.InvalidStepUpError):
+        await provider.async_verify_step_up(
+            user, {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"}, context
+        )
+
+
+async def test_verify_step_up_rejects_a_missing_challenge(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a proof is rejected when the user never started a step up."""
+    user, _ = await _linked_user(hass, provider, "credential-1")
+
+    with pytest.raises(webauthn.InvalidStepUpError):
+        await provider.async_verify_step_up(
+            user,
+            {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"},
+            STEP_UP_CONTEXT,
+        )
+
+
+async def test_verify_step_up_rejects_an_expired_challenge(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a proof is rejected, and cleared, once the challenge has timed out."""
+    user, _ = await _linked_user(hass, provider, "credential-1")
+    provider._pending_step_up_challenges[user.id] = (b"challenge", time.time() - 1)
+
+    with (
+        patch.object(provider, "async_verify_authentication") as verify,
+        pytest.raises(webauthn.InvalidStepUpError),
+    ):
+        await provider.async_verify_step_up(
+            user,
+            {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"},
+            STEP_UP_CONTEXT,
+        )
+
+    verify.assert_not_awaited()
+    assert user.id not in provider._pending_step_up_challenges
+
+
+async def test_step_up_succeeds_with_the_users_passkey(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a valid passkey proof from the user clears the step up challenge."""
+    user, _ = await _linked_user(hass, provider, "credential-1")
+    provider._pending_step_up_challenges[user.id] = (b"challenge", time.time() + 60)
+
+    with patch.object(
+        provider, "async_verify_authentication", return_value=user.id
+    ) as verify:
+        await provider.async_verify_step_up(
+            user,
+            {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"},
+            STEP_UP_CONTEXT,
+        )
+
+    verify.assert_awaited_once_with("assertion", b"challenge", ORIGIN)
+    assert user.id not in provider._pending_step_up_challenges
+
+
+async def test_step_up_rejects_a_passkey_from_another_user(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a proof made with someone else's passkey does not count."""
+    user, _ = await _linked_user(hass, provider, "credential-1")
+    provider._pending_step_up_challenges[user.id] = (b"challenge", time.time() + 60)
+
+    with (
+        patch.object(
+            provider, "async_verify_authentication", return_value="another-user"
+        ),
+        pytest.raises(webauthn.InvalidStepUpError),
+    ):
+        await provider.async_verify_step_up(
+            user,
+            {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"},
+            STEP_UP_CONTEXT,
+        )
+
+
+async def test_verify_step_up_wraps_a_failed_assertion(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a rejected passkey assertion surfaces as a step up failure."""
+    user, _ = await _linked_user(hass, provider, "credential-1")
+    provider._pending_step_up_challenges[user.id] = (b"challenge", time.time() + 60)
+
+    with (
+        patch.object(
+            provider,
+            "async_verify_authentication",
+            side_effect=webauthn.InvalidAuthError("nope"),
+        ),
+        pytest.raises(webauthn.InvalidStepUpError),
+    ):
+        await provider.async_verify_step_up(
+            user,
+            {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"},
+            STEP_UP_CONTEXT,
+        )

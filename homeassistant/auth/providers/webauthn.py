@@ -18,6 +18,7 @@ from webauthn import (
 )
 from webauthn.helpers.bytes_to_base64url import bytes_to_base64url
 from webauthn.helpers.exceptions import WebAuthnException
+from webauthn.helpers.options_to_json_dict import options_to_json_dict
 from webauthn.helpers.parse_authentication_credential_json import (
     parse_authentication_credential_json,
 )
@@ -42,7 +43,13 @@ from homeassistant.util.network import is_ip_address
 
 from ..auth_store import AuthStore
 from ..models import AuthFlowContext, AuthFlowResult, Credentials, User, UserMeta
-from . import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
+from . import (
+    AUTH_PROVIDER_SCHEMA,
+    AUTH_PROVIDERS,
+    AuthProvider,
+    InvalidStepUpError,
+    LoginFlow,
+)
 
 REQUIREMENTS = ["webauthn==3.0.0"]
 
@@ -304,6 +311,9 @@ class WebAuthnProvider(AuthProvider):
         # store the challenges for pending registrations for each user
         self._pending_registration_challenges: dict[str, bytes] = {}
 
+        # store the pending step up challenge and its expiry for each user
+        self._pending_step_up_challenges: dict[str, tuple[bytes, float]] = {}
+
         self._init_lock = Lock()
         self._registration_lock = Lock()
 
@@ -317,6 +327,12 @@ class WebAuthnProvider(AuthProvider):
         biometric or PIN. Asking for another factor on top would be redundant.
         """
         return False
+
+    @property
+    @override
+    def support_step_up(self) -> bool:
+        """Return that a signed in user can re-verify with a passkey."""
+        return True
 
     @override
     async def async_initialize(self) -> None:
@@ -518,6 +534,58 @@ class WebAuthnProvider(AuthProvider):
             credential_backed_up=response.credential_backed_up,
         )
         return user_id
+
+    @override
+    async def async_start_step_up(
+        self, user: User, context: AuthFlowContext | None
+    ) -> dict[str, Any]:
+        """Return the options the client needs to build a passkey proof."""
+        origin = context.get("origin") if context else None
+        if origin is None:
+            raise InvalidAuthError("No origin to run a WebAuthn ceremony for.")
+
+        data = await self._async_get_data()
+        options = generate_authentication_options(
+            rp_id=_async_relying_party(self.hass, origin).id,
+            # The user is known here, so only their own passkeys are offered.
+            allow_credentials=data.get_registered_credentials(user.id),
+            user_verification=UserVerificationRequirement.REQUIRED,
+            timeout=SIGN_IN_TIMEOUT_MS,
+        )
+        self._pending_step_up_challenges[user.id] = (
+            options.challenge,
+            time() + SIGN_IN_TIMEOUT_MS / 1000,
+        )
+        return options_to_json_dict(options)
+
+    @override
+    async def async_verify_step_up(
+        self, user: User, data: Mapping[str, Any], context: AuthFlowContext | None
+    ) -> None:
+        """Verify a passkey proof from an already signed in user."""
+        origin = context.get("origin") if context else None
+        if origin is None:
+            raise InvalidStepUpError("No origin to verify a passkey against.")
+
+        challenge = self._pending_step_up_challenges.pop(user.id, None)
+        # The timeout in the options is only a hint to the client, so the
+        # challenge lifetime has to be enforced here as well.
+        if challenge is None or time() > challenge[1]:
+            raise InvalidStepUpError("No pending step up challenge for user.")
+
+        if (credential := data.get(CONF_AUTHENTICATION_CREDENTIAL)) is None:
+            raise InvalidStepUpError("No credential to verify.")
+
+        try:
+            verified_user_id = await self.async_verify_authentication(
+                credential, challenge[0], origin
+            )
+        except InvalidAuthError as err:
+            raise InvalidStepUpError("Passkey step up failed.") from err
+
+        # A passkey proves whoever holds it, so it has to be one of this user's.
+        if verified_user_id != user.id:
+            raise InvalidStepUpError("Passkey does not belong to this user.")
 
     async def async_delete_credential(self, user: User, credential_id: str) -> None:
         """Delete a registered credential."""
