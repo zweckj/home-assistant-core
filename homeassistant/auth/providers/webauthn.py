@@ -690,10 +690,9 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
         """Initialize the login flow."""
 
         errors: dict[str, str] = {}
-        # Client supplied and only validated once the flow finishes, so the
-        # origin it carries is checked again for every ceremony.
-        if (redirect_uri := self.context.get("redirect_uri")) is None:
-            return self.async_abort(reason="missing_redirect_uri")
+        # Client supplied, so the origin is checked again for every ceremony.
+        if (origin := self.context.get("origin")) is None:
+            return self.async_abort(reason="missing_origin")
 
         if user_input is not None:
             # The timeout in the options is only a hint to the client, so the
@@ -706,7 +705,7 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
                     user_id = await self._auth_provider.async_verify_authentication(
                         user_input[CONF_AUTHENTICATION_CREDENTIAL],
                         self._challenge,
-                        redirect_uri,
+                        origin,
                     )
                 except InvalidAuthError as err:
                     _LOGGER.debug("Passkey login rejected: %s", err, exc_info=True)
@@ -715,7 +714,7 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
                     return await self.async_finish({CONF_USER_ID: user_id})
 
         try:
-            options = await self._auth_provider.async_start_authentication(redirect_uri)
+            options = await self._auth_provider.async_start_authentication(origin)
         except InvalidAuthError as err:
             _LOGGER.debug("Cannot offer a passkey login: %s", err)
             return self.async_abort(reason="invalid_origin")

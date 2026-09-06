@@ -2,7 +2,7 @@
 
 from ipaddress import ip_address
 import time
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 from webauthn.helpers.structs import CredentialDeviceType
@@ -10,6 +10,7 @@ from webauthn.helpers.structs import CredentialDeviceType
 from homeassistant.auth.models import AuthFlowContext, Credentials, User
 from homeassistant.auth.providers import homeassistant as hass_auth, webauthn
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 
 from tests.common import CLIENT_ID
 
@@ -280,3 +281,92 @@ async def test_verify_step_up_wraps_a_failed_assertion(
             {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"},
             STEP_UP_CONTEXT,
         )
+
+
+@pytest.mark.parametrize(
+    ("context", "reason"),
+    [
+        (CONTEXT, "missing_origin"),
+        (
+            AuthFlowContext(ip_address=ip_address("192.168.1.10"), origin=None),
+            "missing_origin",
+        ),
+        (
+            AuthFlowContext(
+                ip_address=ip_address("192.168.1.10"), origin="http://ha.example.com"
+            ),
+            "invalid_origin",
+        ),
+    ],
+    ids=["absent", "empty", "not usable for webauthn"],
+)
+async def test_login_flow_needs_an_origin_to_run_a_ceremony_for(
+    hass: HomeAssistant,
+    provider: webauthn.WebAuthnProvider,
+    context: AuthFlowContext,
+    reason: str,
+) -> None:
+    """Test a passkey login is not offered without an origin to bind it to."""
+    await _linked_user(hass, provider, "credential-1")
+
+    result = await hass.auth.login_flow.async_init(
+        (provider.type, provider.id), context=context
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == reason
+
+
+async def test_login_flow_signs_in_against_the_browser_origin(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test the passkey login runs its ceremony for the origin of the browser."""
+    user, credentials = await _linked_user(hass, provider, "credential-1")
+
+    with patch(
+        f"{webauthn.__name__}._async_relying_party", return_value=RELYING_PARTY
+    ) as relying_party:
+        result = await hass.auth.login_flow.async_init(
+            (provider.type, provider.id), context=STEP_UP_CONTEXT
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["description_placeholders"]["webauthn_options"]
+
+        with patch.object(
+            provider, "async_verify_authentication", return_value=user.id
+        ) as verify:
+            result = await hass.auth.login_flow.async_configure(
+                result["flow_id"],
+                {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"},
+            )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"] is credentials
+    verify.assert_awaited_once_with("assertion", ANY, ORIGIN)
+    assert relying_party.call_args.args[1] == ORIGIN
+
+
+async def test_login_flow_rejects_an_expired_challenge(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a passkey login is refused once its challenge has timed out."""
+    user, _ = await _linked_user(hass, provider, "credential-1")
+
+    with patch(f"{webauthn.__name__}._async_relying_party", return_value=RELYING_PARTY):
+        result = await hass.auth.login_flow.async_init(
+            (provider.type, provider.id), context=STEP_UP_CONTEXT
+        )
+        flow = hass.auth.login_flow._progress[result["flow_id"]]
+        flow._challenge_expires_at = time.time() - 1
+
+        with patch.object(
+            provider, "async_verify_authentication", return_value=user.id
+        ) as verify:
+            result = await hass.auth.login_flow.async_configure(
+                result["flow_id"],
+                {webauthn.CONF_AUTHENTICATION_CREDENTIAL: "assertion"},
+            )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+    verify.assert_not_awaited()
