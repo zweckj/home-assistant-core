@@ -398,7 +398,7 @@ class LoginFlowIndexView(LoginFlowBaseView):
                 max_age=BROWSER_TOKEN_EXPIRATION,
                 httponly=True,
                 secure=request.secure,
-                # The identity provider sends the user back with a top level
+                # The external party sends the user back with a top level
                 # navigation, which strict same site would strip the cookie from.
                 samesite="Lax",
                 path=AUTH_COOKIE_PATH,
@@ -452,7 +452,7 @@ class LoginFlowResourceView(LoginFlowBaseView):
             if flow["context"].get("client_id") != client_id:
                 return self.json_message("Client ID changed", HTTPStatus.BAD_REQUEST)
             if (expected_token := flow["context"].get("browser_token")) is not None:
-                if flow["step_id"] == "authorize":
+                if self._flow_mgr.async_is_awaiting_external_callback(flow_id):
                     return self.json_message(
                         "External callback required", HTTPStatus.BAD_REQUEST
                     )
@@ -589,7 +589,7 @@ class LoginFlowCallbackView(HomeAssistantView):
             status=HTTPStatus.FOUND, headers={"location": str(location)}
         )
         # The finish step still needs the cookie, so give it a fresh budget
-        # rather than whatever is left after the detour to the provider.
+        # rather than whatever is left after the detour to the external party.
         response.set_cookie(
             _browser_token_cookie(flow_id),
             presented_token,

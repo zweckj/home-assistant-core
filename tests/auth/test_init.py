@@ -1571,8 +1571,8 @@ async def test_a_flow_that_is_not_parked_is_not_awaiting_a_callback(mock_hass) -
     step = await manager.login_flow.async_init(("insecure_example", None))
 
     assert step["type"] is data_entry_flow.FlowResultType.FORM
-    assert manager.login_flow.async_is_awaiting_external_callback(step["flow_id"]) is (
-        False
+    assert (
+        manager.login_flow.async_is_awaiting_external_callback(step["flow_id"]) is False
     )
     assert manager.login_flow.async_is_awaiting_external_callback("unknown") is False
 

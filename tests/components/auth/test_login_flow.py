@@ -407,11 +407,16 @@ async def test_login_exist_user_ip_changes(
     assert response == {"message": "IP address changed"}
 
 
-async def test_login_flow_rejects_changed_client_id(
+async def test_login_flow_rejects_a_changed_client_id(
     hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
 ) -> None:
-    """Test a different OAuth client cannot finish an existing login flow."""
-    client = await async_setup_auth(hass, aiohttp_client)
+    """Test a flow cannot be finished for another client than it was started for."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    cred = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(cred)
+
     resp = await client.post(
         "/auth/login_flow",
         json={
@@ -425,14 +430,139 @@ async def test_login_flow_rejects_changed_client_id(
     resp = await client.post(
         f"/auth/login_flow/{step['flow_id']}",
         json={
-            "client_id": "https://example.com/other-client",
+            "client_id": "https://other.example.com/",
             "username": "test-user",
             "password": "test-pass",
         },
     )
 
-    assert resp.status == HTTPStatus.BAD_REQUEST
-    assert hass.auth.login_flow.async_get(step["flow_id"])["step_id"] == "init"
+    assert resp.status == 400
+    assert await resp.json() == {"message": "Client ID changed"}
+
+
+async def test_a_flow_without_an_external_step_gets_no_browser_cookie(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test only a login that leaves the browser is tied back to it."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+
+    assert step["type"] == "form"
+    assert f"hass_login_browser_{step['flow_id']}" not in resp.cookies
+
+
+@pytest.mark.parametrize(
+    ("query", "status"),
+    [
+        ("code=the-code", HTTPStatus.BAD_REQUEST),
+        ("code=the-code&state=not-a-token", HTTPStatus.BAD_REQUEST),
+    ],
+    ids=["no state", "unsigned state"],
+)
+async def test_login_callback_requires_a_state_we_signed(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    query: str,
+    status: HTTPStatus,
+) -> None:
+    """Test the callback refuses anything it cannot tie back to a login."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?{query}")
+
+    assert resp.status == status
+
+
+async def test_login_callback_rejects_an_unknown_flow(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a correctly signed state for a flow that is gone is refused."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    state = hass.auth.login_flow.async_encode_external_state("does-not-exist")
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
+
+    assert resp.status == HTTPStatus.NOT_FOUND
+
+
+async def test_login_callback_rejects_a_flow_that_is_not_parked(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a flow waiting on a form cannot be advanced through the callback."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    flow_id = (await resp.json())["flow_id"]
+    state = hass.auth.login_flow.async_encode_external_state(flow_id)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
+
+    assert resp.status == HTTPStatus.NOT_FOUND
+    assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "init"
+
+
+async def test_concurrent_requests_cannot_advance_the_same_flow(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a second request gets a conflict rather than racing the first one."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    cred = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(cred)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    flow_id = (await resp.json())["flow_id"]
+
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    original_configure = hass.auth.login_flow.async_configure
+
+    async def slow_configure(*args: Any, **kwargs: Any) -> Any:
+        first_started.set()
+        await release_first.wait()
+        return await original_configure(*args, **kwargs)
+
+    body = {
+        "client_id": CLIENT_ID,
+        "username": "test-user",
+        "password": "test-pass",
+    }
+    with patch.object(hass.auth.login_flow, "async_configure", slow_configure):
+        first = asyncio.create_task(
+            client.post(f"/auth/login_flow/{flow_id}", json=body)
+        )
+        await first_started.wait()
+        second = await client.post(f"/auth/login_flow/{flow_id}", json=body)
+        release_first.set()
+        first_response = await first
+
+    assert second.status == HTTPStatus.CONFLICT
+    assert first_response.status == HTTPStatus.OK
+    assert (await first_response.json())["type"] == "create_entry"
 
 
 @pytest.mark.usefixtures("current_request_with_host")  # Has example.com host
