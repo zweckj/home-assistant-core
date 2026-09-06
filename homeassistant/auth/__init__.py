@@ -441,16 +441,20 @@ class AuthManager:
     ) -> bool:
         """Test if the user can still log in without the given credentials.
 
-        Credentials of a provider that is no longer configured cannot be logged
-        in with, so they do not count as a login method.
+        Credentials of a provider that is no longer configured, or that only
+        works from certain places, cannot be relied on to log back in, so they
+        do not count as a login method.
         """
         removed = {removed_credentials.id for removed_credentials in credentials}
         return any(
             credential.id not in removed
-            and self.get_auth_provider(
-                credential.auth_provider_type, credential.auth_provider_id
+            and (
+                provider := self.get_auth_provider(
+                    credential.auth_provider_type, credential.auth_provider_id
+                )
             )
             is not None
+            and provider.counts_as_login_method
             for credential in user.credentials
         )
 
