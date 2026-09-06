@@ -105,8 +105,8 @@ async def test_get_returns_redirect_uris(
 
     assert result["success"]
     assert result["result"]["redirect_uris"] == [
-        "https://ha.example.com/auth/oidc/callback",
-        "http://homeassistant.local:8123/auth/oidc/callback",
+        "https://ha.example.com/auth/login_callback",
+        "http://homeassistant.local:8123/auth/login_callback",
     ]
 
 

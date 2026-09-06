@@ -111,7 +111,7 @@ Ending a session removes it and every Home Assistant token derived from it, thro
 ### Login flow
 
 - Authorization code flow with PKCE `S256`, with or without a client secret.
-- The browser leaves Home Assistant and returns to `/auth/oidc/callback`, registered by the `auth` component. The callback validates state, flow existence, browser, IP and the relying client's redirect URI, then redirects to `/auth/authorize?flow_id=...&auth_callback=1` for a final frontend post.
+- The browser leaves Home Assistant and returns to `/auth/login_callback`, the shared callback the `auth` component registers for any login flow with an external step. The callback validates state, flow existence, browser, IP and the relying client's redirect URI, then redirects to `/auth/authorize?flow_id=...&auth_callback=1` for a final frontend post.
 - `EXTERNAL_STEP` may only move to another external step or to `EXTERNAL_STEP_DONE`; aborting raises `ValueError`. So `async_step_authorize` records failures and `async_step_finish` reports them.
 - `EXTERNAL_STEP_DONE` needs a second `async_configure` call to reach `CREATE_ENTRY` — that is the final frontend post.
 

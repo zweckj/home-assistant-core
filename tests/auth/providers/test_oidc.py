@@ -793,7 +793,7 @@ async def test_login_flow(
     query = URL(result["url"]).query
     assert query["client_id"] == CLIENT_ID
     assert query["code_challenge_method"] == "S256"
-    assert query["redirect_uri"] == f"{REDIRECT_BASE}/auth/oidc/callback"
+    assert query["redirect_uri"] == f"{REDIRECT_BASE}/auth/login_callback"
 
     mock_idp.post(
         TOKEN_URL,
@@ -2682,32 +2682,6 @@ async def test_login_starts_over_a_usable_transport(
     result = await _start_login(manager, url, internal=internal)
 
     assert result["type"] is FlowResultType.EXTERNAL_STEP
-
-
-async def test_state_is_signed(provider: oidc_auth.OidcAuthProvider) -> None:
-    """Test a tampered state parameter is not accepted."""
-    state = provider.async_encode_state("the-flow-id")
-
-    assert provider.async_decode_state(state) == "the-flow-id"
-    assert provider.async_decode_state(f"{state}x") is None
-    assert provider.async_decode_state("not-a-token") is None
-
-
-async def test_state_expires(provider: oidc_auth.OidcAuthProvider) -> None:
-    """Test an old state parameter cannot be replayed."""
-    with patch("time.time", return_value=time.time() - 3600):
-        state = provider.async_encode_state("the-flow-id")
-
-    assert provider.async_decode_state(state) is None
-
-
-async def test_state_requires_expiration(provider: oidc_auth.OidcAuthProvider) -> None:
-    """Test a state without an explicit expiration is refused."""
-    state = jwt.encode(
-        {"flow_id": "the-flow-id"}, provider._state_secret, algorithm="HS256"
-    )
-
-    assert provider.async_decode_state(state) is None
 
 
 @pytest.mark.parametrize(

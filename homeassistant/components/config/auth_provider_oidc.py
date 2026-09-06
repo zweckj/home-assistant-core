@@ -6,6 +6,7 @@ from typing import Any
 import voluptuous as vol
 from yarl import URL
 
+from homeassistant.auth.const import LOGIN_CALLBACK_PATH
 from homeassistant.auth.providers.oidc import (
     OidcAuthProvider,
     OidcConfig,
@@ -13,7 +14,6 @@ from homeassistant.auth.providers.oidc import (
 )
 from homeassistant.auth.providers.oidc.client import OidcClient, OidcError
 from homeassistant.auth.providers.oidc.const import (
-    AUTH_CALLBACK_PATH,
     DEFAULT_ADMIN_GROUP,
     DEFAULT_DISPLAY_NAME_CLAIM,
     DEFAULT_REVALIDATE_INTERVAL,
@@ -121,7 +121,7 @@ def _async_redirect_uris(hass: HomeAssistant) -> list[str]:
             )
         except NoURLAvailableError:
             continue
-        if (uri := f"{base}{AUTH_CALLBACK_PATH}") not in uris:
+        if (uri := f"{base}{LOGIN_CALLBACK_PATH}") not in uris:
             uris.append(uri)
 
     if not uris:

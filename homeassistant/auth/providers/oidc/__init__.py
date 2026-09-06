@@ -19,7 +19,6 @@ import time
 from typing import Any, cast, override
 from weakref import WeakValueDictionary
 
-import jwt
 import voluptuous as vol
 
 from homeassistant.const import CONF_ID
@@ -32,7 +31,7 @@ from homeassistant.helpers.network import (
 )
 
 from ... import InvalidAuthError
-from ...const import GROUP_ID_ADMIN, GROUP_ID_USER
+from ...const import GROUP_ID_ADMIN, GROUP_ID_USER, LOGIN_CALLBACK_PATH
 from ...models import (
     TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
     AuthFlowContext,
@@ -53,11 +52,9 @@ from .client import (
     generate_code_verifier,
 )
 from .const import (
-    AUTH_CALLBACK_PATH,
     CONF_ISSUER,
     CONF_SUBJECT,
     GROUPS_CLAIM,
-    LOGIN_STATE_EXPIRATION,
     PROVIDER_TYPE,
     REVALIDATE_CHECK_INTERVAL,
 )
@@ -107,8 +104,6 @@ class OidcAuthProvider(AuthProvider):
             WeakValueDictionary()
         )
         self._unsub_revalidate: CALLBACK_TYPE | None = None
-        # Regenerated on restart, which only invalidates in flight logins.
-        self._state_secret = secrets.token_hex(32)
 
     @property
     @override
@@ -258,7 +253,7 @@ class OidcAuthProvider(AuthProvider):
             raise OidcInsecureTransportError(
                 f"Signing in through {url} would expose the tokens, use HTTPS"
             )
-        return f"{url}{AUTH_CALLBACK_PATH}"
+        return f"{url}{LOGIN_CALLBACK_PATH}"
 
     @override
     async def async_login_flow(self, context: AuthFlowContext | None) -> OidcLoginFlow:
@@ -417,31 +412,6 @@ class OidcAuthProvider(AuthProvider):
             raise InvalidAuthError(
                 "The identity provider has to confirm this session again"
             )
-
-    @callback
-    def async_encode_state(self, flow_id: str) -> str:
-        """Return a signed state parameter that names a login flow."""
-        return jwt.encode(
-            {"flow_id": flow_id, "exp": int(time.time()) + LOGIN_STATE_EXPIRATION},
-            self._state_secret,
-            algorithm="HS256",
-        )
-
-    @callback
-    def async_decode_state(self, state: str) -> str | None:
-        """Return the login flow a state parameter belongs to."""
-        try:
-            claims = jwt.decode(
-                state,
-                self._state_secret,
-                algorithms=["HS256"],
-                options={"require": ["exp", "flow_id"]},
-            )
-        except jwt.InvalidTokenError:
-            return None
-
-        flow_id = claims.get("flow_id")
-        return flow_id if isinstance(flow_id, str) else None
 
     async def async_record_session(
         self,
@@ -730,7 +700,9 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
             url=client.async_authorize_url(
                 metadata,
                 redirect_uri=self._redirect_uri,
-                state=provider.async_encode_state(self.flow_id),
+                state=self._auth_manager.login_flow.async_encode_external_state(
+                    self.flow_id
+                ),
                 nonce=self._nonce,
                 code_verifier=self._code_verifier,
                 scopes=config.scopes,

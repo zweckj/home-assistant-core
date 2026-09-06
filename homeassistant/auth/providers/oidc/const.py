@@ -22,8 +22,6 @@ DEFAULT_ADMIN_GROUP: Final = "home_assistant_admin"
 
 DISCOVERY_PATH: Final = "/.well-known/openid-configuration"
 
-AUTH_CALLBACK_PATH: Final = "/auth/oidc/callback"
-
 HTTP_TIMEOUT: Final = 30
 
 DISCOVERY_CACHE_TTL: Final = 3600
@@ -34,9 +32,6 @@ JWKS_REFETCH_COOLDOWN: Final = 60
 
 # Tolerance for clock drift between Home Assistant and the identity provider.
 CLOCK_SKEW_LEEWAY: Final = 30
-
-# How long the user has to complete the redirect to the identity provider.
-LOGIN_STATE_EXPIRATION: Final = 300
 
 # Only asymmetric signatures are acceptable for ID tokens. HMAC would let anyone
 # holding the client secret mint tokens, and "none" is unsigned entirely.

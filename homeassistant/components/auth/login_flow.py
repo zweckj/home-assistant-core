@@ -73,7 +73,7 @@ import hmac
 from http import HTTPStatus
 from ipaddress import ip_address
 import secrets
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 from probatio import to_field_list
@@ -82,6 +82,7 @@ from yarl import URL
 
 from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager
+from homeassistant.auth.const import LOGIN_CALLBACK_PATH, LOGIN_STATE_EXPIRATION
 from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
 from homeassistant.components import onboarding
 from homeassistant.components.http import KEY_HASS
@@ -104,30 +105,18 @@ from homeassistant.util.network import is_local
 from . import indieauth
 
 if TYPE_CHECKING:
-    from homeassistant.auth.providers.oidc import OidcAuthProvider
-
     from . import StoreResultType
 
-OIDC_CALLBACK_PATH = "/auth/oidc/callback"
 BROWSER_TOKEN_COOKIE_PREFIX = "hass_login_browser_"
 AUTH_COOKIE_PATH = "/auth"
-# Matches how long a login may stay parked at the identity provider.
-BROWSER_TOKEN_EXPIRATION = 300
+# The cookie has to outlive the detour, so it follows the state it guards.
+BROWSER_TOKEN_EXPIRATION = LOGIN_STATE_EXPIRATION
 
 
 @callback
 def _browser_token_cookie(flow_id: str) -> str:
     """Return the browser-token cookie name for a login flow."""
     return f"{BROWSER_TOKEN_COOKIE_PREFIX}{flow_id}"
-
-
-@callback
-def _async_oidc_provider(hass: HomeAssistant) -> OidcAuthProvider | None:
-    """Return the OpenID Connect auth provider if it is enabled."""
-    for provider in hass.auth.auth_providers:
-        if provider.type == "oidc":
-            return cast("OidcAuthProvider", provider)
-    return None
 
 
 @callback
@@ -138,7 +127,7 @@ def async_setup(hass: HomeAssistant, store_result: StoreResultType) -> None:
     hass.http.register_view(AuthProvidersView)
     hass.http.register_view(LoginFlowIndexView(hass.auth.login_flow, store_result))
     hass.http.register_view(LoginFlowResourceView(hass.auth.login_flow, store_result))
-    hass.http.register_view(OidcCallbackView(hass.auth.login_flow))
+    hass.http.register_view(LoginFlowCallbackView(hass.auth.login_flow))
 
 
 class WellKnownOAuthInfoView(HomeAssistantView):
@@ -509,11 +498,11 @@ class LoginFlowResourceView(LoginFlowBaseView):
         return response
 
 
-class OidcCallbackView(HomeAssistantView):
-    """Receive the redirect back from an OpenID Connect provider."""
+class LoginFlowCallbackView(HomeAssistantView):
+    """Receive the redirect back from an external step of a login flow."""
 
-    url = OIDC_CALLBACK_PATH
-    name = "api:auth:oidc:callback"
+    url = LOGIN_CALLBACK_PATH
+    name = "api:auth:login_flow:callback"
     requires_auth = False
 
     def __init__(self, flow_mgr: AuthManagerFlowManager) -> None:
@@ -521,20 +510,15 @@ class OidcCallbackView(HomeAssistantView):
         self._flow_mgr = flow_mgr
 
     async def get(self, request: web.Request) -> web.Response:
-        """Resume the login flow the identity provider was started for."""
+        """Resume the login flow the external party was started for."""
         hass = request.app[KEY_HASS]
-
-        if (provider := _async_oidc_provider(hass)) is None:
-            return self.json_message(
-                "OpenID Connect is not enabled", HTTPStatus.NOT_FOUND
-            )
 
         if (state := request.query.get("state")) is None:
             return self.json_message("Missing state parameter", HTTPStatus.BAD_REQUEST)
 
-        # The state is signed by the provider, so a tampered or expired one
+        # The state is signed by Home Assistant, so a tampered or expired one
         # never reaches a flow.
-        if (flow_id := provider.async_decode_state(state)) is None:
+        if (flow_id := self._flow_mgr.async_decode_external_state(state)) is None:
             return self.json_message("Invalid state parameter", HTTPStatus.BAD_REQUEST)
 
         try:
@@ -542,7 +526,7 @@ class OidcCallbackView(HomeAssistantView):
         except data_entry_flow.UnknownFlow:
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
 
-        if flow["step_id"] != "authorize":
+        if not self._flow_mgr.async_is_awaiting_external_callback(flow_id):
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
 
         try:
@@ -577,16 +561,13 @@ class OidcCallbackView(HomeAssistantView):
 
         # Verifying the redirect URI awaited, so the flow may have been advanced
         # by a concurrent callback in the meantime.
-        try:
-            if self._flow_mgr.async_get(flow_id)["step_id"] != "authorize":
-                return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
-        except data_entry_flow.UnknownFlow:
+        if not self._flow_mgr.async_is_awaiting_external_callback(flow_id):
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
 
-        user_input: dict[str, str] = {
-            key: value
-            for key in ("code", "error")
-            if (value := request.query.get(key)) is not None
+        # What the external party sends back is the provider's business; the
+        # step it resumes decides what it accepts.
+        user_input = {
+            key: value for key, value in request.query.items() if key != "state"
         }
 
         try:

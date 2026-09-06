@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from functools import partial
 import logging
+import secrets
 import time
 from typing import Any, cast, override
 
@@ -23,7 +24,12 @@ from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util import dt as dt_util
 
 from . import auth_store, jwt_wrapper, models
-from .const import ACCESS_TOKEN_EXPIRATION, GROUP_ID_ADMIN, REFRESH_TOKEN_EXPIRATION
+from .const import (
+    ACCESS_TOKEN_EXPIRATION,
+    GROUP_ID_ADMIN,
+    LOGIN_STATE_EXPIRATION,
+    REFRESH_TOKEN_EXPIRATION,
+)
 from .mfa_modules import MultiFactorAuthModule, auth_mfa_module_from_config
 from .models import AuthFlowContext, AuthFlowResult
 from .providers import AuthProvider, LoginFlow, auth_provider_from_config
@@ -118,6 +124,45 @@ class AuthManagerFlowManager(
         """Init auth manager flows."""
         super().__init__(hass)
         self.auth_manager = auth_manager
+        self._external_state_secret = secrets.token_hex(32)
+
+    @callback
+    def async_encode_external_state(self, flow_id: str) -> str:
+        """Return a signed state parameter that names a login flow.
+
+        A flow that sends the browser to an external party has to recognize it
+        again when it comes back, without trusting what the browser carries.
+        """
+        return jwt.encode(
+            {"flow_id": flow_id, "exp": int(time.time()) + LOGIN_STATE_EXPIRATION},
+            self._external_state_secret,
+            algorithm="HS256",
+        )
+
+    @callback
+    def async_decode_external_state(self, state: str) -> str | None:
+        """Return the login flow a state parameter belongs to."""
+        try:
+            claims = jwt.decode(
+                state,
+                self._external_state_secret,
+                algorithms=["HS256"],
+                options={"require": ["exp", "flow_id"]},
+            )
+        except jwt.InvalidTokenError:
+            return None
+
+        flow_id = claims.get("flow_id")
+        return flow_id if isinstance(flow_id, str) else None
+
+    @callback
+    def async_is_awaiting_external_callback(self, flow_id: str) -> bool:
+        """Return if the flow is parked waiting to be called back into."""
+        return (
+            (flow := self._progress.get(flow_id)) is not None
+            and flow.cur_step is not None
+            and flow.cur_step["type"] is FlowResultType.EXTERNAL_STEP
+        )
 
     @override
     async def async_create_flow(

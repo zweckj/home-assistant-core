@@ -13,6 +13,7 @@ from aiohttp.test_utils import TestClient
 import pytest
 from yarl import URL
 
+from homeassistant.auth.const import LOGIN_CALLBACK_PATH
 from homeassistant.auth.providers.oidc import OidcAuthProvider
 from homeassistant.auth.providers.oidc.client import OidcTransientError, TokenResponse
 from homeassistant.auth.providers.oidc.store import OidcConfig
@@ -618,7 +619,7 @@ async def test_oidc_callback_resumes_the_flow(
     state = await _start_oidc_login(client)
 
     resp = await client.get(
-        f"/auth/oidc/callback?code=the-code&state={state}", allow_redirects=False
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
     )
 
     assert resp.status == 302
@@ -649,7 +650,7 @@ async def test_oidc_callback_renews_the_browser_cookie(
     state = await _start_oidc_login(client)
 
     resp = await client.get(
-        f"/auth/oidc/callback?code=the-code&state={state}", allow_redirects=False
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
     )
 
     assert resp.status == 302
@@ -701,7 +702,7 @@ async def test_oidc_complete_http_login(
         ),
     ):
         resp = await client.get(
-            f"/auth/oidc/callback?code=the-code&state={state}",
+            f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
             allow_redirects=False,
         )
         flow_id = URL(resp.headers["location"]).query["flow_id"]
@@ -763,7 +764,7 @@ async def _oidc_sign_in(hass: HomeAssistant, client: TestClient, **claims: Any) 
         ),
     ):
         resp = await client.get(
-            f"/auth/oidc/callback?code=the-code&state={state}", allow_redirects=False
+            f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
         )
         flow_id = URL(resp.headers["location"]).query["flow_id"]
         resp = await client.post(
@@ -899,7 +900,7 @@ async def test_concurrent_oidc_finish_posts_execute_once(
     )
     state = await _start_oidc_login(client)
     resp = await client.get(
-        f"/auth/oidc/callback?code=the-code&state={state}",
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
         allow_redirects=False,
     )
     flow_id = URL(resp.headers["location"]).query["flow_id"]
@@ -979,12 +980,12 @@ async def test_oidc_callback_rejects_invalid_client_redirect(
         return_value=[],
     ):
         resp = await client.get(
-            f"/auth/oidc/callback?code=the-code&state={state}",
+            f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
             allow_redirects=False,
         )
 
     assert resp.status == HTTPStatus.FORBIDDEN
-    flow_id = hass.auth.auth_providers[0].async_decode_state(state)
+    flow_id = hass.auth.login_flow.async_decode_external_state(state)
     assert flow_id is not None
     assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "authorize"
 
@@ -997,7 +998,7 @@ async def test_concurrent_oidc_callbacks_advance_the_flow_once(
     """Test two callbacks cannot both consume the external flow step."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
     state = await _start_oidc_login(client)
-    callback_url = f"/auth/oidc/callback?code=the-code&state={state}"
+    callback_url = f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}"
     both_validating = asyncio.Event()
     release_validation = asyncio.Event()
     validation_calls = 0
@@ -1024,7 +1025,7 @@ async def test_concurrent_oidc_callbacks_advance_the_flow_once(
         HTTPStatus.FOUND,
         HTTPStatus.NOT_FOUND,
     ]
-    flow_id = hass.auth.auth_providers[0].async_decode_state(state)
+    flow_id = hass.auth.login_flow.async_decode_external_state(state)
     assert flow_id is not None
     assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "finish"
 
@@ -1037,7 +1038,7 @@ async def test_oidc_external_step_rejects_direct_posts(
     """Test only the state-validating callback can advance the external step."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
     state = await _start_oidc_login(client)
-    flow_id = hass.auth.auth_providers[0].async_decode_state(state)
+    flow_id = hass.auth.login_flow.async_decode_external_state(state)
     assert flow_id is not None
 
     resp = await client.post(
@@ -1059,7 +1060,7 @@ async def test_oidc_finish_requires_the_browser_that_started_the_login(
     state = await _start_oidc_login(client)
 
     resp = await client.get(
-        f"/auth/oidc/callback?code=the-code&state={state}", allow_redirects=False
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
     )
     flow_id = URL(resp.headers["location"]).query["flow_id"]
     client.session.cookie_jar.clear()
@@ -1083,7 +1084,7 @@ async def test_concurrent_oidc_logins_have_independent_browser_tokens(
     await _start_oidc_login(client)
 
     resp = await client.get(
-        f"/auth/oidc/callback?code=the-code&state={first_state}",
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={first_state}",
         allow_redirects=False,
     )
 
@@ -1105,7 +1106,7 @@ async def test_oidc_callback_requires_the_browser_that_started_the_login(
     client.session.cookie_jar.clear()
 
     resp = await client.get(
-        f"/auth/oidc/callback?code=the-code&state={state}", allow_redirects=False
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
     )
 
     assert resp.status == 400
@@ -1119,11 +1120,11 @@ async def test_oidc_callback_rejects_a_foreign_browser_token(
     """Test a cookie from another login does not unlock this one."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
     state = await _start_oidc_login(client)
-    flow_id = hass.auth.auth_providers[0].async_decode_state(state)
+    flow_id = hass.auth.login_flow.async_decode_external_state(state)
     assert flow_id is not None
 
     resp = await client.get(
-        f"/auth/oidc/callback?code=the-code&state={state}",
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
         cookies={f"hass_login_browser_{flow_id}": "not-the-one"},
         allow_redirects=False,
     )
@@ -1139,7 +1140,7 @@ async def test_oidc_callback_requires_state(
     """Test a callback without a state parameter is refused."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
 
-    resp = await client.get("/auth/oidc/callback?code=the-code")
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code")
 
     assert resp.status == 400
 
@@ -1153,7 +1154,7 @@ async def test_oidc_callback_rejects_tampered_state(
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
     state = await _start_oidc_login(client)
 
-    resp = await client.get(f"/auth/oidc/callback?code=the-code&state={state}x")
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}x")
 
     assert resp.status == 400
 
@@ -1165,9 +1166,9 @@ async def test_oidc_callback_rejects_unknown_flow(
 ) -> None:
     """Test a correctly signed state for a finished flow is refused."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
-    state = hass.auth.auth_providers[0].async_encode_state("does-not-exist")
+    state = hass.auth.login_flow.async_encode_external_state("does-not-exist")
 
-    resp = await client.get(f"/auth/oidc/callback?code=the-code&state={state}")
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
 
     assert resp.status == 404
 
@@ -1193,20 +1194,20 @@ async def test_oidc_callback_rejects_changed_ip(
         )
 
     state = URL(result["url"]).query["state"]
-    resp = await client.get(f"/auth/oidc/callback?code=the-code&state={state}")
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
 
     assert resp.status == 400
 
 
-async def test_oidc_callback_without_provider(
+async def test_login_callback_without_an_external_login(
     hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
 ) -> None:
-    """Test the callback is inert when the provider is not enabled."""
+    """Test a state Home Assistant never signed is refused."""
     client = await async_setup_auth(hass, aiohttp_client)
 
-    resp = await client.get("/auth/oidc/callback?code=the-code&state=whatever")
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state=whatever")
 
-    assert resp.status == 404
+    assert resp.status == 400
 
 
 @pytest.mark.parametrize(
