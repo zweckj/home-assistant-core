@@ -90,6 +90,16 @@ class AuthProvider:
         """Return whether the provider can re-verify an already signed in user."""
         return False
 
+    @property
+    def counts_as_login_method(self) -> bool:
+        """Return whether this is a login the user can always fall back to.
+
+        A login that only works from certain places cannot be relied on to get
+        back in, so it does not count when deciding whether the last remaining
+        credential may be removed.
+        """
+        return True
+
     async def async_credentials(self) -> list[Credentials]:
         """Return all credentials of this provider."""
         users = await self.store.async_get_users()
