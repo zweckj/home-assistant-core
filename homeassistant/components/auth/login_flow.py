@@ -65,16 +65,20 @@ an authorization code.
 """
 
 from collections.abc import Callable
+import hmac
 from http import HTTPStatus
 from ipaddress import ip_address
+import secrets
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 from probatio import to_field_list
 import voluptuous as vol
+from yarl import URL
 
 from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager
+from homeassistant.auth.const import LOGIN_CALLBACK_PATH, LOGIN_STATE_EXPIRATION
 from homeassistant.auth.models import AuthFlowContext, AuthFlowResult, Credentials
 from homeassistant.components import onboarding
 from homeassistant.components.http import KEY_HASS
@@ -99,6 +103,17 @@ from . import indieauth
 if TYPE_CHECKING:
     from . import StoreResultType
 
+BROWSER_TOKEN_COOKIE_PREFIX = "hass_login_browser_"
+AUTH_COOKIE_PATH = "/auth"
+# The cookie has to outlive the detour, so it follows the state it guards.
+BROWSER_TOKEN_EXPIRATION = LOGIN_STATE_EXPIRATION
+
+
+@callback
+def _browser_token_cookie(flow_id: str) -> str:
+    """Return the browser-token cookie name for a login flow."""
+    return f"{BROWSER_TOKEN_COOKIE_PREFIX}{flow_id}"
+
 
 @callback
 def async_setup(
@@ -110,6 +125,7 @@ def async_setup(
     hass.http.register_view(AuthProvidersView)
     hass.http.register_view(LoginFlowIndexView(hass.auth.login_flow, store_result))
     hass.http.register_view(LoginFlowResourceView(hass.auth.login_flow, store_result))
+    hass.http.register_view(LoginFlowCallbackView(hass.auth.login_flow))
 
 
 class WellKnownOAuthInfoView(HomeAssistantView):
@@ -346,13 +362,16 @@ class LoginFlowIndexView(LoginFlowBaseView):
 
         handler: tuple[str, str] = tuple(data["handler"])
 
+        context = AuthFlowContext(
+            ip_address=ip_address(request.remote),  # type: ignore[arg-type]
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+        )
+
         try:
             result = await self._flow_mgr.async_init(
                 handler,
-                context=AuthFlowContext(
-                    ip_address=ip_address(request.remote),  # type: ignore[arg-type]
-                    redirect_uri=redirect_uri,
-                ),
+                context=context,
             )
         except data_entry_flow.UnknownHandler:
             return self.json_message("Invalid handler specified", HTTPStatus.NOT_FOUND)
@@ -361,7 +380,26 @@ class LoginFlowIndexView(LoginFlowBaseView):
                 "Handler does not support init", HTTPStatus.BAD_REQUEST
             )
 
-        return await self._async_flow_result_to_response(request, client_id, result)
+        response = await self._async_flow_result_to_response(request, client_id, result)
+
+        # Only an external step leaves the browser, and only then does the flow
+        # have to be tied back to it when it returns.
+        if result["type"] is data_entry_flow.FlowResultType.EXTERNAL_STEP:
+            # The flow has already run its first step, which must not read this.
+            browser_token = context["browser_token"] = secrets.token_urlsafe(32)
+            response.set_cookie(
+                _browser_token_cookie(result["flow_id"]),
+                browser_token,
+                max_age=BROWSER_TOKEN_EXPIRATION,
+                httponly=True,
+                secure=request.secure,
+                # The external party sends the user back with a top level
+                # navigation, which strict same site would strip the cookie from.
+                samesite="Lax",
+                path=AUTH_COOKIE_PATH,
+            )
+
+        return response
 
 
 class LoginFlowResourceView(LoginFlowBaseView):
@@ -406,6 +444,21 @@ class LoginFlowResourceView(LoginFlowBaseView):
             flow = self._flow_mgr.async_get(flow_id)
             if flow["context"]["ip_address"] != ip_address(request.remote):  # type: ignore[arg-type]
                 return self.json_message("IP address changed", HTTPStatus.BAD_REQUEST)
+            if flow["context"].get("client_id") != client_id:
+                return self.json_message("Client ID changed", HTTPStatus.BAD_REQUEST)
+            if (expected_token := flow["context"].get("browser_token")) is not None:
+                if self._flow_mgr.async_is_awaiting_external_callback(flow_id):
+                    return self.json_message(
+                        "External callback required", HTTPStatus.BAD_REQUEST
+                    )
+                presented_token = request.cookies.get(_browser_token_cookie(flow_id))
+                if presented_token is None or not hmac.compare_digest(
+                    expected_token, presented_token
+                ):
+                    return self.json_message(
+                        "Login was not started in this browser",
+                        HTTPStatus.BAD_REQUEST,
+                    )
             if flow_id in self._flows_in_progress:
                 return self.json_message(
                     "Flow request already in progress", HTTPStatus.CONFLICT
@@ -420,7 +473,13 @@ class LoginFlowResourceView(LoginFlowBaseView):
         except vol.Invalid:
             return self.json_message("User input malformed", HTTPStatus.BAD_REQUEST)
 
-        return await self._async_flow_result_to_response(request, client_id, result)
+        response = await self._async_flow_result_to_response(request, client_id, result)
+        if result["type"] in (
+            data_entry_flow.FlowResultType.ABORT,
+            data_entry_flow.FlowResultType.CREATE_ENTRY,
+        ):
+            response.del_cookie(_browser_token_cookie(flow_id), path=AUTH_COOKIE_PATH)
+        return response
 
     async def delete(self, request: web.Request, flow_id: str) -> web.Response:
         """Cancel a flow in progress."""
@@ -429,4 +488,110 @@ class LoginFlowResourceView(LoginFlowBaseView):
         except data_entry_flow.UnknownFlow:
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
 
-        return self.json_message("Flow aborted")
+        response = self.json_message("Flow aborted")
+        response.del_cookie(_browser_token_cookie(flow_id), path=AUTH_COOKIE_PATH)
+        return response
+
+
+class LoginFlowCallbackView(HomeAssistantView):
+    """Receive the redirect back from an external step of a login flow."""
+
+    url = LOGIN_CALLBACK_PATH
+    name = "api:auth:login_flow:callback"
+    requires_auth = False
+
+    def __init__(self, flow_mgr: AuthManagerFlowManager) -> None:
+        """Initialize the callback view."""
+        self._flow_mgr = flow_mgr
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Resume the login flow the external party was started for."""
+        hass = request.app[KEY_HASS]
+
+        if (state := request.query.get("state")) is None:
+            return self.json_message("Missing state parameter", HTTPStatus.BAD_REQUEST)
+
+        # The state is signed by Home Assistant, so a tampered or expired one
+        # never reaches a flow.
+        if (flow_id := self._flow_mgr.async_decode_external_state(state)) is None:
+            return self.json_message("Invalid state parameter", HTTPStatus.BAD_REQUEST)
+
+        try:
+            flow = self._flow_mgr.async_get(flow_id)
+        except data_entry_flow.UnknownFlow:
+            return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+
+        if not self._flow_mgr.async_is_awaiting_external_callback(flow_id):
+            return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+
+        try:
+            remote_address = ip_address(request.remote)  # type: ignore[arg-type]
+        except ValueError:
+            return self.json_message("Invalid remote IP", HTTPStatus.BAD_REQUEST)
+
+        # do not allow change ip during login flow
+        if flow["context"]["ip_address"] != remote_address:
+            return self.json_message("IP address changed", HTTPStatus.BAD_REQUEST)
+
+        # The state alone only proves the flow existed. Tying it to a cookie set
+        # when the flow started means a login cannot be finished in a browser
+        # other than the one that began it.
+        expected_token = flow["context"].get("browser_token")
+        presented_token = request.cookies.get(_browser_token_cookie(flow_id))
+        if (
+            not expected_token
+            or not presented_token
+            or not hmac.compare_digest(expected_token, presented_token)
+        ):
+            return self.json_message(
+                "Login was not started in this browser", HTTPStatus.BAD_REQUEST
+            )
+
+        if not await indieauth.verify_redirect_uri(
+            hass,
+            flow["context"]["client_id"],
+            flow["context"]["redirect_uri"],
+        ):
+            return self.json_message("Invalid redirect URI", HTTPStatus.FORBIDDEN)
+
+        # Verifying the redirect URI awaited, so the flow may have been advanced
+        # by a concurrent callback in the meantime.
+        if not self._flow_mgr.async_is_awaiting_external_callback(flow_id):
+            return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+
+        # What the external party sends back is the provider's business; the
+        # step it resumes decides what it accepts.
+        user_input = {
+            key: value for key, value in request.query.items() if key != "state"
+        }
+
+        try:
+            await self._flow_mgr.async_configure(flow_id, user_input)
+        except data_entry_flow.UnknownFlow:
+            return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
+        except vol.Invalid:
+            return self.json_message("User input malformed", HTTPStatus.BAD_REQUEST)
+
+        location = URL("/auth/authorize").with_query(
+            {
+                "flow_id": flow_id,
+                "client_id": flow["context"]["client_id"],
+                "redirect_uri": flow["context"]["redirect_uri"],
+                "auth_callback": "1",
+            }
+        )
+        response = web.Response(
+            status=HTTPStatus.FOUND, headers={"location": str(location)}
+        )
+        # The finish step still needs the cookie, so give it a fresh budget
+        # rather than whatever is left after the detour to the external party.
+        response.set_cookie(
+            _browser_token_cookie(flow_id),
+            presented_token,
+            max_age=BROWSER_TOKEN_EXPIRATION,
+            httponly=True,
+            secure=request.secure,
+            samesite="Lax",
+            path=AUTH_COOKIE_PATH,
+        )
+        return response
