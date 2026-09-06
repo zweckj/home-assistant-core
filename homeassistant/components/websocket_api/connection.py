@@ -81,7 +81,6 @@ class ActiveConnection:
         self.user = user
         self.refresh_token_id = refresh_token.id if refresh_token else None
         self.remote = remote
-        # Origin of the page that opened the connection, as sent in the handshake.
         self.origin = origin
         self.subscriptions: dict[Hashable, Callable[[], Any]] = {}
         self.last_id = 0
