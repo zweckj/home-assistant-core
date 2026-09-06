@@ -120,7 +120,9 @@ async def websocket_change_password(
         return
 
     try:
-        await provider.async_verify_step_up(user, {"password": msg["current_password"]})
+        await provider.async_verify_step_up(
+            user, {"password": msg["current_password"]}, None
+        )
     except InvalidStepUpError:
         connection.send_error(
             msg["id"], "invalid_current_password", "Invalid current password"

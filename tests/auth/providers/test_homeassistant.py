@@ -289,10 +289,10 @@ async def test_step_up_accepts_the_current_password(
     provider, user = await _signed_in_user(hass, data)
 
     assert provider.support_step_up is True
-    assert await provider.async_start_step_up(user) == {}
+    assert await provider.async_start_step_up(user, None) == {}
     assert provider.async_get_username(user) == "hello"
 
-    await provider.async_verify_step_up(user, {"password": "test-pass"})
+    await provider.async_verify_step_up(user, {"password": "test-pass"}, None)
 
 
 @pytest.mark.parametrize(
@@ -307,7 +307,7 @@ async def test_step_up_rejects_a_proof_that_does_not_hold(
     provider, user = await _signed_in_user(hass, data)
 
     with pytest.raises(InvalidStepUpError):
-        await provider.async_verify_step_up(user, step_up_data)
+        await provider.async_verify_step_up(user, step_up_data, None)
 
 
 async def test_step_up_needs_a_credential_of_this_provider(
@@ -321,4 +321,4 @@ async def test_step_up_needs_a_credential_of_this_provider(
 
     assert provider.async_get_username(user) is None
     with pytest.raises(InvalidStepUpError):
-        await provider.async_verify_step_up(user, {"password": "test-pass"})
+        await provider.async_verify_step_up(user, {"password": "test-pass"}, None)

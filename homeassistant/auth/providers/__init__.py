@@ -90,6 +90,16 @@ class AuthProvider:
         """Return whether the provider can re-verify an already signed in user."""
         return False
 
+    @property
+    def counts_as_login_method(self) -> bool:
+        """Return whether this is a login the user can always fall back to.
+
+        A login that only works from certain places cannot be relied on to get
+        back in, so it does not count when deciding whether the last remaining
+        credential may be removed.
+        """
+        return True
+
     async def async_credentials(self) -> list[Credentials]:
         """Return all credentials of this provider."""
         users = await self.store.async_get_users()
@@ -143,14 +153,18 @@ class AuthProvider:
         """
         raise NotImplementedError
 
-    async def async_start_step_up(self, user: User) -> dict[str, Any]:
+    async def async_start_step_up(
+        self, user: User, context: AuthFlowContext | None
+    ) -> dict[str, Any]:
         """Return the data the client needs to build a step up proof.
 
         Only called on providers that report support_step_up.
         """
         raise NotImplementedError
 
-    async def async_verify_step_up(self, user: User, data: Mapping[str, Any]) -> None:
+    async def async_verify_step_up(
+        self, user: User, data: Mapping[str, Any], context: AuthFlowContext | None
+    ) -> None:
         """Verify that an already signed in user proved their identity again.
 
         Raise InvalidStepUpError when the proof does not hold. Only called on

@@ -272,12 +272,16 @@ class HassAuthProvider(AuthProvider):
         return True
 
     @override
-    async def async_start_step_up(self, user: User) -> dict[str, Any]:
+    async def async_start_step_up(
+        self, user: User, context: AuthFlowContext | None
+    ) -> dict[str, Any]:
         """Return the data needed to build a password proof."""
         return {}
 
     @override
-    async def async_verify_step_up(self, user: User, data: Mapping[str, Any]) -> None:
+    async def async_verify_step_up(
+        self, user: User, data: Mapping[str, Any], context: AuthFlowContext | None
+    ) -> None:
         """Verify the current password of an already signed in user."""
         if (username := self.async_get_username(user)) is None:
             raise InvalidStepUpError("User has no credentials for this provider.")

@@ -1465,7 +1465,12 @@ async def test_concurrent_logins_with_one_credential_create_one_user(
 async def test_has_other_login_method(mock_hass) -> None:
     """Test what counts as another way into an account."""
     manager = await auth.auth_manager_from_config(
-        mock_hass, [{"type": "insecure_example", "users": []}], []
+        mock_hass,
+        [
+            {"type": "insecure_example", "users": []},
+            {"type": "trusted_networks", "trusted_networks": ["192.168.0.0/24"]},
+        ],
+        [],
     )
     user = MockUser().add_to_auth_manager(manager)
     credentials = manager.auth_providers[0].async_create_credentials(
@@ -1489,6 +1494,16 @@ async def test_has_other_login_method(mock_hass) -> None:
             auth_provider_id="removed",
             data={},
         )
+    )
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+    # A trusted network login only works from that network, so it is not a
+    # fallback the user can rely on to get back in.
+    user.credentials[:] = [credentials]
+    trusted_networks = manager.get_auth_provider("trusted_networks", None)
+    assert trusted_networks is not None
+    user.credentials.append(
+        trusted_networks.async_create_credentials({"user_id": user.id})
     )
     assert manager.async_has_other_login_method(user, credentials) is False
 
