@@ -509,17 +509,17 @@ class AuthManager:
         """Remove every refresh token that was issued for these credentials.
 
         Refusing to issue new tokens is not revocation, so a provider that ends
-        a session has to take the tokens it already handed out with it.
+        a session has to take the tokens it already handed out with it. Tokens
+        are matched on the credentials they were issued for rather than on who
+        holds them, so this still works once the credentials are detached.
         """
-        if (user := await self.async_get_user_by_credentials(credentials)) is None:
-            return
-
-        for refresh_token in list(user.refresh_tokens.values()):
-            if (
-                refresh_token.credential is not None
-                and refresh_token.credential.id == credentials.id
-            ):
-                self.async_remove_refresh_token(refresh_token)
+        for user in await self.async_get_users():
+            for refresh_token in list(user.refresh_tokens.values()):
+                if (
+                    refresh_token.credential is not None
+                    and refresh_token.credential.id == credentials.id
+                ):
+                    self.async_remove_refresh_token(refresh_token)
 
     async def async_enable_user_mfa(
         self, user: models.User, mfa_module_id: str, data: Any
