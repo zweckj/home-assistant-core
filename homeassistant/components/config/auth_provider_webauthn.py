@@ -160,15 +160,18 @@ async def websocket_delete(
     if (provider := _async_provider(hass, connection, msg)) is None:
         return
 
-    try:
-        await provider.async_delete_credential(connection.user, msg["credential_id"])
-    except CredentialNotFoundError as err:
-        connection.send_error(msg["id"], "credential_not_found", str(err))
-        return
-    except LastLoginMethodError as err:
-        connection.send_error(msg["id"], "last_login_method", str(err))
-        return
-    connection.send_result(msg["id"])
+    with connection.async_defer_auth_close():
+        try:
+            await provider.async_delete_credential(
+                connection.user, msg["credential_id"]
+            )
+        except CredentialNotFoundError as err:
+            connection.send_error(msg["id"], "credential_not_found", str(err))
+            return
+        except LastLoginMethodError as err:
+            connection.send_error(msg["id"], "last_login_method", str(err))
+            return
+        connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command(
