@@ -47,7 +47,7 @@ Extracting a shared token-request helper would be a reasonable follow-up PR.
 
 ### Administrator rights
 
-Groups come from the `groups` claim (list of strings, or space separated). Only the admin group name is configurable, defaulting to `home_assistant_admin`; clearing it disables group mapping.
+Groups come from the verified ID token's `groups` claim (list of strings, or space separated), never from userinfo. Only the admin group name is configurable, defaulting to `home_assistant_admin`; clearing it disables group mapping.
 
 - Gaining the group promotes; losing it demotes, but only if the group was seen before. `OidcSession.is_admin` remembers that, so the sync must run before the session is rewritten.
 - An account never seen in the group is left alone, so an administrator appointed inside Home Assistant keeps their rights until the identity provider claims authority by showing the group once.
@@ -122,12 +122,12 @@ Ending a session removes it and every Home Assistant token derived from it, thro
 | Subject | No, always `sub` | Every login, ID token only |
 | Username | Yes, `username_claim` | Account creation |
 | Display name | Yes, `display_name_claim` | Account creation |
-| Groups | No, always `groups` | Every login, and every refresh that carries them |
+| Groups | No, always `groups` | Verified ID tokens at login and refresh |
 
 - Display name applies only at creation, so a rename inside Home Assistant is permanent.
 - Claim names are plain key lookups; nested paths are unsupported.
 - Userinfo is consulted only when creating an account whose ID token lacks `username_claim` or `display_name_claim`. Returning users cost no request.
-- Merge order is `userinfo | id_token`, so the signed token wins. A provider advertising no userinfo endpoint is skipped rather than failed.
+- Profile enrichment uses `userinfo | id_token`, so the signed token wins. Only username and display name use the enriched claims; identity and administrator grants use the verified ID token. A provider advertising no userinfo endpoint is skipped rather than failed.
 
 ## Known gaps
 

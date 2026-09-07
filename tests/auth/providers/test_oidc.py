@@ -1414,6 +1414,56 @@ async def test_login_flow_reads_claims_from_userinfo(
     assert user.name == "Alice"
 
 
+@pytest.mark.parametrize(
+    ("groups", "expected_admin"),
+    [
+        pytest.param(None, False, id="userinfo-only-group"),
+        pytest.param([], False, id="empty-id-token-groups"),
+        pytest.param(["home_assistant_admin"], True, id="id-token-admin-group"),
+    ],
+)
+@pytest.mark.usefixtures("provider")
+async def test_login_flow_uses_id_token_groups_when_enriching_profile(
+    manager: auth.AuthManager,
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+    jwks: dict[str, Any],
+    groups: list[str] | None,
+    expected_admin: bool,
+) -> None:
+    """Test profile enrichment cannot change the source of admin grants."""
+    userinfo = {
+        "sub": SUBJECT,
+        "name": "Alice",
+        "preferred_username": "alice",
+        "groups": ["home_assistant_admin"],
+    }
+    id_token_claims = {
+        "name": None,
+        "preferred_username": None,
+        "groups": groups,
+    }
+    result = await _complete_login(
+        manager, mock_idp, signing_key, jwks, userinfo=userinfo, **id_token_claims
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    user = await manager.async_get_or_create_user(result["result"])
+    assert user.name == "Alice"
+    assert user.is_admin is expected_admin
+    assert any(call[1].path == "/userinfo" for call in mock_idp.mock_calls)
+
+    result = await _complete_login(
+        manager, mock_idp, signing_key, jwks, userinfo=userinfo, **id_token_claims
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert await manager.async_get_or_create_user(result["result"]) is user
+    assert user.name == "Alice"
+    assert user.is_admin is expected_admin
+    assert not any(call[1].path == "/userinfo" for call in mock_idp.mock_calls)
+
+
 async def test_login_flow_skips_userinfo_when_the_id_token_suffices(
     manager: auth.AuthManager,
     provider: oidc_auth.OidcAuthProvider,

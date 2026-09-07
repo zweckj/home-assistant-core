@@ -441,10 +441,13 @@ class OidcAuthProvider(AuthProvider):
         credential_id: str,
         claims: Mapping[str, Any],
         tokens: TokenResponse,
+        profile_claims: Mapping[str, Any] | None = None,
     ) -> str | None:
         """Store a session while the caller holds the revalidation lock."""
         config = self.oidc_config
         data = await self._async_get_data()
+        if profile_claims is None:
+            profile_claims = claims
         previous_refresh_token = (
             previous.refresh_token
             if (previous := data.sessions.get(credential_id)) is not None
@@ -455,8 +458,8 @@ class OidcAuthProvider(AuthProvider):
             credential_id=credential_id,
             subject=str(claims["sub"]),
             refresh_token=tokens.refresh_token,
-            username=config.username_from(claims),
-            display_name=config.display_name_from(claims),
+            username=config.username_from(profile_claims),
+            display_name=config.display_name_from(profile_claims),
             is_admin=config.grants_admin(claims),
         )
         session.mark_validated(config.revalidate_interval)
@@ -472,6 +475,8 @@ class OidcAuthProvider(AuthProvider):
         credentials: Credentials,
         claims: Mapping[str, Any],
         tokens: TokenResponse,
+        *,
+        profile_claims: Mapping[str, Any] | None = None,
     ) -> str | None:
         """Apply identity claims and commit a session atomically."""
         async with self._revalidate_lock:
@@ -483,7 +488,10 @@ class OidcAuthProvider(AuthProvider):
                 raise InvalidAuthError("OIDC credentials were removed")
             await self.async_sync_admin(credentials, claims)
             return await self._async_record_session(
-                credential_id=credentials.id, claims=claims, tokens=tokens
+                credential_id=credentials.id,
+                claims=claims,
+                tokens=tokens,
+                profile_claims=profile_claims,
             )
 
     async def _async_revalidate_sessions(self, now: datetime) -> None:
@@ -800,9 +808,10 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
                 ):
                     return self.async_abort(reason="user_not_allowed")
 
+                profile_claims = claims
                 if credentials.is_new and config.needs_userinfo(claims):
                     try:
-                        claims = await client.async_merge_userinfo(
+                        profile_claims = await client.async_merge_userinfo(
                             claims, tokens.access_token
                         )
                     except OidcError as err:
@@ -811,7 +820,7 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
 
                 try:
                     replaced_refresh_token = await provider.async_complete_login(
-                        credentials, claims, tokens
+                        credentials, claims, tokens, profile_claims=profile_claims
                     )
                 except InvalidAuthError:
                     return self.async_abort(reason="authorize_failed")
