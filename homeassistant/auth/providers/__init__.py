@@ -138,6 +138,11 @@ class AuthProvider:
         """
         return True
 
+    @callback
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return if the credentials count as a fallback login method."""
+        return self.counts_as_login_method
+
     async def async_get_or_create_credentials(
         self, flow_result: Mapping[str, str]
     ) -> Credentials:
