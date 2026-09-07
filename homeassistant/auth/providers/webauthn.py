@@ -707,11 +707,16 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
                         self._challenge,
                         origin,
                     )
+                    credentials = (
+                        await self._auth_provider.async_get_or_create_credentials(
+                            {CONF_USER_ID: user_id}
+                        )
+                    )
                 except InvalidAuthError as err:
                     _LOGGER.debug("Passkey login rejected: %s", err, exc_info=True)
                     errors["base"] = "invalid_auth"
                 else:
-                    return await self.async_finish({CONF_USER_ID: user_id})
+                    return await self.async_finish(credentials)
 
         try:
             options = await self._auth_provider.async_start_authentication(origin)
