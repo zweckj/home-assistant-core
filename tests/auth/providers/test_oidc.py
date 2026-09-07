@@ -1531,6 +1531,52 @@ async def test_credentials_are_bound_to_the_issuer(
     assert other.is_new
 
 
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        pytest.param(None, False, id="configuration-removed"),
+        pytest.param(
+            OidcConfig(issuer="https://other-idp.example.com", client_id=CLIENT_ID),
+            False,
+            id="issuer-changed",
+        ),
+        pytest.param(
+            OidcConfig(issuer=f"{ISSUER}/", client_id=CLIENT_ID),
+            False,
+            id="issuer-trailing-slash-changed",
+        ),
+        pytest.param(
+            OidcConfig(issuer=ISSUER, client_id=CLIENT_ID, allow_auto_create=True),
+            True,
+            id="current-issuer-without-session",
+        ),
+    ],
+)
+async def test_login_fallback_requires_current_issuer_configuration(
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    aioclient_mock: AiohttpClientMocker,
+    config: OidcConfig | None,
+    expected: bool,
+) -> None:
+    """Test only credentials usable with the current issuer count as a fallback."""
+    user = await manager.async_create_user("Alice")
+    credentials = await provider.async_get_or_create_credentials(
+        {"issuer": ISSUER, "subject": SUBJECT}
+    )
+    await manager.async_link_user(user, credentials)
+
+    assert manager.async_has_other_login_method(user)
+
+    await provider.async_set_config(config)
+
+    assert manager.async_has_other_login_method(user) is expected
+    assert credentials in user.credentials
+    assert provider.data is not None
+    assert provider.data.sessions == {}
+    assert aioclient_mock.mock_calls == []
+
+
 async def test_pending_credentials_are_deduplicated(
     provider: oidc_auth.OidcAuthProvider,
 ) -> None:

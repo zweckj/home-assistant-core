@@ -266,6 +266,15 @@ class OidcAuthProvider(AuthProvider):
         """Return if an administrator has set up an identity provider yet."""
         return self.is_configured
 
+    @callback
+    @override
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return if the credentials belong to the currently configured issuer."""
+        return (
+            self.is_configured
+            and credentials.data.get(CONF_ISSUER) == self.oidc_config.issuer
+        )
+
     @override
     async def async_get_or_create_credentials(
         self, flow_result: Mapping[str, str]
