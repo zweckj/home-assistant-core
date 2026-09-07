@@ -231,8 +231,9 @@ async def websocket_update(
         revalidate_interval=revalidate_interval,
     )
 
-    await provider.async_set_config(config)
-    connection.send_result(msg["id"], {"config": _config_to_dict(config)})
+    with connection.async_defer_auth_close():
+        await provider.async_set_config(config)
+        connection.send_result(msg["id"], {"config": _config_to_dict(config)})
 
 
 @websocket_api.websocket_command(
@@ -249,8 +250,9 @@ async def websocket_delete(
     if (provider := _async_provider(hass, connection, msg)) is None:
         return
 
-    await provider.async_set_config(None)
-    connection.send_result(msg["id"])
+    with connection.async_defer_auth_close():
+        await provider.async_set_config(None)
+        connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command(
@@ -297,10 +299,11 @@ async def websocket_unlink(
         )
         return
 
-    for credentials in linked:
-        await hass.auth.async_remove_credentials(credentials)
+    with connection.async_defer_auth_close():
+        for credentials in linked:
+            await hass.auth.async_remove_credentials(credentials)
 
-    connection.send_result(msg["id"])
+        connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command(

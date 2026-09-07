@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from aiohttp import WSMsgType
 import pytest
 
 from homeassistant.auth import models as auth_models
@@ -396,6 +397,56 @@ async def test_unlink(
     assert result["success"]
     assert credentials not in hass_admin_user.credentials
     assert await hass.auth.async_get_user_by_credentials(credentials) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param({"type": "config/auth_provider/oidc/unlink"}, id="unlink"),
+        pytest.param({"type": "config/auth_provider/oidc/delete"}, id="delete"),
+        pytest.param(
+            {**MINIMAL_UPDATE, "issuer": "https://other-idp.example.com"},
+            id="replace-issuer",
+        ),
+    ],
+)
+async def test_self_revoking_command_returns_result_before_disconnect(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+    hass_admin_user: MockUser,
+    command: dict[str, Any],
+) -> None:
+    """Test a successful mutation is acknowledged before its session closes."""
+    await oidc_provider.async_set_config(
+        OidcConfig(issuer=ISSUER, client_id=CLIENT_ID, allow_auto_create=False)
+    )
+    credentials = await _link(hass, oidc_provider, hass_admin_user)
+    await _give_password(hass, hass_admin_user)
+    await oidc_provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT},
+        tokens=TokenResponse(access_token="at"),
+    )
+    refresh_token = await hass.auth.async_create_refresh_token(
+        hass_admin_user, TEST_CLIENT_ID, credential=credentials
+    )
+    access_token = hass.auth.async_create_access_token(refresh_token)
+    client = await hass_ws_client(hass, access_token)
+    peer = await hass_ws_client(hass, access_token)
+    unrelated = await hass.auth.async_create_refresh_token(
+        hass_admin_user, "https://other-client.example.com"
+    )
+
+    await client.send_json_auto_id(command)
+
+    result = await client.receive_json()
+    assert result["id"] == command["id"]
+    assert result["success"]
+    assert hass.auth.async_get_refresh_token(refresh_token.id) is None
+    assert hass.auth.async_get_refresh_token(unrelated.id) is unrelated
+    assert (await peer.receive()).type is WSMsgType.CLOSE
+    assert (await client.receive()).type is WSMsgType.CLOSE
 
 
 async def test_unlink_needs_another_way_in(
