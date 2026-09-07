@@ -499,7 +499,7 @@ class AuthManager:
                 )
             )
             is not None
-            and provider.counts_as_login_method
+            and provider.async_can_login_with_credentials(credential)
             for credential in user.credentials
         )
 
