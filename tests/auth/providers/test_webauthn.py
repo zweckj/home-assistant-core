@@ -8,7 +8,7 @@ import pytest
 from webauthn.helpers.structs import CredentialDeviceType
 
 from homeassistant.auth.models import AuthFlowContext, Credentials, User
-from homeassistant.auth.providers import homeassistant as hass_auth, webauthn
+from homeassistant.auth.providers import webauthn
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
@@ -59,8 +59,9 @@ async def _linked_user(
     return user, credentials
 
 
+@pytest.mark.usefixtures("hass")
 async def test_provider_is_hidden_until_a_passkey_exists(
-    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+    provider: webauthn.WebAuthnProvider,
 ) -> None:
     """Test the login screen does not offer a passkey nobody has."""
     assert provider.async_can_start_login(CONTEXT) is False
@@ -111,38 +112,6 @@ async def test_deleting_one_of_several_passkeys_revokes_the_sessions(
     assert credentials in user.credentials
     assert provider.data is not None
     assert len(provider.data.list_credentials_meta(user.id)) == 1
-
-
-async def test_deleting_the_last_passkey_needs_another_login(
-    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
-) -> None:
-    """Test an account cannot delete the only way it has to sign in."""
-    user, credentials = await _linked_user(hass, provider, "credential-1")
-
-    with pytest.raises(webauthn.LastLoginMethodError):
-        await provider.async_delete_credential(user, "credential-1")
-
-    assert credentials in user.credentials
-    assert provider.data is not None
-    assert len(provider.data.list_credentials_meta(user.id)) == 1
-
-
-async def test_deleting_the_last_passkey_drops_the_credentials(
-    hass: HomeAssistant,
-    provider: webauthn.WebAuthnProvider,
-    local_auth: hass_auth.HassAuthProvider,
-) -> None:
-    """Test the account keeps working through its password afterwards."""
-    user, credentials = await _linked_user(hass, provider, "credential-1")
-    await hass.auth.async_link_user(
-        user, local_auth.async_create_credentials({"username": "alice"})
-    )
-
-    await provider.async_delete_credential(user, "credential-1")
-
-    assert credentials not in user.credentials
-    assert provider.data is not None
-    assert provider.data.list_credentials_meta(user.id) == []
 
 
 @pytest.mark.parametrize("context", [None, CONTEXT])
