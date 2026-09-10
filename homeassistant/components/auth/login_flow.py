@@ -64,7 +64,6 @@ an authorization code.
 }
 """
 
-from collections.abc import Callable
 from http import HTTPStatus
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
@@ -75,7 +74,7 @@ import voluptuous as vol
 
 from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager
-from homeassistant.auth.models import AuthFlowContext, AuthFlowResult, Credentials
+from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
 from homeassistant.components import onboarding
 from homeassistant.components.http import KEY_HASS
 from homeassistant.components.http.auth import async_user_not_allowed_do_auth
@@ -101,9 +100,7 @@ if TYPE_CHECKING:
 
 
 @callback
-def async_setup(
-    hass: HomeAssistant, store_result: Callable[[str, Credentials], str]
-) -> None:
+def async_setup(hass: HomeAssistant, store_result: StoreResultType) -> None:
     """Component to allow users to login."""
     hass.http.register_view(WellKnownOAuthInfoView)
     hass.http.register_view(WellKnownProtectedResourceView)
@@ -290,7 +287,7 @@ class LoginFlowBaseView(HomeAssistantView):
             return self.json_message("Invalid redirect URI", HTTPStatus.FORBIDDEN)
 
         result.pop("data")
-        result.pop("context")
+        link_user = result.pop("context").get("link_user", False)
 
         result_obj = result.pop("result")
 
@@ -304,9 +301,16 @@ class LoginFlowBaseView(HomeAssistantView):
                 f"Login blocked: {user_access_error}", HTTPStatus.FORBIDDEN
             )
 
-        process_success_login(request)
+        # Attaching an identity is not a sign in, so it must not clear the
+        # failed login counter for the address.
+        if not link_user:
+            process_success_login(request)
         # We overwrite the Credentials object with the string code to retrieve it.
-        result["result"] = self._store_result(client_id, result_obj)  # type: ignore[typeddict-item]
+        result["result"] = self._store_result(  # type: ignore[typeddict-item]
+            client_id,
+            result_obj,
+            "link_user" if link_user else "authorize",
+        )
 
         return self.json(result)
 
@@ -329,9 +333,7 @@ class LoginFlowIndexView(LoginFlowBaseView):
                     [vol.Any(str, None)], vol.Length(2, 2), vol.Coerce(tuple)
                 ),
                 vol.Required("redirect_uri"): str,
-                vol.Optional(
-                    "type", default="authorize"
-                ): str,  # not used, kept for backwards compatibility
+                vol.Optional("type", default="authorize"): str,
             }
         )
     )
@@ -352,6 +354,7 @@ class LoginFlowIndexView(LoginFlowBaseView):
                 context=AuthFlowContext(
                     ip_address=ip_address(request.remote),  # type: ignore[arg-type]
                     redirect_uri=redirect_uri,
+                    link_user=data["type"] == "link_user",
                 ),
             )
         except data_entry_flow.UnknownHandler:
@@ -373,7 +376,7 @@ class LoginFlowResourceView(LoginFlowBaseView):
     def __init__(
         self,
         flow_mgr: AuthManagerFlowManager,
-        store_result: Callable[[str, Credentials], str],
+        store_result: StoreResultType,
     ) -> None:
         """Initialize the login flow resource view."""
         super().__init__(flow_mgr, store_result)
