@@ -183,6 +183,9 @@ class AuthProvider:
     async def async_will_remove_credentials(self, credentials: Credentials) -> None:
         """Clean up provider owned data before credentials are removed."""
 
+    async def async_auth_code_expired(self, credentials: Credentials) -> None:
+        """Clean up provider state after an unused authorization code expires."""
+
     @callback
     def async_validate_refresh_token(
         self, refresh_token: RefreshToken, remote_ip: str | None = None

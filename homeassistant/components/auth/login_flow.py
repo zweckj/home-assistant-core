@@ -22,7 +22,12 @@ Pass in parameter 'client_id' and 'redirect_url' validate by indieauth.
 Pass in parameter 'handler' to specify the auth provider to use. Auth providers
 are identified by type and id.
 
-The default 'type' is 'authorize'.
+Pass in parameter 'type' to say what the resulting authorization code is for.
+The default is 'authorize', which mints a code for POST /auth/token to exchange
+for tokens. Use 'link_user' to attach the credentials to the user who is already
+signed in; that code is only redeemable at POST /auth/link_user, and a provider
+may allow the login purely so it can be linked even when it would refuse to
+create a new user.
 
 {
     "client_id": "https://hassbian.local:8123/",
@@ -363,7 +368,6 @@ class LoginFlowIndexView(LoginFlowBaseView):
             return self.json_message("Invalid client id", HTTPStatus.BAD_REQUEST)
 
         handler: tuple[str, str] = tuple(data["handler"])
-
         context = AuthFlowContext(
             ip_address=ip_address(request.remote),  # type: ignore[arg-type]
             client_id=client_id,
