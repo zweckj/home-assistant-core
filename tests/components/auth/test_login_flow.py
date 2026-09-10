@@ -1,5 +1,6 @@
 """Tests for the login flow."""
 
+import asyncio
 from http import HTTPStatus
 from typing import Any
 from unittest.mock import patch
@@ -99,6 +100,22 @@ async def test_fetch_auth_providers_trusted_network(
     resp = await client.get("/auth/providers")
     assert resp.status == HTTPStatus.OK
     assert (await resp.json())["providers"] == expected
+
+
+async def test_fetch_auth_providers_skips_providers_that_cannot_start_login(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a provider that cannot be used right now is left off the list."""
+    client = await async_setup_auth(hass, aiohttp_client, BASE_CONFIG)
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider"
+        ".async_can_start_login",
+        return_value=False,
+    ):
+        resp = await client.get("/auth/providers")
+
+    assert resp.status == HTTPStatus.OK
+    assert (await resp.json())["providers"] == []
 
 
 async def test_fetch_auth_providers_onboarding(
@@ -370,6 +387,84 @@ async def test_login_exist_user_ip_changes(
     assert resp.status == 400
     response = await resp.json()
     assert response == {"message": "IP address changed"}
+
+
+@pytest.mark.parametrize(
+    ("flow_type", "expected"),
+    [("authorize", False), ("link_user", True), (None, False)],
+    ids=["authorize", "link-user", "default"],
+)
+async def test_login_flow_marks_account_linking(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    flow_type: str | None,
+    expected: bool,
+) -> None:
+    """Test the flow can tell an account link apart from a plain sign in."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    body = {
+        "client_id": CLIENT_ID,
+        "handler": ["insecure_example", None],
+        "redirect_uri": CLIENT_REDIRECT_URI,
+    }
+    if flow_type is not None:
+        body["type"] = flow_type
+
+    resp = await client.post("/auth/login_flow", json=body)
+
+    assert resp.status == HTTPStatus.OK
+    flow_id = (await resp.json())["flow_id"]
+
+    assert hass.auth.login_flow.async_get(flow_id)["context"]["link_user"] is expected
+
+
+async def test_concurrent_requests_cannot_advance_the_same_flow(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a second request gets a conflict rather than racing the first one."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    cred = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(cred)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    flow_id = (await resp.json())["flow_id"]
+
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    original_configure = hass.auth.login_flow.async_configure
+
+    async def slow_configure(*args: Any, **kwargs: Any) -> Any:
+        first_started.set()
+        await release_first.wait()
+        return await original_configure(*args, **kwargs)
+
+    body = {
+        "client_id": CLIENT_ID,
+        "username": "test-user",
+        "password": "test-pass",
+    }
+    with patch.object(hass.auth.login_flow, "async_configure", slow_configure):
+        first = asyncio.create_task(
+            client.post(f"/auth/login_flow/{flow_id}", json=body)
+        )
+        await first_started.wait()
+        second = await client.post(f"/auth/login_flow/{flow_id}", json=body)
+        release_first.set()
+        first_response = await first
+
+    assert second.status == HTTPStatus.CONFLICT
+    assert first_response.status == HTTPStatus.OK
+    assert (await first_response.json())["type"] == "create_entry"
 
 
 @pytest.mark.usefixtures("current_request_with_host")  # Has example.com host
