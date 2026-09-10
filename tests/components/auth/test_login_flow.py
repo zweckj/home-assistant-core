@@ -517,6 +517,36 @@ async def test_login_callback_rejects_a_flow_that_is_not_parked(
     assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "init"
 
 
+@pytest.mark.parametrize(
+    ("flow_type", "expected"),
+    [("authorize", False), ("link_user", True), (None, False)],
+    ids=["authorize", "link-user", "default"],
+)
+async def test_login_flow_marks_account_linking(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    flow_type: str | None,
+    expected: bool,
+) -> None:
+    """Test the flow can tell an account link apart from a plain sign in."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    body = {
+        "client_id": CLIENT_ID,
+        "handler": ["insecure_example", None],
+        "redirect_uri": CLIENT_REDIRECT_URI,
+    }
+    if flow_type is not None:
+        body["type"] = flow_type
+
+    resp = await client.post("/auth/login_flow", json=body)
+
+    assert resp.status == HTTPStatus.OK
+    flow_id = (await resp.json())["flow_id"]
+
+    assert hass.auth.login_flow.async_get(flow_id)["context"]["link_user"] is expected
+
+
 async def test_concurrent_requests_cannot_advance_the_same_flow(
     hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
 ) -> None:
@@ -1338,41 +1368,6 @@ async def test_login_callback_without_an_external_login(
     resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state=whatever")
 
     assert resp.status == 400
-
-
-@pytest.mark.parametrize(
-    ("flow_type", "expected"),
-    [("authorize", False), ("link_user", True), (None, False)],
-    ids=["authorize", "link-user", "default"],
-)
-async def test_login_flow_marks_account_linking(
-    hass: HomeAssistant,
-    aiohttp_client: ClientSessionGenerator,
-    aioclient_mock: AiohttpClientMocker,
-    flow_type: str | None,
-    expected: bool,
-) -> None:
-    """Test the flow can tell an account link apart from a plain sign in."""
-    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
-
-    body = {
-        "client_id": CLIENT_ID,
-        "handler": ["oidc", None],
-        "redirect_uri": CLIENT_REDIRECT_URI,
-    }
-    if flow_type is not None:
-        body["type"] = flow_type
-
-    with patch(
-        "homeassistant.auth.providers.oidc.get_url",
-        return_value="https://ha.example.com",
-    ):
-        resp = await client.post("/auth/login_flow", json=body)
-
-    assert resp.status == 200
-    flow_id = (await resp.json())["flow_id"]
-
-    assert hass.auth.login_flow.async_get(flow_id)["context"]["link_user"] is expected
 
 
 async def test_oidc_provider_hidden_until_configured(

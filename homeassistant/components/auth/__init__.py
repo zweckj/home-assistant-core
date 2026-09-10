@@ -525,6 +525,8 @@ def _create_auth_code_store(
             return None
 
         created, result, stored_purpose, cancel_expiration = stored
+        # A code minted to attach an identity must not buy tokens, and a login
+        # code must not silently attach an identity to whoever is signed in.
         if stored_purpose != purpose:
             return None
 

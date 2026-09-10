@@ -120,6 +120,7 @@ async def test_link_user_code_cannot_be_exchanged_for_tokens(
     )
     assert resp.status == HTTPStatus.BAD_REQUEST
 
+    # The refused exchange must not have burned the code.
     resp = await client.post(
         "/auth/link_user",
         json={"client_id": CLIENT_ID, "code": code},
@@ -159,6 +160,42 @@ async def test_link_user_invalid_code(
     resp = await client.post(
         "/auth/link_user",
         json={"client_id": CLIENT_ID, "code": "invalid"},
+        headers={"authorization": f"Bearer {info['access_token']}"},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert len(info["user"].credentials) == 0
+
+
+async def test_link_user_rejects_a_sign_in_code(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a code from a plain sign in cannot attach an identity."""
+    info = await async_get_code(hass, aiohttp_client)
+    client = info["client"]
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    sign_in_code = (await resp.json())["result"]
+
+    resp = await client.post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": sign_in_code},
         headers={"authorization": f"Bearer {info['access_token']}"},
     )
 

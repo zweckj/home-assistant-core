@@ -322,6 +322,8 @@ class LoginFlowBaseView(HomeAssistantView):
                 f"Login blocked: {user_access_error}", HTTPStatus.FORBIDDEN
             )
 
+        # Attaching an identity is not a sign in, so it must not clear the
+        # failed login counter for the address.
         if not link_user:
             process_success_login(request)
         # We overwrite the Credentials object with the string code to retrieve it.
