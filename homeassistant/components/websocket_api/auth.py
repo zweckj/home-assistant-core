@@ -3,6 +3,7 @@
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, Final
 
+from aiohttp import hdrs
 from aiohttp.web import Request
 import voluptuous as vol
 from voluptuous.humanize import humanize_error
@@ -77,6 +78,7 @@ class AuthPhase:
             self._request[KEY_HASS_USER],
             refresh_token=None,
             remote=self._request.remote,
+            origin=self._request.headers.get(hdrs.ORIGIN),
         )
         await self._send_bytes_text(AUTH_OK_MESSAGE)
         self._logger.debug("Auth OK (unix socket)")
@@ -111,10 +113,12 @@ class AuthPhase:
                 refresh_token.user,
                 refresh_token,
                 remote=self._request.remote,
+                origin=self._request.headers.get(hdrs.ORIGIN),
+                cancel_ws=self._cancel_ws,
             )
             conn.subscriptions["auth"] = (
                 self._hass.auth.async_register_revoke_token_callback(
-                    refresh_token.id, self._cancel_ws
+                    refresh_token.id, conn.async_auth_revoked
                 )
             )
             await self._send_bytes_text(AUTH_OK_MESSAGE)
