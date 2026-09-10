@@ -1532,6 +1532,51 @@ async def test_get_step_up_providers(mock_hass) -> None:
     assert manager.async_get_step_up_providers(user) == [hass_provider]
 
 
+async def test_external_state_is_signed(mock_hass) -> None:
+    """Test a tampered state parameter does not name a flow."""
+    manager = await auth.auth_manager_from_config(mock_hass, [], [])
+    state = manager.login_flow.async_encode_external_state("the-flow-id")
+
+    assert manager.login_flow.async_decode_external_state(state) == "the-flow-id"
+    assert manager.login_flow.async_decode_external_state(f"{state}x") is None
+    assert manager.login_flow.async_decode_external_state("not-a-token") is None
+
+
+async def test_external_state_expires(mock_hass) -> None:
+    """Test an old state parameter cannot be replayed."""
+    manager = await auth.auth_manager_from_config(mock_hass, [], [])
+    with patch("time.time", return_value=time.time() - 3600):
+        state = manager.login_flow.async_encode_external_state("the-flow-id")
+
+    assert manager.login_flow.async_decode_external_state(state) is None
+
+
+async def test_external_state_requires_expiration(mock_hass) -> None:
+    """Test a state without an explicit expiration is refused."""
+    manager = await auth.auth_manager_from_config(mock_hass, [], [])
+    state = jwt.encode(
+        {"flow_id": "the-flow-id"},
+        manager.login_flow._external_state_secret,
+        algorithm="HS256",
+    )
+
+    assert manager.login_flow.async_decode_external_state(state) is None
+
+
+async def test_a_flow_that_is_not_parked_is_not_awaiting_a_callback(mock_hass) -> None:
+    """Test only a flow stopped on an external step can be called back into."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    step = await manager.login_flow.async_init(("insecure_example", None))
+
+    assert step["type"] is data_entry_flow.FlowResultType.FORM
+    assert (
+        manager.login_flow.async_is_awaiting_external_callback(step["flow_id"]) is False
+    )
+    assert manager.login_flow.async_is_awaiting_external_callback("unknown") is False
+
+
 async def test_remove_refresh_tokens_for_credentials(mock_hass) -> None:
     """Test only the tokens issued for the given credentials are removed."""
     manager = await auth.auth_manager_from_config(

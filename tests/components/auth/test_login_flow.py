@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from homeassistant.auth.const import LOGIN_CALLBACK_PATH
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
 
@@ -387,6 +388,116 @@ async def test_login_exist_user_ip_changes(
     assert resp.status == 400
     response = await resp.json()
     assert response == {"message": "IP address changed"}
+
+
+async def test_login_flow_rejects_a_changed_client_id(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a flow cannot be finished for another client than it was started for."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    cred = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(cred)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": "https://other.example.com/",
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+
+    assert resp.status == 400
+    assert await resp.json() == {"message": "Client ID changed"}
+
+
+async def test_a_flow_without_an_external_step_gets_no_browser_cookie(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test only a login that leaves the browser is tied back to it."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+
+    assert step["type"] == "form"
+    assert f"hass_login_browser_{step['flow_id']}" not in resp.cookies
+
+
+@pytest.mark.parametrize(
+    ("query", "status"),
+    [
+        ("code=the-code", HTTPStatus.BAD_REQUEST),
+        ("code=the-code&state=not-a-token", HTTPStatus.BAD_REQUEST),
+    ],
+    ids=["no state", "unsigned state"],
+)
+async def test_login_callback_requires_a_state_we_signed(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    query: str,
+    status: HTTPStatus,
+) -> None:
+    """Test the callback refuses anything it cannot tie back to a login."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?{query}")
+
+    assert resp.status == status
+
+
+async def test_login_callback_rejects_an_unknown_flow(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a correctly signed state for a flow that is gone is refused."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    state = hass.auth.login_flow.async_encode_external_state("does-not-exist")
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
+
+    assert resp.status == HTTPStatus.NOT_FOUND
+
+
+async def test_login_callback_rejects_a_flow_that_is_not_parked(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a flow waiting on a form cannot be advanced through the callback."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    flow_id = (await resp.json())["flow_id"]
+    state = hass.auth.login_flow.async_encode_external_state(flow_id)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
+
+    assert resp.status == HTTPStatus.NOT_FOUND
+    assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "init"
 
 
 @pytest.mark.parametrize(
