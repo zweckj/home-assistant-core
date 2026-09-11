@@ -32,6 +32,10 @@ class AuthFlowContext(FlowContext, total=False):
     # through /auth/link_user rather than signing in with them.
     link_user: bool
     origin: str | None
+    # Set when a companion app runs a ceremony for its restore key, which is
+    # scoped to the relying party the app is associated with rather than to the
+    # origin the request came from.
+    restore: bool
 
 
 class AuthFlowResult(FlowResult[AuthFlowContext, tuple[str, str]], total=False):
