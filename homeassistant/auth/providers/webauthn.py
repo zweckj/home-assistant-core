@@ -72,8 +72,6 @@ DEFAULT_CREDENTIAL_NAME: Final = "Passkey"
 # The companion apps are associated with this domain through their app site
 # association files, so a passkey they create survives moving to a new device.
 RESTORE_RP_ID: Final = "my.home-assistant.io"
-# Pinned by the app site association files the companion apps ship against, so
-# an instance cannot widen who is allowed to create a restore key.
 RESTORE_ORIGINS: Final[list[str]] = [f"https://{RESTORE_RP_ID}"]
 
 
@@ -370,12 +368,7 @@ class WebAuthnProvider(AuthProvider):
     def _async_ceremony_relying_party(
         self, origin: str | None, restore: bool = False
     ) -> _RelyingParty:
-        """Return the relying party a ceremony runs for.
-
-        A restore key is registered against the fixed relying party the
-        companion apps are associated with, so it survives the user moving to a
-        new device. Browsers stay scoped to the instance's own origin.
-        """
+        """Return the relying party a ceremony runs for."""
         if restore or origin in RESTORE_ORIGINS:
             return _RelyingParty(RESTORE_RP_ID, RESTORE_ORIGINS)
 
