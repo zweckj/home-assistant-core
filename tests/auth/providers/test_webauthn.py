@@ -206,7 +206,7 @@ async def test_step_up_succeeds_with_the_users_passkey(
             STEP_UP_CONTEXT,
         )
 
-    verify.assert_awaited_once_with("assertion", b"challenge", ORIGIN)
+    verify.assert_awaited_once_with("assertion", b"challenge", ORIGIN, False)
     assert user.id not in provider._pending_step_up_challenges
 
 
@@ -311,7 +311,7 @@ async def test_login_flow_signs_in_against_the_browser_origin(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"] is credentials
-    verify.assert_awaited_once_with("assertion", ANY, ORIGIN)
+    verify.assert_awaited_once_with("assertion", ANY, ORIGIN, False)
     assert relying_party.call_args.args[1] == ORIGIN
 
 

@@ -369,7 +369,7 @@ class WebAuthnProvider(AuthProvider):
         self, origin: str | None, restore: bool = False
     ) -> _RelyingParty:
         """Return the relying party a ceremony runs for."""
-        if restore or origin in RESTORE_ORIGINS:
+        if restore:
             return _RelyingParty(RESTORE_RP_ID, RESTORE_ORIGINS)
 
         if origin is None:
@@ -500,12 +500,12 @@ class WebAuthnProvider(AuthProvider):
         await data.async_delete_user_credentials(credentials.data[CONF_USER_ID])
 
     async def async_start_authentication(
-        self, origin: str
+        self, origin: str | None, restore: bool = False
     ) -> PublicKeyCredentialRequestOptions:
         """Start the authentication process."""
 
         options = generate_authentication_options(
-            rp_id=self._async_ceremony_relying_party(origin).id,
+            rp_id=self._async_ceremony_relying_party(origin, restore).id,
             user_verification=UserVerificationRequirement.REQUIRED,
             timeout=SIGN_IN_TIMEOUT_MS,
         )
@@ -513,7 +513,11 @@ class WebAuthnProvider(AuthProvider):
         return options
 
     async def async_verify_authentication(
-        self, credential: str | dict[str, Any], challenge: bytes, origin: str
+        self,
+        credential: str | dict[str, Any],
+        challenge: bytes,
+        origin: str | None,
+        restore: bool = False,
     ) -> str:
         """Complete the authentication process and return the ID of the user."""
 
@@ -531,7 +535,7 @@ class WebAuthnProvider(AuthProvider):
             raise InvalidAuthError("Invalid user handle.") from err
 
         data = await self._async_get_data()
-        relying_party = self._async_ceremony_relying_party(origin)
+        relying_party = self._async_ceremony_relying_party(origin, restore)
 
         registration = data.get_credential(user_id, parsed.id)
         if registration is None:
@@ -567,12 +571,11 @@ class WebAuthnProvider(AuthProvider):
         self, user: User, context: AuthFlowContext | None
     ) -> dict[str, Any]:
         """Return the options the client needs to build a passkey proof."""
-        origin = context.get("origin") if context else None
-        if origin is None:
-            raise InvalidAuthError("No origin to run a WebAuthn ceremony for.")
-
         data = await self._async_get_data()
-        relying_party = self._async_ceremony_relying_party(origin)
+        relying_party = self._async_ceremony_relying_party(
+            context.get("origin") if context else None,
+            context.get("restore", False) if context else False,
+        )
         options = generate_authentication_options(
             rp_id=relying_party.id,
             # The user is known here, so only their own passkeys are offered.
@@ -594,7 +597,8 @@ class WebAuthnProvider(AuthProvider):
     ) -> None:
         """Verify a passkey proof from an already signed in user."""
         origin = context.get("origin") if context else None
-        if origin is None:
+        restore = context.get("restore", False) if context else False
+        if origin is None and not restore:
             raise InvalidStepUpError("No origin to verify a passkey against.")
 
         challenge = self._pending_step_up_challenges.pop(user.id, None)
@@ -608,7 +612,7 @@ class WebAuthnProvider(AuthProvider):
 
         try:
             verified_user_id = await self.async_verify_authentication(
-                credential, challenge[0], origin
+                credential, challenge[0], origin, restore
             )
         except InvalidAuthError as err:
             raise InvalidStepUpError("Passkey step up failed.") from err
@@ -721,7 +725,9 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
 
         errors: dict[str, str] = {}
         # Client supplied, so the origin is checked again for every ceremony.
-        if (origin := self.context.get("origin")) is None:
+        origin = self.context.get("origin")
+        restore = self.context.get("restore", False)
+        if origin is None and not restore:
             return self.async_abort(reason="missing_origin")
 
         if user_input is not None:
@@ -736,6 +742,7 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
                         user_input[CONF_AUTHENTICATION_CREDENTIAL],
                         self._challenge,
                         origin,
+                        restore,
                     )
                     credentials = (
                         await self._auth_provider.async_get_or_create_credentials(
@@ -749,7 +756,9 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
                     return await self.async_finish(credentials)
 
         try:
-            options = await self._auth_provider.async_start_authentication(origin)
+            options = await self._auth_provider.async_start_authentication(
+                origin, restore
+            )
         except InvalidAuthError as err:
             _LOGGER.debug("Cannot offer a passkey login: %s", err)
             return self.async_abort(reason="invalid_origin")
