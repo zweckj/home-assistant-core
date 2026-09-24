@@ -298,7 +298,6 @@ class HassAuthProvider(AuthProvider):
     def async_get_username(self, user: User) -> str | None:
         """Return the username the user is known by with this provider."""
         for credential in user.credentials:
-            # Mirrors async_credentials; the id is always None for this provider.
             if (
                 credential.auth_provider_type == self.type
                 and credential.auth_provider_id == self.id

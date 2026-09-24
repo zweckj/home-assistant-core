@@ -418,8 +418,7 @@ class LoginFlowResourceView(LoginFlowBaseView):
     ) -> None:
         """Initialize the login flow resource view."""
         super().__init__(flow_mgr, store_result)
-        # A flow may only be advanced one request at a time; a second concurrent
-        # request gets a conflict rather than racing the first one.
+        # A concurrent request for the same flow gets a conflict instead of racing.
         self._flows_in_progress: set[str] = set()
 
     async def get(self, request: web.Request) -> web.Response:
