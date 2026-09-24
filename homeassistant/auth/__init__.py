@@ -80,8 +80,7 @@ async def auth_manager_from_config(
         key = (provider.type, provider.id)
         provider_hash[key] = provider
 
-    # A provider that cannot initialize must not keep the rest of the auth
-    # system, and with it every way into the instance, from coming up.
+    # A broken provider must not take every other way into the instance with it.
     results = await asyncio.gather(
         *(provider.async_initialize() for provider in providers),
         return_exceptions=True,
@@ -128,11 +127,7 @@ class AuthManagerFlowManager(
 
     @callback
     def async_encode_external_state(self, flow_id: str) -> str:
-        """Return a signed state parameter that names a login flow.
-
-        A flow that sends the browser to an external party has to recognize it
-        again when it comes back, without trusting what the browser carries.
-        """
+        """Return a signed, expiring state parameter that names a login flow."""
         return jwt.encode(
             {"flow_id": flow_id, "exp": int(time.time()) + LOGIN_STATE_EXPIRATION},
             self._external_state_secret,
@@ -157,7 +152,7 @@ class AuthManagerFlowManager(
 
     @callback
     def async_is_awaiting_external_callback(self, flow_id: str) -> bool:
-        """Return if the flow is parked waiting to be called back into."""
+        """Return if the flow is waiting on an external step."""
         return (
             (flow := self._progress.get(flow_id)) is not None
             and flow.cur_step is not None
@@ -240,8 +235,7 @@ class AuthManager:
         self._providers = providers
         self._mfa_modules = mfa_modules
         self.login_flow = AuthManagerFlowManager(hass, self)
-        # Serializes the check that a credential is still new, so two logins
-        # racing on the same one cannot both create a user.
+        # Stops two logins racing on one new credential from creating two users.
         self._credential_lock = asyncio.Lock()
         self._revoke_callbacks: dict[str, set[CALLBACK_TYPE]] = {}
         self._expire_callback: CALLBACK_TYPE | None = None
@@ -484,21 +478,11 @@ class AuthManager:
     def async_has_other_login_method(
         self, user: models.User, *credentials: models.Credentials
     ) -> bool:
-        """Test if the user can still log in without the given credentials.
-
-        Credentials of a provider that is no longer configured, or that only
-        works from certain places, cannot be relied on to log back in, so they
-        do not count as a login method.
-        """
-        removed = {removed_credentials.id for removed_credentials in credentials}
+        """Test if the user can still log in without the given credentials."""
+        removed = {credential.id for credential in credentials}
         return any(
             credential.id not in removed
-            and (
-                provider := self.get_auth_provider(
-                    credential.auth_provider_type, credential.auth_provider_id
-                )
-            )
-            is not None
+            and (provider := self._async_get_auth_provider(credential)) is not None
             and provider.async_can_login_with_credentials(credential)
             for credential in user.credentials
         )
@@ -506,12 +490,10 @@ class AuthManager:
     async def async_remove_refresh_tokens_for_credentials(
         self, credentials: models.Credentials
     ) -> None:
-        """Remove every refresh token that was issued for these credentials.
+        """Remove every refresh token issued for these credentials.
 
-        Refusing to issue new tokens is not revocation, so a provider that ends
-        a session has to take the tokens it already handed out with it. Tokens
-        are matched on the credentials they were issued for rather than on who
-        holds them, so this still works once the credentials are detached.
+        Matches on the credentials each token was issued for, so this still works
+        after the credentials were detached from their user.
         """
         for user in await self.async_get_users():
             for refresh_token in list(user.refresh_tokens.values()):

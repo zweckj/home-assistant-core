@@ -29,11 +29,9 @@ class AuthFlowContext(FlowContext, total=False):
     ip_address: IPv4Address | IPv6Address
     client_id: str
     redirect_uri: str
-    # Set when a signed in user is attaching these credentials to their account
-    # through /auth/link_user rather than signing in with them.
+    # Attaching credentials to the signed in user via /auth/link_user.
     link_user: bool
-    # Ties an external step to the browser that started it, so a login cannot be
-    # completed in a browser other than the one it began in.
+    # Binds an external step to the browser that started it.
     browser_token: str
 
 
