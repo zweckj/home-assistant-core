@@ -42,19 +42,34 @@ def async_setup(hass: HomeAssistant) -> bool:
     return True
 
 
-def _https_url(value: str) -> str:
-    """Validate that a URL is https and has no query or fragment."""
+def _issuer_url(value: str) -> str:
+    """Validate an issuer URL, leaving the scheme to the transport setting."""
     try:
         url = URL(value)
     except ValueError as err:
-        raise vol.Invalid("must be an https URL") from err
-    if url.scheme != "https" or not url.host:
-        raise vol.Invalid("must be an https URL")
+        raise vol.Invalid("must be an http or https URL") from err
+    if url.scheme not in ("https", "http") or not url.host:
+        raise vol.Invalid("must be an http or https URL")
     if url.user is not None:
         raise vol.Invalid("must not contain credentials")
     if url.query_string or url.fragment:
         raise vol.Invalid("must not contain a query or fragment")
     return value
+
+
+@callback
+def _insecure_issuer(
+    connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> bool:
+    """Report back an http issuer the administrator did not allow."""
+    if msg["allow_insecure_transport"] or URL(msg["issuer"]).scheme == "https":
+        return False
+    connection.send_error(
+        msg["id"],
+        "insecure_transport",
+        "The issuer must be an https URL unless insecure transport is allowed",
+    )
+    return True
 
 
 def _scopes(value: list[str]) -> list[str]:
@@ -74,7 +89,7 @@ def _name(value: Any) -> str | None:
 
 
 CONFIG_SCHEMA: VolDictType = {
-    vol.Required("issuer"): vol.All(str, _https_url),
+    vol.Required("issuer"): vol.All(str, _issuer_url),
     vol.Required("client_id"): str,
     vol.Optional("client_secret"): vol.Any(str, None),
     vol.Optional("name", default=None): _name,
@@ -85,6 +100,7 @@ CONFIG_SCHEMA: VolDictType = {
     vol.Optional("display_name_claim", default=DEFAULT_DISPLAY_NAME_CLAIM): str,
     vol.Optional("admin_group", default=DEFAULT_ADMIN_GROUP): vol.Any(str, None),
     vol.Optional("allow_auto_create", default=False): bool,
+    vol.Optional("allow_insecure_transport", default=False): bool,
     vol.Optional("revalidate_interval"): vol.All(
         int, vol.Range(min=MIN_REVALIDATE_INTERVAL, max=MAX_REVALIDATE_INTERVAL)
     ),
@@ -149,6 +165,7 @@ def _config_to_dict(config: OidcConfig | None) -> dict[str, Any] | None:
         "display_name_claim": config.display_name_claim,
         "admin_group": config.admin_group,
         "allow_auto_create": config.allow_auto_create,
+        "allow_insecure_transport": config.allow_insecure_transport,
         "revalidate_interval": config.revalidate_interval,
     }
 
@@ -198,6 +215,9 @@ async def websocket_update(
     if (provider := _async_provider(hass, connection, msg)) is None:
         return
 
+    if _insecure_issuer(connection, msg):
+        return
+
     current = provider.oidc_config if provider.is_configured else None
 
     # Leaving these out of the message keeps the stored values, so the UI never
@@ -228,6 +248,7 @@ async def websocket_update(
         display_name_claim=msg["display_name_claim"],
         admin_group=msg["admin_group"],
         allow_auto_create=msg["allow_auto_create"],
+        allow_insecure_transport=msg["allow_insecure_transport"],
         revalidate_interval=revalidate_interval,
     )
 
@@ -309,9 +330,10 @@ async def websocket_unlink(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "config/auth_provider/oidc/test",
-        vol.Required("issuer"): vol.All(str, _https_url),
+        vol.Required("issuer"): vol.All(str, _issuer_url),
         vol.Required("client_id"): str,
         vol.Optional("client_secret"): vol.Any(str, None),
+        vol.Optional("allow_insecure_transport", default=False): bool,
     }
 )
 @websocket_api.require_admin
@@ -322,11 +344,15 @@ async def websocket_test(
     msg: dict[str, Any],
 ) -> None:
     """Fetch the discovery document so the UI can report on it."""
+    if _insecure_issuer(connection, msg):
+        return
+
     client = OidcClient(
         hass,
         issuer=msg["issuer"],
         client_id=msg["client_id"],
         client_secret=msg.get("client_secret"),
+        allow_insecure_transport=msg["allow_insecure_transport"],
     )
 
     try:

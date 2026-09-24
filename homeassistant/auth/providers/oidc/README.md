@@ -88,6 +88,7 @@ Ending a session removes it and every Home Assistant token derived from it, thro
 - Every discovery endpoint must be HTTPS, including `userinfo_endpoint` and `revocation_endpoint`, which carry bearer and refresh tokens.
 - No outbound request follows redirects: a redirect defeats the HTTPS check, and a 307 or 308 from the token endpoint would replay the client secret.
 - The browser flow itself must be HTTPS unless the request arrived over the internal URL, since the tokens it carries are as exposed as the ones on the back channel.
+- An administrator can waive all three HTTPS rules with `allow_insecure_transport`, for an identity provider on a trusted network that cannot be given a certificate. It only relaxes the scheme: endpoints still need a host and may not carry credentials or a fragment. Toggling it is a trust change, so it ends every existing OIDC session.
 - The discovery issuer must match the configured issuer exactly. A trailing slash is part of the identifier, so accepting either spelling would weaken issuer binding.
 - PKCE is always `S256`. A provider advertising challenge methods without it is refused rather than downgraded to `plain`.
 - Token responses must be labelled `Bearer`, compared case insensitively, because the access token is sent to userinfo as a bearer.

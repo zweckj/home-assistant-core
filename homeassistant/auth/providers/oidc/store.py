@@ -57,14 +57,19 @@ class OidcConfig:
     admin_group: str | None = DEFAULT_ADMIN_GROUP
     allow_auto_create: bool = False
     revalidate_interval: int = DEFAULT_REVALIDATE_INTERVAL
+    allow_insecure_transport: bool = False
 
     @property
-    def trust_key(self) -> tuple[str, str, str | None, tuple[str, ...], str | None]:
+    def trust_key(
+        self,
+    ) -> tuple[str, str, str | None, tuple[str, ...], str | None, bool]:
         """Return the fields an existing session is only meaningful under.
 
         Who issued it, and the group that decided what it was allowed to do. A
         change to the mapping is an authorization change, so the grants made
-        under the old one are not carried over.
+        under the old one are not carried over. Relaxing or tightening transport
+        security changes what a session could have been exposed to, so it
+        counts too.
         """
         return (
             self.issuer,
@@ -72,6 +77,7 @@ class OidcConfig:
             self.client_secret,
             tuple(self.scopes),
             self.admin_group,
+            self.allow_insecure_transport,
         )
 
     def username_from(self, claims: Mapping[str, Any]) -> str | None:
@@ -138,6 +144,7 @@ def _config_from_dict(data: Any) -> OidcConfig:
         or not isinstance(config.display_name_claim, str)
         or not (config.admin_group is None or isinstance(config.admin_group, str))
         or type(config.allow_auto_create) is not bool
+        or type(config.allow_insecure_transport) is not bool
         or type(config.revalidate_interval) is not int
         or not MIN_REVALIDATE_INTERVAL
         <= config.revalidate_interval

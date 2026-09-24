@@ -201,6 +201,56 @@ async def test_discovery_requires_https(
 
 
 @pytest.mark.parametrize(
+    "field",
+    [
+        "authorization_endpoint",
+        "token_endpoint",
+        "jwks_uri",
+        "userinfo_endpoint",
+        "revocation_endpoint",
+    ],
+)
+async def test_discovery_allows_http_when_insecure_transport_is_allowed(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, field: str
+) -> None:
+    """Test an administrator can let the provider use plain http endpoints."""
+    value = f"http://idp.example.com/{field}"
+    aioclient_mock.get(DISCOVERY_URL, json=discovery_document(**{field: value}))
+    client = OidcClient(
+        hass, issuer=ISSUER, client_id=CLIENT_ID, allow_insecure_transport=True
+    )
+
+    metadata = await client.async_metadata()
+
+    assert getattr(metadata, field) == value
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("token_endpoint", "http://user:password@idp.example.com/token"),
+        ("jwks_uri", "http://idp.example.com/jwks#keys"),
+        ("authorization_endpoint", "ftp://idp.example.com/authorize"),
+    ],
+    ids=["embedded-credentials", "fragment", "other-scheme"],
+)
+async def test_insecure_transport_keeps_the_other_endpoint_rules(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    field: str,
+    value: str,
+) -> None:
+    """Test allowing http does not let through anything else."""
+    aioclient_mock.get(DISCOVERY_URL, json=discovery_document(**{field: value}))
+    client = OidcClient(
+        hass, issuer=ISSUER, client_id=CLIENT_ID, allow_insecure_transport=True
+    )
+
+    with pytest.raises(OidcDiscoveryError):
+        await client.async_metadata()
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("token_endpoint", "https://user:password@idp.example.com/token"),
@@ -2756,6 +2806,61 @@ async def test_login_refuses_plain_http_reachable_from_outside(
     assert result["reason"] == "insecure_transport"
 
 
+@pytest.mark.usefixtures("mock_idp")
+async def test_login_over_plain_http_when_insecure_transport_is_allowed(
+    manager: auth.AuthManager, provider: oidc_auth.OidcAuthProvider
+) -> None:
+    """Test an administrator can waive HTTPS for an install they trust."""
+    await provider.async_set_config(
+        OidcConfig(
+            issuer=ISSUER,
+            client_id=CLIENT_ID,
+            allow_auto_create=True,
+            allow_insecure_transport=True,
+        )
+    )
+
+    result = await _start_login(manager, "http://ha.example.com", internal=False)
+
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+
+
+@pytest.mark.usefixtures("mock_idp")
+async def test_changing_transport_security_ends_sessions(
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+) -> None:
+    """Test sessions made under one transport setting do not outlive it."""
+    user = await manager.async_create_user("Alice")
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await manager.async_link_user(user, credentials)
+    await provider.async_record_session(
+        credential_id=credentials.id,
+        claims={"sub": SUBJECT},
+        tokens=oidc_auth.TokenResponse(access_token="at", refresh_token="rt"),
+    )
+    refresh_token = await manager.async_create_refresh_token(
+        user, "https://ha.example.com/", credential=credentials
+    )
+    old_client = provider.async_client()
+
+    await provider.async_set_config(
+        OidcConfig(
+            issuer=ISSUER,
+            client_id=CLIENT_ID,
+            allow_auto_create=True,
+            allow_insecure_transport=True,
+        )
+    )
+
+    assert provider.data.sessions == {}
+    assert manager.async_get_refresh_token(refresh_token.id) is None
+    # The client enforces the setting, so it has to be rebuilt with it.
+    new_client = provider.async_client()
+    assert new_client is not old_client
+    assert new_client.allow_insecure_transport is True
+
+
 @pytest.mark.parametrize(
     ("url", "internal"),
     [
@@ -2787,6 +2892,13 @@ async def test_login_starts_over_a_usable_transport(
         {"config": []},
         {"config": {"issuer": 1, "client_id": CLIENT_ID}},
         {
+            "config": {
+                "issuer": ISSUER,
+                "client_id": CLIENT_ID,
+                "allow_insecure_transport": "yes",
+            }
+        },
+        {
             "config": {"issuer": 1, "client_id": CLIENT_ID},
             "sessions": {
                 "credential-id": {
@@ -2813,6 +2925,7 @@ async def test_login_starts_over_a_usable_transport(
         "root",
         "config-container",
         "config-field",
+        "insecure-transport-not-a-bool",
         "config-field-with-session",
         "sessions-container",
         "session-container",

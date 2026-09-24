@@ -147,14 +147,15 @@ class TokenResponse:
     refresh_token: str | None = None
 
 
-def _require_https(url: str, field: str) -> str:
+def _require_https(url: str, field: str, *, allow_http: bool = False) -> str:
     """Return an unambiguous HTTPS endpoint URL."""
+    schemes = {"https", "http"} if allow_http else {"https"}
     try:
         parsed = URL(url)
     except (TypeError, ValueError) as err:
         raise OidcDiscoveryError(f"{field} must be an https URL") from err
     if (
-        parsed.scheme != "https"
+        parsed.scheme not in schemes
         or not parsed.host
         or parsed.user is not None
         or parsed.fragment
@@ -165,13 +166,13 @@ def _require_https(url: str, field: str) -> str:
     return url
 
 
-def _optional_https(url: Any, field: str) -> str | None:
+def _optional_https(url: Any, field: str, *, allow_http: bool = False) -> str | None:
     """Return an optional endpoint, rejecting anything that is not HTTPS."""
     if url is None:
         return None
     if not isinstance(url, str):
         raise OidcDiscoveryError(f"{field} is not a URL")
-    return _require_https(url, field)
+    return _require_https(url, field, allow_http=allow_http)
 
 
 def _string_tuple(value: Any, field: str) -> tuple[str, ...]:
@@ -193,12 +194,14 @@ class OidcClient:
         issuer: str,
         client_id: str,
         client_secret: str | None = None,
+        allow_insecure_transport: bool = False,
     ) -> None:
         """Initialize the client."""
         self.hass = hass
         self.issuer = issuer
         self.client_id = client_id
         self.client_secret = client_secret
+        self.allow_insecure_transport = allow_insecure_transport
 
         self._metadata: ProviderMetadata | None = None
         self._metadata_fetched_at = 0.0
@@ -250,23 +253,32 @@ class OidcClient:
                 f" challenge method, it only offers {', '.join(challenge_methods)}"
             )
 
+        allow_http = self.allow_insecure_transport
         try:
             return ProviderMetadata(
                 issuer=advertised,
                 authorization_endpoint=_require_https(
-                    document["authorization_endpoint"], "authorization_endpoint"
+                    document["authorization_endpoint"],
+                    "authorization_endpoint",
+                    allow_http=allow_http,
                 ),
                 token_endpoint=_require_https(
-                    document["token_endpoint"], "token_endpoint"
+                    document["token_endpoint"], "token_endpoint", allow_http=allow_http
                 ),
-                jwks_uri=_require_https(document["jwks_uri"], "jwks_uri"),
+                jwks_uri=_require_https(
+                    document["jwks_uri"], "jwks_uri", allow_http=allow_http
+                ),
                 # Both carry credentials, so they get the same treatment as the
                 # endpoints the spec makes mandatory.
                 userinfo_endpoint=_optional_https(
-                    document.get("userinfo_endpoint"), "userinfo_endpoint"
+                    document.get("userinfo_endpoint"),
+                    "userinfo_endpoint",
+                    allow_http=allow_http,
                 ),
                 revocation_endpoint=_optional_https(
-                    document.get("revocation_endpoint"), "revocation_endpoint"
+                    document.get("revocation_endpoint"),
+                    "revocation_endpoint",
+                    allow_http=allow_http,
                 ),
                 id_token_signing_alg_values_supported=_string_tuple(
                     document.get("id_token_signing_alg_values_supported"),

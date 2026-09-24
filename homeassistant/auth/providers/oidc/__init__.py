@@ -235,6 +235,7 @@ class OidcAuthProvider(AuthProvider):
                 issuer=config.issuer,
                 client_id=config.client_id,
                 client_secret=config.client_secret,
+                allow_insecure_transport=config.allow_insecure_transport,
             )
 
         return self._client
@@ -246,10 +247,15 @@ class OidcAuthProvider(AuthProvider):
         A login carries the identity provider's authorization code and, on the
         way back, Home Assistant's own tokens through the browser. Anything
         reachable from outside therefore has to be HTTPS; the internal URL is
-        left alone so a local install keeps working over plain HTTP.
+        left alone so a local install keeps working over plain HTTP. An
+        administrator can waive this for an install they know is not exposed.
         """
         url = get_url(self.hass, require_current_request=True)
-        if not url.startswith("https://") and not is_internal_request(self.hass):
+        if (
+            not url.startswith("https://")
+            and not self.oidc_config.allow_insecure_transport
+            and not is_internal_request(self.hass)
+        ):
             raise OidcInsecureTransportError(
                 f"Signing in through {url} would expose the tokens, use HTTPS"
             )

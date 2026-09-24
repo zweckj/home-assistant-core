@@ -227,19 +227,19 @@ async def test_update_clears_secret_when_null(
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"issuer": "http://idp.example.com"},
         {"issuer": "idp.example.com"},
         {"issuer": "https://"},
         {"issuer": "https://user:password@idp.example.com"},
+        {"issuer": "ftp://idp.example.com"},
         {"subject_claim": "email"},
         {"scopes": ["profile"]},
         {"revalidate_interval": 10},
     ],
     ids=[
-        "plain-http",
         "not-a-url",
         "missing-host",
         "embedded-credentials",
+        "other-scheme",
         "custom-subject",
         "without-openid-scope",
         "interval-too-short",
@@ -256,6 +256,43 @@ async def test_update_rejects_invalid_configuration(
 
     assert not result["success"]
     assert result["error"]["code"] == "invalid_format"
+
+
+async def test_update_refuses_a_plain_http_issuer(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+) -> None:
+    """Test an http issuer needs the administrator to allow insecure transport."""
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        MINIMAL_UPDATE | {"issuer": "http://idp.example.com"}
+    )
+
+    result = await client.receive_json()
+
+    assert not result["success"]
+    assert result["error"]["code"] == "insecure_transport"
+    assert not oidc_provider.is_configured
+
+
+async def test_update_allows_a_plain_http_issuer_when_opted_out(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+) -> None:
+    """Test an administrator can run the provider over plain http."""
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        MINIMAL_UPDATE
+        | {"issuer": "http://idp.example.com", "allow_insecure_transport": True}
+    )
+
+    result = await client.receive_json()
+
+    assert result["success"]
+    assert result["result"]["config"]["allow_insecure_transport"] is True
+    assert oidc_provider.oidc_config.allow_insecure_transport is True
 
 
 async def test_delete(
@@ -320,6 +357,29 @@ async def test_test_reports_failure(
 
     assert not result["success"]
     assert result["error"]["code"] == "discovery_failed"
+
+
+async def test_test_refuses_a_plain_http_issuer(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test probing an http issuer needs insecure transport to be allowed."""
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "config/auth_provider/oidc/test",
+            "issuer": "http://idp.example.com",
+            "client_id": CLIENT_ID,
+        }
+    )
+
+    result = await client.receive_json()
+
+    assert not result["success"]
+    assert result["error"]["code"] == "insecure_transport"
+    # Refused before anything was sent to the identity provider.
+    assert aioclient_mock.call_count == 0
 
 
 @pytest.mark.parametrize(
