@@ -127,11 +127,7 @@ class AuthManagerFlowManager(
 
     @callback
     def async_encode_external_state(self, flow_id: str) -> str:
-        """Return a signed state parameter that names a login flow.
-
-        A flow that sends the browser to an external party has to recognize it
-        again when it comes back, without trusting what the browser carries.
-        """
+        """Return a signed, expiring state parameter that names a login flow."""
         return jwt.encode(
             {"flow_id": flow_id, "exp": int(time.time()) + LOGIN_STATE_EXPIRATION},
             self._external_state_secret,
@@ -156,7 +152,7 @@ class AuthManagerFlowManager(
 
     @callback
     def async_is_awaiting_external_callback(self, flow_id: str) -> bool:
-        """Return if the flow is parked waiting to be called back into."""
+        """Return if the flow is waiting on an external step."""
         return (
             (flow := self._progress.get(flow_id)) is not None
             and flow.cur_step is not None

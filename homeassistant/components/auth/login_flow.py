@@ -104,14 +104,41 @@ if TYPE_CHECKING:
 
 BROWSER_TOKEN_COOKIE_PREFIX = "hass_login_browser_"
 AUTH_COOKIE_PATH = "/auth"
-# The cookie has to outlive the detour, so it follows the state it guards.
-BROWSER_TOKEN_EXPIRATION = LOGIN_STATE_EXPIRATION
 
 
 @callback
 def _browser_token_cookie(flow_id: str) -> str:
     """Return the browser-token cookie name for a login flow."""
     return f"{BROWSER_TOKEN_COOKIE_PREFIX}{flow_id}"
+
+
+@callback
+def _set_browser_token(
+    request: web.Request, response: web.StreamResponse, flow_id: str, token: str
+) -> None:
+    """Tie the browser to a flow that leaves it for an external step."""
+    response.set_cookie(
+        _browser_token_cookie(flow_id),
+        token,
+        max_age=LOGIN_STATE_EXPIRATION,
+        httponly=True,
+        secure=request.secure,
+        # Strict would drop the cookie on the top level navigation back.
+        samesite="Lax",
+        path=AUTH_COOKIE_PATH,
+    )
+
+
+@callback
+def _has_browser_token(request: web.Request, flow: AuthFlowResult) -> bool:
+    """Return if the request comes from the browser that started the flow."""
+    expected = flow["context"].get("browser_token")
+    presented = request.cookies.get(_browser_token_cookie(flow["flow_id"]))
+    return (
+        expected is not None
+        and presented is not None
+        and hmac.compare_digest(expected, presented)
+    )
 
 
 @callback
@@ -385,21 +412,11 @@ class LoginFlowIndexView(LoginFlowBaseView):
 
         response = await self._async_flow_result_to_response(request, client_id, result)
 
-        # Only an external step leaves the browser, and only then does the flow
-        # have to be tied back to it when it returns.
         if result["type"] is data_entry_flow.FlowResultType.EXTERNAL_STEP:
-            # The flow has already run its first step, which must not read this.
-            browser_token = context["browser_token"] = secrets.token_urlsafe(32)
-            response.set_cookie(
-                _browser_token_cookie(result["flow_id"]),
-                browser_token,
-                max_age=BROWSER_TOKEN_EXPIRATION,
-                httponly=True,
-                secure=request.secure,
-                # The external party sends the user back with a top level
-                # navigation, which strict same site would strip the cookie from.
-                samesite="Lax",
-                path=AUTH_COOKIE_PATH,
+            # Set after the first step ran, so that step cannot read it.
+            context["browser_token"] = secrets.token_urlsafe(32)
+            _set_browser_token(
+                request, response, result["flow_id"], context["browser_token"]
             )
 
         return response
@@ -448,15 +465,12 @@ class LoginFlowResourceView(LoginFlowBaseView):
                 return self.json_message("IP address changed", HTTPStatus.BAD_REQUEST)
             if flow["context"].get("client_id") != client_id:
                 return self.json_message("Client ID changed", HTTPStatus.BAD_REQUEST)
-            if (expected_token := flow["context"].get("browser_token")) is not None:
+            if "browser_token" in flow["context"]:
                 if self._flow_mgr.async_is_awaiting_external_callback(flow_id):
                     return self.json_message(
                         "External callback required", HTTPStatus.BAD_REQUEST
                     )
-                presented_token = request.cookies.get(_browser_token_cookie(flow_id))
-                if presented_token is None or not hmac.compare_digest(
-                    expected_token, presented_token
-                ):
+                if not _has_browser_token(request, flow):
                     return self.json_message(
                         "Login was not started in this browser",
                         HTTPStatus.BAD_REQUEST,
@@ -513,8 +527,6 @@ class LoginFlowCallbackView(HomeAssistantView):
         if (state := request.query.get("state")) is None:
             return self.json_message("Missing state parameter", HTTPStatus.BAD_REQUEST)
 
-        # The state is signed by Home Assistant, so a tampered or expired one
-        # never reaches a flow.
         if (flow_id := self._flow_mgr.async_decode_external_state(state)) is None:
             return self.json_message("Invalid state parameter", HTTPStatus.BAD_REQUEST)
 
@@ -535,16 +547,8 @@ class LoginFlowCallbackView(HomeAssistantView):
         if flow["context"]["ip_address"] != remote_address:
             return self.json_message("IP address changed", HTTPStatus.BAD_REQUEST)
 
-        # The state alone only proves the flow existed. Tying it to a cookie set
-        # when the flow started means a login cannot be finished in a browser
-        # other than the one that began it.
-        expected_token = flow["context"].get("browser_token")
-        presented_token = request.cookies.get(_browser_token_cookie(flow_id))
-        if (
-            not expected_token
-            or not presented_token
-            or not hmac.compare_digest(expected_token, presented_token)
-        ):
+        # The signed state only proves the flow exists, not who started it.
+        if not _has_browser_token(request, flow):
             return self.json_message(
                 "Login was not started in this browser", HTTPStatus.BAD_REQUEST
             )
@@ -556,13 +560,10 @@ class LoginFlowCallbackView(HomeAssistantView):
         ):
             return self.json_message("Invalid redirect URI", HTTPStatus.FORBIDDEN)
 
-        # Verifying the redirect URI awaited, so the flow may have been advanced
-        # by a concurrent callback in the meantime.
+        # The redirect URI check awaited, so a concurrent callback may have won.
         if not self._flow_mgr.async_is_awaiting_external_callback(flow_id):
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
 
-        # What the external party sends back is the provider's business; the
-        # step it resumes decides what it accepts.
         user_input = {
             key: value for key, value in request.query.items() if key != "state"
         }
@@ -585,15 +586,6 @@ class LoginFlowCallbackView(HomeAssistantView):
         response = web.Response(
             status=HTTPStatus.FOUND, headers={"location": str(location)}
         )
-        # The finish step still needs the cookie, so give it a fresh budget
-        # rather than whatever is left after the detour to the external party.
-        response.set_cookie(
-            _browser_token_cookie(flow_id),
-            presented_token,
-            max_age=BROWSER_TOKEN_EXPIRATION,
-            httponly=True,
-            secure=request.secure,
-            samesite="Lax",
-            path=AUTH_COOKIE_PATH,
-        )
+        # Renewed so the finish step does not inherit the time spent away.
+        _set_browser_token(request, response, flow_id, flow["context"]["browser_token"])
         return response
