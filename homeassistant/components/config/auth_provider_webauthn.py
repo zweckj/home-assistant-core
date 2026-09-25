@@ -3,7 +3,7 @@
 from dataclasses import asdict
 from typing import Any
 
-import voluptuous as vol
+import probatio
 from webauthn.helpers.options_to_json_dict import options_to_json_dict
 from webauthn.helpers.structs import PublicKeyCredentialCreationOptions
 
@@ -49,7 +49,7 @@ def _async_provider(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "config/auth_provider/webauthn/list",
+        probatio.Required("type"): "config/auth_provider/webauthn/list",
     }
 )
 @websocket_api.async_response
@@ -71,8 +71,8 @@ async def websocket_list(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "config/auth_provider/webauthn/register",
-        vol.Optional("restore", default=False): bool,
+        probatio.Required("type"): "config/auth_provider/webauthn/register",
+        probatio.Optional("restore", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -109,10 +109,10 @@ async def websocket_register(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "config/auth_provider/webauthn/register_verify",
-        vol.Required("credential"): object,
-        vol.Optional("name"): str,
-        vol.Optional("restore", default=False): bool,
+        probatio.Required("type"): "config/auth_provider/webauthn/register_verify",
+        probatio.Required("credential"): object,
+        probatio.Optional("name"): str,
+        probatio.Optional("restore", default=False): bool,
     },
 )
 @websocket_api.async_response
@@ -150,8 +150,8 @@ async def websocket_register_verify(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "config/auth_provider/webauthn/delete",
-        vol.Required("credential_id"): str,
+        probatio.Required("type"): "config/auth_provider/webauthn/delete",
+        probatio.Required("credential_id"): str,
     },
 )
 @websocket_api.async_response
@@ -181,9 +181,9 @@ async def websocket_delete(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "config/auth_provider/webauthn/rename",
-        vol.Required("credential_id"): str,
-        vol.Required("name"): str,
+        probatio.Required("type"): "config/auth_provider/webauthn/rename",
+        probatio.Required("credential_id"): str,
+        probatio.Required("name"): str,
     },
 )
 @websocket_api.async_response

@@ -5,11 +5,12 @@ from unittest.mock import patch
 
 import aiohttp
 from aiohttp import WSMsgType, web
+import probatio
 import pytest
-import voluptuous as vol
 
 from homeassistant.auth.providers.homeassistant import HassAuthProvider
 from homeassistant.components import websocket_api
+from homeassistant.components.http.const import DATA_SUPERVISOR_USER
 from homeassistant.components.websocket_api import DOMAIN
 from homeassistant.components.websocket_api.auth import (
     TYPE_AUTH,
@@ -284,7 +285,7 @@ async def test_auth_records_the_browser_origin(
     assert await async_setup_component(hass, DOMAIN, {})
     origins: list[str | None] = []
 
-    @websocket_api.websocket_command({vol.Required("type"): "test/origin"})
+    @websocket_api.websocket_command({probatio.Required("type"): "test/origin"})
     @callback
     def handle_origin(
         hass: HomeAssistant,
@@ -474,8 +475,8 @@ async def test_unix_socket_auth_bypass(
     hass: HomeAssistant, hass_client_no_auth: ClientSessionGenerator
 ) -> None:
     """Test that Unix socket connections skip websocket auth phase."""
-    # Create the Supervisor system user
-    await hass.auth.async_create_system_user(
+    # Create the Supervisor system user, as the hassio integration would
+    hass.data[DATA_SUPERVISOR_USER] = await hass.auth.async_create_system_user(
         HASSIO_USER_NAME, group_ids=["system-admin"]
     )
 
