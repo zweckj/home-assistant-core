@@ -1,11 +1,19 @@
 """Tests for the login flow."""
 
+import asyncio
 from http import HTTPStatus
+import json
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from webauthn.authentication.verify_authentication_response import (
+    VerifiedAuthentication,
+)
+from webauthn.helpers.bytes_to_base64url import bytes_to_base64url
+from webauthn.helpers.structs import CredentialDeviceType
 
+from homeassistant.auth.providers.webauthn import WebAuthnCredential, WebAuthnProvider
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
 
@@ -99,6 +107,22 @@ async def test_fetch_auth_providers_trusted_network(
     resp = await client.get("/auth/providers")
     assert resp.status == HTTPStatus.OK
     assert (await resp.json())["providers"] == expected
+
+
+async def test_fetch_auth_providers_skips_providers_that_cannot_start_login(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a provider that cannot be used right now is left off the list."""
+    client = await async_setup_auth(hass, aiohttp_client, BASE_CONFIG)
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider"
+        ".async_can_start_login",
+        return_value=False,
+    ):
+        resp = await client.get("/auth/providers")
+
+    assert resp.status == HTTPStatus.OK
+    assert (await resp.json())["providers"] == []
 
 
 async def test_fetch_auth_providers_onboarding(
@@ -372,6 +396,84 @@ async def test_login_exist_user_ip_changes(
     assert response == {"message": "IP address changed"}
 
 
+@pytest.mark.parametrize(
+    ("flow_type", "expected"),
+    [("authorize", False), ("link_user", True), (None, False)],
+    ids=["authorize", "link-user", "default"],
+)
+async def test_login_flow_marks_account_linking(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    flow_type: str | None,
+    expected: bool,
+) -> None:
+    """Test the flow can tell an account link apart from a plain sign in."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    body = {
+        "client_id": CLIENT_ID,
+        "handler": ["insecure_example", None],
+        "redirect_uri": CLIENT_REDIRECT_URI,
+    }
+    if flow_type is not None:
+        body["type"] = flow_type
+
+    resp = await client.post("/auth/login_flow", json=body)
+
+    assert resp.status == HTTPStatus.OK
+    flow_id = (await resp.json())["flow_id"]
+
+    assert hass.auth.login_flow.async_get(flow_id)["context"]["link_user"] is expected
+
+
+async def test_concurrent_requests_cannot_advance_the_same_flow(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a second request gets a conflict rather than racing the first one."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    cred = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(cred)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    flow_id = (await resp.json())["flow_id"]
+
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    original_configure = hass.auth.login_flow.async_configure
+
+    async def slow_configure(*args: Any, **kwargs: Any) -> Any:
+        first_started.set()
+        await release_first.wait()
+        return await original_configure(*args, **kwargs)
+
+    body = {
+        "client_id": CLIENT_ID,
+        "username": "test-user",
+        "password": "test-pass",
+    }
+    with patch.object(hass.auth.login_flow, "async_configure", slow_configure):
+        first = asyncio.create_task(
+            client.post(f"/auth/login_flow/{flow_id}", json=body)
+        )
+        await first_started.wait()
+        second = await client.post(f"/auth/login_flow/{flow_id}", json=body)
+        release_first.set()
+        first_response = await first
+
+    assert second.status == HTTPStatus.CONFLICT
+    assert first_response.status == HTTPStatus.OK
+    assert (await first_response.json())["type"] == "create_entry"
+
+
 @pytest.mark.usefixtures("current_request_with_host")  # Has example.com host
 @pytest.mark.parametrize(
     ("config", "expected_url_prefix", "extra_response_data"),
@@ -496,3 +598,132 @@ async def test_well_known_protected_resource_no_url(
         "/.well-known/oauth-protected-resource",
     )
     assert resp.status == 404
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        ({"Origin": "https://ha.example.com"}, "https://ha.example.com"),
+        ({}, None),
+    ],
+    ids=["sent", "absent"],
+)
+async def test_login_flow_records_the_browser_origin(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    headers: dict[str, str],
+    expected: str | None,
+) -> None:
+    """Test a provider can tell which page the login was started from."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+        headers=headers,
+    )
+
+    assert resp.status == HTTPStatus.OK
+    flow_id = (await resp.json())["flow_id"]
+    assert hass.auth.login_flow.async_get(flow_id)["context"]["origin"] == expected
+
+
+async def test_webauthn_login_requires_linked_credentials(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test an orphaned passkey fails cleanly and a linked passkey can sign in."""
+    origin = "https://ha.example.com"
+    await async_process_ha_core_config(hass, {"external_url": origin})
+    client = await async_setup_auth(hass, aiohttp_client, [{"type": "webauthn"}])
+    provider = hass.auth.get_auth_provider("webauthn", None)
+    assert isinstance(provider, WebAuthnProvider)
+    assert provider.data is not None
+    user = await hass.auth.async_create_user("Alice")
+    existing_users = await hass.auth.async_get_users()
+    raw_credential_id = b"credential-1"
+    credential_id = bytes_to_base64url(raw_credential_id)
+    await provider.data.async_add_credential(
+        user.id,
+        WebAuthnCredential(
+            credential_id=credential_id,
+            rp_id="ha.example.com",
+            credential_public_key=bytes_to_base64url(b"public-key"),
+            sign_count=0,
+            credential_device_type=CredentialDeviceType.MULTI_DEVICE,
+            credential_backed_up=True,
+        ),
+    )
+
+    response = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["webauthn", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+        headers={"Origin": origin},
+    )
+    assert response.status == HTTPStatus.OK
+    step = await response.json()
+    assert step["type"] == "form"
+    flow_url = f"/auth/login_flow/{step['flow_id']}"
+    login_input = {
+        "client_id": CLIENT_ID,
+        "authentication_credential": json.dumps(
+            {
+                "id": credential_id,
+                "rawId": credential_id,
+                "type": "public-key",
+                "response": {
+                    "clientDataJSON": bytes_to_base64url(b"{}"),
+                    "authenticatorData": bytes_to_base64url(b"authenticator-data"),
+                    "signature": bytes_to_base64url(b"signature"),
+                    "userHandle": bytes_to_base64url(user.id.encode()),
+                },
+            }
+        ),
+    }
+
+    with patch(
+        "homeassistant.auth.providers.webauthn.verify_authentication_response",
+        return_value=VerifiedAuthentication(
+            credential_id=raw_credential_id,
+            new_sign_count=1,
+            credential_device_type=CredentialDeviceType.MULTI_DEVICE,
+            credential_backed_up=True,
+            user_verified=True,
+        ),
+    ) as verify:
+        response = await client.post(flow_url, json=login_input)
+
+        assert response.status == HTTPStatus.OK
+        step = await response.json()
+        assert step["type"] == "form"
+        assert step["errors"] == {"base": "invalid_auth"}
+        assert "result" not in step
+        assert user.credentials == []
+        assert await hass.auth.async_get_users() == existing_users
+
+        credentials = provider.async_create_credentials({"user_id": user.id})
+        await hass.auth.async_link_user(user, credentials)
+        response = await client.post(flow_url, json=login_input)
+
+    assert verify.call_count == 2
+    assert response.status == HTTPStatus.OK
+    step = await response.json()
+    assert step["type"] == "create_entry"
+    response = await client.post(
+        "/auth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": CLIENT_ID,
+            "code": step["result"],
+        },
+    )
+    assert response.status == HTTPStatus.OK
+    assert await hass.auth.async_get_users() == existing_users
+    assert user.credentials == [credentials]

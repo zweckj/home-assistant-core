@@ -180,16 +180,31 @@ def test_auth_code_store_expiration(
     now = utcnow()
 
     freezer.move_to(now)
-    code = store(client_id, mock_credential)
+    code = store(client_id, mock_credential, "authorize")
 
     freezer.move_to(now + timedelta(minutes=10))
-    assert retrieve(client_id, code) is None
+    assert retrieve(client_id, code, "authorize") is None
 
     freezer.move_to(now)
-    code = store(client_id, mock_credential)
+    code = store(client_id, mock_credential, "authorize")
 
     freezer.move_to(now + timedelta(minutes=9, seconds=59))
-    assert retrieve(client_id, code) == mock_credential
+    assert retrieve(client_id, code, "authorize") == mock_credential
+
+
+def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
+    """Test a code minted for one purpose cannot be redeemed for the other."""
+    store, retrieve = auth._create_auth_code_store()
+    client_id = "bla"
+
+    code = store(client_id, mock_credential, "link_user")
+    assert retrieve(client_id, code, "authorize") is None
+    # The mismatch must not consume the code either.
+    assert retrieve(client_id, code, "link_user") == mock_credential
+
+    code = store(client_id, mock_credential, "authorize")
+    assert retrieve(client_id, code, "link_user") is None
+    assert retrieve(client_id, code, "authorize") == mock_credential
 
 
 def test_auth_code_store_requires_credentials(mock_credential) -> None:
@@ -197,9 +212,9 @@ def test_auth_code_store_requires_credentials(mock_credential) -> None:
     store, _retrieve = auth._create_auth_code_store()
 
     with pytest.raises(TypeError):
-        store(None, MockUser())
+        store(None, MockUser(), "authorize")
 
-    store(None, mock_credential)
+    store(None, mock_credential, "authorize")
 
 
 async def test_ws_current_user(

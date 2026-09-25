@@ -666,8 +666,9 @@ async def test_auth_provider_config_default(hass: HomeAssistant) -> None:
         del hass.auth
     await async_process_ha_core_config(hass, core_config)
 
-    assert len(hass.auth.auth_providers) == 1
+    assert len(hass.auth.auth_providers) == 2
     assert hass.auth.auth_providers[0].type == "homeassistant"
+    assert hass.auth.auth_providers[1].type == "webauthn"
     assert len(hass.auth.auth_mfa_modules) == 1
     assert hass.auth.auth_mfa_modules[0].id == "totp"
 
