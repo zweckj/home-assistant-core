@@ -15,7 +15,7 @@ import time
 from typing import Any, cast, override
 from weakref import WeakValueDictionary
 
-import voluptuous as vol
+import probatio
 
 from homeassistant.const import CONF_ID
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -25,6 +25,7 @@ from homeassistant.helpers.network import (
     get_url,
     is_internal_request,
 )
+from homeassistant.helpers.oauth2 import generate_code_verifier
 
 from ... import InvalidAuthError
 from ...const import GROUP_ID_ADMIN, GROUP_ID_USER, LOGIN_CALLBACK_PATH
@@ -45,7 +46,6 @@ from .client import (
     OidcInvalidGrantError,
     OidcTransientError,
     TokenResponse,
-    generate_code_verifier,
 )
 from .const import (
     CONF_ISSUER,
@@ -64,12 +64,12 @@ __all__ = ["OidcAuthProvider", "OidcConfig", "async_get_provider"]
 def _disallow_id(conf: dict[str, Any]) -> dict[str, Any]:
     """Disallow ID in config."""
     if CONF_ID in conf:
-        raise vol.Invalid("ID is not allowed for the oidc auth provider.")
+        raise probatio.Invalid("ID is not allowed for the oidc auth provider.")
 
     return conf
 
 
-CONFIG_SCHEMA = vol.All(AUTH_PROVIDER_SCHEMA, _disallow_id)
+CONFIG_SCHEMA = probatio.All(AUTH_PROVIDER_SCHEMA, _disallow_id)
 
 
 @callback

@@ -10,7 +10,6 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import logging
-import secrets
 import time
 from typing import Any
 from urllib.parse import quote
@@ -20,8 +19,19 @@ import jwt
 from yarl import URL
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import (
+    HomeAssistantError,
+    OAuth2TokenRequestConnectionError,
+    OAuth2TokenRequestError,
+    OAuth2TokenRequestReauthError,
+    OAuth2TokenRequestTransientError,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.oauth2 import (
+    async_token_request,
+    build_authorize_url,
+    compute_code_challenge,
+)
 
 from .const import (
     ALLOWED_ID_TOKEN_ALGORITHMS,
@@ -36,6 +46,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Names the token request errors; OIDC runs under the auth component.
+AUTH_DOMAIN = "auth"
 
 # The at_hash digest follows the signing algorithm. OpenID Connect pins none for
 # EdDSA, so it is left out and its at_hash goes unchecked.
@@ -100,17 +113,6 @@ class OidcIdTokenError(OidcError):
 
 class OidcInsecureTransportError(OidcError):
     """Raised when a login would run over a connection that is not private."""
-
-
-def generate_code_verifier() -> str:
-    """Return a new PKCE code verifier."""
-    return secrets.token_urlsafe(64)
-
-
-def compute_code_challenge(code_verifier: str) -> str:
-    """Return the S256 PKCE challenge for a code verifier."""
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -319,19 +321,17 @@ class OidcClient:
         scopes: list[str],
     ) -> str:
         """Return the URL to send the user to."""
-        return str(
-            URL(metadata.authorization_endpoint).update_query(
-                {
-                    "response_type": "code",
-                    "client_id": self.client_id,
-                    "redirect_uri": redirect_uri,
-                    "scope": " ".join(scopes),
-                    "state": state,
-                    "nonce": nonce,
-                    "code_challenge": compute_code_challenge(code_verifier),
-                    "code_challenge_method": PKCE_CHALLENGE_METHOD,
-                }
-            )
+        return build_authorize_url(
+            metadata.authorization_endpoint,
+            client_id=self.client_id,
+            redirect_uri=redirect_uri,
+            state=state,
+            extra={
+                "scope": " ".join(scopes),
+                "nonce": nonce,
+                "code_challenge": compute_code_challenge(code_verifier),
+                "code_challenge_method": PKCE_CHALLENGE_METHOD,
+            },
         )
 
     async def async_exchange_code(
@@ -356,38 +356,35 @@ class OidcClient:
     async def _async_token_request(self, data: dict[str, str]) -> TokenResponse:
         """Post to the token endpoint and parse the response."""
         metadata = await self.async_metadata()
-        session = async_get_clientsession(self.hass)
         payload, headers = self._client_auth(metadata, data)
 
         try:
             async with asyncio.timeout(HTTP_TIMEOUT):
                 # A 307 or 308 would replay the client secret to the new target.
-                response = await session.post(
+                body = await async_token_request(
+                    self.hass,
                     metadata.token_endpoint,
-                    data=payload,
+                    payload,
+                    domain=AUTH_DOMAIN,
                     headers=headers,
                     allow_redirects=False,
                 )
-                status = response.status
-                if 300 <= status < 400:
-                    raise OidcTokenError("The token endpoint URL redirects elsewhere")
-                body = await response.json(content_type=None)
-        except TimeoutError as err:
-            raise OidcTransientError("Timeout talking to the token endpoint") from err
-        except ClientError as err:
-            raise OidcTransientError(f"Token request failed: {err}") from err
+        except OAuth2TokenRequestReauthError as err:
+            raise OidcInvalidGrantError(
+                "The identity provider rejected the grant"
+            ) from err
+        except (
+            TimeoutError,
+            OAuth2TokenRequestConnectionError,
+            OAuth2TokenRequestTransientError,
+        ) as err:
+            raise OidcTransientError("Could not reach the token endpoint") from err
+        except OAuth2TokenRequestError as err:
+            raise OidcTokenError(
+                f"Token endpoint returned an unusable response ({err.status})"
+            ) from err
         except ValueError as err:
             raise OidcTokenError("Token endpoint returned invalid JSON") from err
-
-        if status >= 400:
-            error = body.get("error") if isinstance(body, dict) else None
-            if status >= 500:
-                raise OidcTransientError(
-                    f"Token endpoint returned status {status}: {error}"
-                )
-            if error == "invalid_grant":
-                raise OidcInvalidGrantError("The identity provider rejected the grant")
-            raise OidcTokenError(f"Token endpoint returned {error or status}")
 
         if not isinstance(body, dict) or not isinstance(
             access_token := body.get("access_token"), str

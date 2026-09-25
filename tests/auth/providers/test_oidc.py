@@ -375,7 +375,7 @@ async def test_token_endpoint_does_not_follow_redirects(
         TOKEN_URL, status=307, headers={"Location": "http://evil.example.com/"}
     )
 
-    with pytest.raises(OidcTokenError, match="redirects"):
+    with pytest.raises(OidcTokenError, match=r"unusable response \(307\)"):
         await client.async_refresh_token("refresh")
 
 
@@ -715,23 +715,24 @@ async def test_verify_id_token_allows_any_advertised_algorithm_without_a_declara
     assert claims["sub"] == SUBJECT
 
 
+@pytest.mark.parametrize("error", ["invalid_grant", "invalid_client"])
 async def test_token_request_reports_invalid_grant(
-    client: OidcClient, aioclient_mock: AiohttpClientMocker
+    client: OidcClient, aioclient_mock: AiohttpClientMocker, error: str
 ) -> None:
-    """Test a rejected grant is reported as permanent."""
-    aioclient_mock.post(TOKEN_URL, status=400, json={"error": "invalid_grant"})
+    """Test a rejected request is reported as permanent."""
+    aioclient_mock.post(TOKEN_URL, status=400, json={"error": error})
 
     with pytest.raises(OidcInvalidGrantError):
         await client.async_refresh_token("dead-token")
 
 
-async def test_token_request_reports_client_error(
+async def test_token_request_reports_invalid_json(
     client: OidcClient, aioclient_mock: AiohttpClientMocker
 ) -> None:
-    """Test other client errors are not treated as a revoked session."""
-    aioclient_mock.post(TOKEN_URL, status=400, json={"error": "invalid_client"})
+    """Test a response that is not JSON is reported as a token error."""
+    aioclient_mock.post(TOKEN_URL, text="<html>")
 
-    with pytest.raises(OidcTokenError):
+    with pytest.raises(OidcTokenError, match="invalid JSON"):
         await client.async_refresh_token("some-token")
 
 
@@ -2528,7 +2529,7 @@ async def test_removing_credentials_drops_the_session(
     mock_idp: AiohttpClientMocker,
 ) -> None:
     """Test removing a user cleans up the identity provider session."""
-    user = await manager.async_create_user("Alice")
+    user = await _non_owner_user(manager)
     credentials = provider.async_create_credentials({"subject": SUBJECT})
     await manager.async_link_user(user, credentials)
     await provider.async_record_session(

@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-import voluptuous as vol
+import probatio
 from yarl import URL
 
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH
@@ -47,13 +47,13 @@ def _issuer_url(value: str) -> str:
     try:
         url = URL(value)
     except ValueError as err:
-        raise vol.Invalid("must be an http or https URL") from err
+        raise probatio.Invalid("must be an http or https URL") from err
     if url.scheme not in ("https", "http") or not url.host:
-        raise vol.Invalid("must be an http or https URL")
+        raise probatio.Invalid("must be an http or https URL")
     if url.user is not None:
-        raise vol.Invalid("must not contain credentials")
+        raise probatio.Invalid("must not contain credentials")
     if url.query_string or url.fragment:
-        raise vol.Invalid("must not contain a query or fragment")
+        raise probatio.Invalid("must not contain a query or fragment")
     return value
 
 
@@ -75,7 +75,7 @@ def _insecure_issuer(
 def _scopes(value: list[str]) -> list[str]:
     """Validate the requested scopes."""
     if "openid" not in value:
-        raise vol.Invalid("the openid scope is required")
+        raise probatio.Invalid("the openid scope is required")
     return value
 
 
@@ -84,25 +84,27 @@ def _name(value: Any) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not (name := value.strip()):
-        raise vol.Invalid("must be a name")
+        raise probatio.Invalid("must be a name")
     return name
 
 
 CONFIG_SCHEMA: VolDictType = {
-    vol.Required("issuer"): vol.All(str, _issuer_url),
-    vol.Required("client_id"): str,
-    vol.Optional("client_secret"): vol.Any(str, None),
-    vol.Optional("name", default=None): _name,
-    vol.Optional("scopes", default=lambda: list(DEFAULT_SCOPES)): vol.All(
-        [str], vol.Length(min=1), _scopes
+    probatio.Required("issuer"): probatio.All(str, _issuer_url),
+    probatio.Required("client_id"): str,
+    probatio.Optional("client_secret"): probatio.Any(str, None),
+    probatio.Optional("name", default=None): _name,
+    probatio.Optional("scopes", default=lambda: list(DEFAULT_SCOPES)): probatio.All(
+        [str], probatio.Length(min=1), _scopes
     ),
-    vol.Optional("username_claim", default=DEFAULT_USERNAME_CLAIM): str,
-    vol.Optional("display_name_claim", default=DEFAULT_DISPLAY_NAME_CLAIM): str,
-    vol.Optional("admin_group", default=DEFAULT_ADMIN_GROUP): vol.Any(str, None),
-    vol.Optional("allow_auto_create", default=False): bool,
-    vol.Optional("allow_insecure_transport", default=False): bool,
-    vol.Optional("revalidate_interval"): vol.All(
-        int, vol.Range(min=MIN_REVALIDATE_INTERVAL, max=MAX_REVALIDATE_INTERVAL)
+    probatio.Optional("username_claim", default=DEFAULT_USERNAME_CLAIM): str,
+    probatio.Optional("display_name_claim", default=DEFAULT_DISPLAY_NAME_CLAIM): str,
+    probatio.Optional("admin_group", default=DEFAULT_ADMIN_GROUP): probatio.Any(
+        str, None
+    ),
+    probatio.Optional("allow_auto_create", default=False): bool,
+    probatio.Optional("allow_insecure_transport", default=False): bool,
+    probatio.Optional("revalidate_interval"): probatio.All(
+        int, probatio.Range(min=MIN_REVALIDATE_INTERVAL, max=MAX_REVALIDATE_INTERVAL)
     ),
 }
 
@@ -171,7 +173,7 @@ def _config_to_dict(config: OidcConfig | None) -> dict[str, Any] | None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "config/auth_provider/oidc/get"}
+    {probatio.Required("type"): "config/auth_provider/oidc/get"}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -200,7 +202,7 @@ async def websocket_get(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "config/auth_provider/oidc/update",
+        probatio.Required("type"): "config/auth_provider/oidc/update",
         **CONFIG_SCHEMA,
     }
 )
@@ -258,7 +260,7 @@ async def websocket_update(
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "config/auth_provider/oidc/delete"}
+    {probatio.Required("type"): "config/auth_provider/oidc/delete"}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -277,7 +279,7 @@ async def websocket_delete(
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "config/auth_provider/oidc/unlink"}
+    {probatio.Required("type"): "config/auth_provider/oidc/unlink"}
 )
 @websocket_api.async_response
 async def websocket_unlink(
@@ -329,11 +331,11 @@ async def websocket_unlink(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "config/auth_provider/oidc/test",
-        vol.Required("issuer"): vol.All(str, _issuer_url),
-        vol.Required("client_id"): str,
-        vol.Optional("client_secret"): vol.Any(str, None),
-        vol.Optional("allow_insecure_transport", default=False): bool,
+        probatio.Required("type"): "config/auth_provider/oidc/test",
+        probatio.Required("issuer"): probatio.All(str, _issuer_url),
+        probatio.Required("client_id"): str,
+        probatio.Optional("client_secret"): probatio.Any(str, None),
+        probatio.Optional("allow_insecure_transport", default=False): bool,
     }
 )
 @websocket_api.require_admin
