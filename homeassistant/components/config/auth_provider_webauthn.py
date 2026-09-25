@@ -72,6 +72,7 @@ async def websocket_list(
 @websocket_api.websocket_command(
     {
         probatio.Required("type"): "config/auth_provider/webauthn/register",
+        probatio.Optional("restore", default=False): bool,
     }
 )
 @websocket_api.async_response
@@ -93,13 +94,11 @@ async def websocket_register(
     if provider is None:
         return
 
-    if (origin := connection.origin) is None:
-        connection.send_error(msg["id"], "invalid_origin", "Connection has no origin")
-        return
-
     try:
         options: PublicKeyCredentialCreationOptions = (
-            await provider.async_start_registration(connection.user, origin)
+            await provider.async_start_registration(
+                connection.user, connection.origin, msg["restore"]
+            )
         )
     except InvalidAuthError as err:
         connection.send_error(msg["id"], "invalid_origin", str(err))
@@ -113,6 +112,7 @@ async def websocket_register(
         probatio.Required("type"): "config/auth_provider/webauthn/register_verify",
         probatio.Required("credential"): object,
         probatio.Optional("name"): str,
+        probatio.Optional("restore", default=False): bool,
     },
 )
 @websocket_api.async_response
@@ -126,13 +126,18 @@ async def websocket_register_verify(
     if provider is None:
         return
 
-    if (origin := connection.origin) is None:
+    # A restore key has a fixed relying party and needs no origin.
+    if not msg["restore"] and connection.origin is None:
         connection.send_error(msg["id"], "invalid_origin", "Connection has no origin")
         return
 
     try:
         await provider.async_verify_registration(
-            connection.user, msg["credential"], origin, msg.get("name")
+            connection.user,
+            msg["credential"],
+            connection.origin,
+            msg.get("name"),
+            msg["restore"],
         )
     except InvalidAuthError as err:
         connection.send_error(msg["id"], "invalid_auth", str(err))

@@ -31,6 +31,8 @@ class AuthFlowContext(FlowContext, total=False):
     # Attaching credentials to the signed in user via /auth/link_user.
     link_user: bool
     origin: str | None
+    # A companion app restore key, scoped to RESTORE_RP_ID instead of the origin.
+    restore: bool
 
 
 class AuthFlowResult(FlowResult[AuthFlowContext, tuple[str, str]], total=False):
