@@ -36,7 +36,6 @@ import yarl
 from homeassistant.const import CONF_ID
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.network import is_hass_url
 from homeassistant.helpers.storage import Store
 from homeassistant.util.network import is_ip_address
@@ -69,8 +68,8 @@ CONF_USER_ID: Final = "user_id"
 
 DEFAULT_CREDENTIAL_NAME: Final = "Passkey"
 
-# The companion apps are associated with this domain through their app site
-# association files, so a passkey they create survives moving to a new device.
+# The companion apps are associated with this domain, so a passkey they create
+# survives moving to a new device.
 RESTORE_RP_ID: Final = "my.home-assistant.io"
 RESTORE_ORIGINS: Final[list[str]] = [f"https://{RESTORE_RP_ID}"]
 
@@ -102,12 +101,14 @@ class _RelyingParty(NamedTuple):
 
 
 @callback
-def _async_relying_party(hass: HomeAssistant, origin: str) -> _RelyingParty:
-    """Return the relying party to run a ceremony for a browser.
-
-    WebAuthn only runs in a secure context and cannot use an IP address as
-    relying party, so anything else is rejected before a ceremony starts.
-    """
+def _async_relying_party(
+    hass: HomeAssistant, origin: str | None, restore: bool = False
+) -> _RelyingParty:
+    """Return the relying party for a restore key or an HTTPS browser origin."""
+    if restore:
+        return _RelyingParty(RESTORE_RP_ID, RESTORE_ORIGINS)
+    if origin is None:
+        raise InvalidAuthError("No origin to run a WebAuthn ceremony for.")
     try:
         url = yarl.URL(origin).origin()
     except ValueError as err:
@@ -180,8 +181,7 @@ class WebAuthnDataStore:
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize WebAuthn data."""
-        # Storage round trips through JSON, so credentials go in and come back
-        # out as plain dicts.
+        # Credentials round trip through JSON as plain dicts.
         self._store = Store[dict[str, dict[str, dict[str, Any]]]](
             hass, STORAGE_VERSION, STORAGE_KEY, private=True, atomic_writes=True
         )
@@ -318,25 +318,15 @@ class WebAuthnProvider(AuthProvider):
         """Initialize an auth provider."""
         super().__init__(hass, store, config)
         self.data: WebAuthnDataStore | None = None
-
-        # store the challenges for pending registrations for each user
-        self._pending_registration_challenges: dict[str, bytes] = {}
-
-        # store the pending step up challenge and its expiry for each user
+        # Challenge and deadline of each user's pending ceremony.
+        self._pending_registration_challenges: dict[str, tuple[bytes, float]] = {}
         self._pending_step_up_challenges: dict[str, tuple[bytes, float]] = {}
-
         self._init_lock = Lock()
-        self._registration_lock = Lock()
 
     @property
     @override
     def support_mfa(self) -> bool:
-        """Return whether multi-factor auth supported by the auth provider.
-
-        Passkeys are registered and verified with user verification required, so
-        the authenticator has already checked both possession of the device and a
-        biometric or PIN. Asking for another factor on top would be redundant.
-        """
+        """Return False, as user verification already covers a second factor."""
         return False
 
     @property
@@ -364,19 +354,6 @@ class WebAuthnProvider(AuthProvider):
 
         return self.data
 
-    @callback
-    def _async_ceremony_relying_party(
-        self, origin: str | None, restore: bool = False
-    ) -> _RelyingParty:
-        """Return the relying party a ceremony runs for."""
-        if restore:
-            return _RelyingParty(RESTORE_RP_ID, RESTORE_ORIGINS)
-
-        if origin is None:
-            raise InvalidAuthError("No origin to run a WebAuthn ceremony for.")
-
-        return _async_relying_party(self.hass, origin)
-
     @override
     async def async_login_flow(
         self, context: AuthFlowContext | None
@@ -396,15 +373,13 @@ class WebAuthnProvider(AuthProvider):
         """Register a new WebAuthn credential."""
 
         data = await self._async_get_data()
-        relying_party = self._async_ceremony_relying_party(origin, restore)
+        relying_party = _async_relying_party(self.hass, origin, restore)
 
         options = generate_registration_options(
             rp_name=self.config[CONF_RP_NAME],
             rp_id=relying_party.id,
-            # The authenticator hands this back as the user handle on login,
-            # which is how a passkey identifies its account.
+            # Returned as the user handle on login, identifying the account.
             user_id=user.id.encode(),
-            # Only ever shown in the authenticator's account picker.
             user_name=user.name or user.id,
             exclude_credentials=data.get_registered_credentials(
                 user.id, relying_party.id
@@ -416,13 +391,14 @@ class WebAuthnProvider(AuthProvider):
             timeout=REGISTER_TIMEOUT_MS,
         )
 
-        async with self._registration_lock:
-            self._pending_registration_challenges[user.id] = options.challenge
+        self._pending_registration_challenges[user.id] = (
+            options.challenge,
+            time() + REGISTER_TIMEOUT_MS / 1000,
+        )
 
         _LOGGER.debug(
             "Registration options for %s: %s", user.id, options_to_json(options)
         )
-        self._async_remove_pending_challenge_later(user.id, options.challenge)
         return options
 
     async def async_verify_registration(
@@ -434,13 +410,13 @@ class WebAuthnProvider(AuthProvider):
         restore: bool = False,
     ) -> None:
         """Complete the registration of a new WebAuthn credential."""
-        async with self._registration_lock:
-            challenge = self._pending_registration_challenges.pop(user.id, None)
-
-        if challenge is None:
+        pending = self._pending_registration_challenges.pop(user.id, None)
+        # The timeout in the options is only a hint to the client.
+        if pending is None or time() > pending[1]:
             raise InvalidAuthError("No pending registration found for user.")
+        challenge = pending[0]
 
-        relying_party = self._async_ceremony_relying_party(origin, restore)
+        relying_party = _async_relying_party(self.hass, origin, restore)
 
         try:
             verification = verify_registration_response(
@@ -505,7 +481,7 @@ class WebAuthnProvider(AuthProvider):
         """Start the authentication process."""
 
         options = generate_authentication_options(
-            rp_id=self._async_ceremony_relying_party(origin, restore).id,
+            rp_id=_async_relying_party(self.hass, origin, restore).id,
             user_verification=UserVerificationRequirement.REQUIRED,
             timeout=SIGN_IN_TIMEOUT_MS,
         )
@@ -535,7 +511,7 @@ class WebAuthnProvider(AuthProvider):
             raise InvalidAuthError("Invalid user handle.") from err
 
         data = await self._async_get_data()
-        relying_party = self._async_ceremony_relying_party(origin, restore)
+        relying_party = _async_relying_party(self.hass, origin, restore)
 
         registration = data.get_credential(user_id, parsed.id)
         if registration is None:
@@ -571,10 +547,10 @@ class WebAuthnProvider(AuthProvider):
         self, user: User, context: AuthFlowContext | None
     ) -> dict[str, Any]:
         """Return the options the client needs to build a passkey proof."""
+        context = context or AuthFlowContext()
         data = await self._async_get_data()
-        relying_party = self._async_ceremony_relying_party(
-            context.get("origin") if context else None,
-            context.get("restore", False) if context else False,
+        relying_party = _async_relying_party(
+            self.hass, context.get("origin"), context.get("restore", False)
         )
         options = generate_authentication_options(
             rp_id=relying_party.id,
@@ -596,14 +572,14 @@ class WebAuthnProvider(AuthProvider):
         self, user: User, data: Mapping[str, Any], context: AuthFlowContext | None
     ) -> None:
         """Verify a passkey proof from an already signed in user."""
-        origin = context.get("origin") if context else None
-        restore = context.get("restore", False) if context else False
+        context = context or AuthFlowContext()
+        origin = context.get("origin")
+        restore = context.get("restore", False)
         if origin is None and not restore:
             raise InvalidStepUpError("No origin to verify a passkey against.")
 
         challenge = self._pending_step_up_challenges.pop(user.id, None)
-        # The timeout in the options is only a hint to the client, so the
-        # challenge lifetime has to be enforced here as well.
+        # The timeout in the options is only a hint to the client.
         if challenge is None or time() > challenge[1]:
             raise InvalidStepUpError("No pending step up challenge for user.")
 
@@ -685,30 +661,8 @@ class WebAuthnProvider(AuthProvider):
     async def async_user_meta_for_credentials(
         self, credentials: Credentials
     ) -> UserMeta:
-        """Return extra user metadata for credentials.
-
-        A passkey can only be registered by an existing user, so this provider
-        never creates one.
-        """
-
+        """Refuse, as only an existing user can register a passkey."""
         raise NotImplementedError
-
-    @callback
-    def _async_remove_pending_challenge_later(
-        self, user_id: str, challenge: bytes
-    ) -> None:
-        """Remove a pending registration challenge for a user after a timeout."""
-
-        async def remove_challenge(_: Any) -> None:
-            async with self._registration_lock:
-                if self._pending_registration_challenges.get(user_id) == challenge:
-                    self._pending_registration_challenges.pop(user_id)
-
-        async_call_later(
-            self.hass,
-            REGISTER_TIMEOUT_MS / 1000,
-            remove_challenge,
-        )
 
 
 class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
@@ -731,8 +685,7 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
             return self.async_abort(reason="missing_origin")
 
         if user_input is not None:
-            # The timeout in the options is only a hint to the client, so the
-            # challenge lifetime has to be enforced here as well.
+            # The timeout in the options is only a hint to the client.
             if time() > self._challenge_expires_at:
                 _LOGGER.debug("Passkey login rejected: challenge expired")
                 errors["base"] = "invalid_auth"

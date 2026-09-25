@@ -103,14 +103,10 @@ class TrustedNetworksAuthProvider(AuthProvider):
         """Trusted Networks auth provider does not support MFA."""
         return False
 
-    @property
+    @callback
     @override
-    def counts_as_login_method(self) -> bool:
-        """Return that a trusted network login is not a fallback login method.
-
-        It only works from inside the trusted network, so a user off the network
-        would be locked out if it were their only remaining login.
-        """
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return False, as a trusted network login only works on that network."""
         return False
 
     @override

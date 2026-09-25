@@ -28,13 +28,10 @@ class AuthFlowContext(FlowContext, total=False):
 
     ip_address: IPv4Address | IPv6Address
     redirect_uri: str
-    # Set when a signed in user is attaching these credentials to their account
-    # through /auth/link_user rather than signing in with them.
+    # Attaching credentials to the signed in user via /auth/link_user.
     link_user: bool
     origin: str | None
-    # Set when a companion app runs a ceremony for its restore key, which is
-    # scoped to the relying party the app is associated with rather than to the
-    # origin the request came from.
+    # A companion app restore key, scoped to RESTORE_RP_ID instead of the origin.
     restore: bool
 
 

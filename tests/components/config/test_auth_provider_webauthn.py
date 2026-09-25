@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import patch
 
 from aiohttp import ClientWebSocketResponse, WSMsgType
+from freezegun.api import FrozenDateTimeFactory
 import pytest
 from syrupy.assertion import SnapshotAssertion
 from syrupy.filters import props
@@ -32,9 +33,8 @@ from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
 from homeassistant.setup import async_setup_component
-from homeassistant.util import dt as dt_util
 
-from tests.common import CLIENT_ID, async_fire_time_changed
+from tests.common import CLIENT_ID
 from tests.typing import ClientSessionGenerator, WebSocketGenerator
 
 pytestmark = pytest.mark.usefixtures("socket_enabled")
@@ -360,14 +360,14 @@ async def test_registration_challenge_expires(
     hass: HomeAssistant,
     aiohttp_client: ClientSessionGenerator,
     webauthn_account: tuple[WebAuthnProvider, User],
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """Test an expired registration never reaches attestation verification."""
     provider, user = webauthn_account
     client = await _connect_user(hass, aiohttp_client, user, {"Origin": ORIGIN})
     await client.send_json({"id": 1, "type": "config/auth_provider/webauthn/register"})
     assert (await client.receive_json())["success"]
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
-    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=61))
 
     with patch(
         "homeassistant.auth.providers.webauthn.verify_registration_response"

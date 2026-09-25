@@ -126,8 +126,7 @@ async def websocket_register_verify(
     if provider is None:
         return
 
-    # A restore key has a fixed relying party, so only a browser ceremony needs
-    # an origin to be scoped to.
+    # A restore key has a fixed relying party and needs no origin.
     if not msg["restore"] and connection.origin is None:
         connection.send_error(msg["id"], "invalid_origin", "Connection has no origin")
         return

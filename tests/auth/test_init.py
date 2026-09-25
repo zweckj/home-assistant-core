@@ -1557,11 +1557,7 @@ async def test_remove_refresh_tokens_for_credentials(mock_hass) -> None:
 
 
 async def test_remove_refresh_tokens_for_detached_credentials(mock_hass) -> None:
-    """Test sessions can still be ended after the credentials were removed.
-
-    Removing credentials leaves the tokens issued for them behind, so revoking
-    afterwards has to still find them.
-    """
+    """Test sessions can still be ended after the credentials were removed."""
     manager = await auth.auth_manager_from_config(
         mock_hass, [{"type": "insecure_example", "users": []}], []
     )
