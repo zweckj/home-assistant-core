@@ -69,8 +69,7 @@ from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
-from probatio import to_field_list
-import voluptuous as vol
+import probatio
 
 from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager
@@ -238,7 +237,7 @@ def _prepare_result_json(result: AuthFlowResult) -> dict[str, Any]:
     if (schema := result["data_schema"]) is None:
         data["data_schema"] = []
     else:
-        data["data_schema"] = to_field_list(schema)
+        data["data_schema"] = probatio.to_field_list(schema)
 
     return data
 
@@ -326,14 +325,16 @@ class LoginFlowIndexView(LoginFlowBaseView):
         return web.Response(status=HTTPStatus.METHOD_NOT_ALLOWED)
 
     @RequestDataValidator(
-        vol.Schema(
+        probatio.Schema(
             {
-                vol.Required("client_id"): str,
-                vol.Required("handler"): vol.All(
-                    [vol.Any(str, None)], vol.Length(2, 2), vol.Coerce(tuple)
+                probatio.Required("client_id"): str,
+                probatio.Required("handler"): probatio.All(
+                    [probatio.Any(str, None)],
+                    probatio.Length(2, 2),
+                    probatio.Coerce(tuple),
                 ),
-                vol.Required("redirect_uri"): str,
-                vol.Optional("type", default="authorize"): str,
+                probatio.Required("redirect_uri"): str,
+                probatio.Optional("type", default="authorize"): str,
             }
         )
     )
@@ -388,9 +389,9 @@ class LoginFlowResourceView(LoginFlowBaseView):
         return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
 
     @RequestDataValidator(
-        vol.Schema(
-            {vol.Required("client_id"): str},
-            extra=vol.ALLOW_EXTRA,
+        probatio.Schema(
+            {probatio.Required("client_id"): str},
+            extra=probatio.ALLOW_EXTRA,
         )
     )
     @log_invalid_auth
@@ -419,7 +420,7 @@ class LoginFlowResourceView(LoginFlowBaseView):
                 self._flows_in_progress.discard(flow_id)
         except data_entry_flow.UnknownFlow:
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
-        except vol.Invalid:
+        except probatio.Invalid:
             return self.json_message("User input malformed", HTTPStatus.BAD_REQUEST)
 
         return await self._async_flow_result_to_response(request, client_id, result)
