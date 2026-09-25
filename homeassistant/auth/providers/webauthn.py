@@ -7,7 +7,7 @@ import logging
 from time import time
 from typing import Any, Final, NamedTuple, cast, override
 
-import voluptuous as vol
+import probatio
 from webauthn import (
     base64url_to_bytes,
     generate_authentication_options,
@@ -72,15 +72,15 @@ DEFAULT_CREDENTIAL_NAME: Final = "Passkey"
 def _disallow_id(conf: dict[str, Any]) -> dict[str, Any]:
     """Disallow ID in config."""
     if CONF_ID in conf:
-        raise vol.Invalid("ID is not allowed for the webauthn auth provider.")
+        raise probatio.Invalid("ID is not allowed for the webauthn auth provider.")
 
     return conf
 
 
-CONFIG_SCHEMA = vol.All(
+CONFIG_SCHEMA = probatio.All(
     AUTH_PROVIDER_SCHEMA.extend(
         {
-            vol.Optional(CONF_RP_NAME, default="Home Assistant"): str,
+            probatio.Optional(CONF_RP_NAME, default="Home Assistant"): str,
         }
     ),
     _disallow_id,
@@ -687,9 +687,9 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
         self._challenge_expires_at = time() + SIGN_IN_TIMEOUT_MS / 1000
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
+            data_schema=probatio.Schema(
                 {
-                    vol.Required(CONF_AUTHENTICATION_CREDENTIAL): str,
+                    probatio.Required(CONF_AUTHENTICATION_CREDENTIAL): str,
                 }
             ),
             description_placeholders={"webauthn_options": options_to_json(options)},
