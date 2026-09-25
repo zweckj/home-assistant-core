@@ -94,11 +94,7 @@ async def test_removing_credentials_revokes_only_passkey_sessions(
 async def test_deleting_one_of_several_passkeys_revokes_the_sessions(
     hass: HomeAssistant, provider: webauthn.WebAuthnProvider
 ) -> None:
-    """Test sessions go even though the account keeps a passkey.
-
-    Every passkey shares one credential, so a session cannot be traced back to
-    the key it was created with.
-    """
+    """Test sessions go even though the account keeps a passkey."""
     user, credentials = await _linked_user(
         hass, provider, "credential-1", "credential-2"
     )
