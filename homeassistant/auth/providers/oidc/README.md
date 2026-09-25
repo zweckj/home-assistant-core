@@ -107,6 +107,7 @@ Ending a session removes it and every Home Assistant token derived from it, thro
 - Configured entirely from the UI via `components/config/auth_provider_oidc.py`. No YAML beyond enabling it.
 - Enabled by default in `core_config.py`, hidden from the login screen until an issuer is configured.
 - A configurable name overrides `AuthProvider.name` and is what `/auth/providers` reports, so the login screen can offer a recognisable provider instead of "OpenID Connect".
+- An optional `icon_url` is reported next to it. The login screen is public, so it must be an `https` URL without credentials or a path on the instance, such as `/local/idp.png`.
 - UI and translated abort reasons live in the frontend repository.
 
 ### Login flow

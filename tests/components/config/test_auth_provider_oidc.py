@@ -154,6 +154,74 @@ async def test_update_rejects_a_blank_name(
     assert not result["success"]
 
 
+@pytest.mark.parametrize(
+    ("icon_url", "expected"),
+    [
+        ("https://idp.example.com/logo.svg", "https://idp.example.com/logo.svg"),
+        ("/local/idp.png", "/local/idp.png"),
+        (None, None),
+    ],
+    ids=["https", "local-path", "cleared"],
+)
+async def test_update_stores_an_icon_url(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+    icon_url: str | None,
+    expected: str | None,
+) -> None:
+    """Test the icon is stored, reported back and offered to the login screen."""
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(MINIMAL_UPDATE | {"icon_url": icon_url})
+
+    result = await client.receive_json()
+
+    assert result["success"]
+    assert result["result"]["config"]["icon_url"] == expected
+    assert oidc_provider.icon_url == expected
+
+
+@pytest.mark.parametrize(
+    "icon_url",
+    [
+        "http://idp.example.com/logo.svg",
+        "https://user:pass@idp.example.com/logo.svg",
+        "//evil.example.com/logo.svg",
+        "/\\evil.example.com/logo.svg",
+        "javascript:alert(1)",
+        "data:image/svg+xml;base64,PHN2Zy8+",
+        "logo.svg",
+        "",
+        5,
+    ],
+    ids=[
+        "http",
+        "credentials",
+        "protocol-relative",
+        "backslash",
+        "javascript",
+        "data",
+        "relative",
+        "empty",
+        "not-a-string",
+    ],
+)
+async def test_update_rejects_an_unsafe_icon_url(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+    icon_url: str | int,
+) -> None:
+    """Test the public login screen is never pointed at an unsafe icon."""
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(MINIMAL_UPDATE | {"icon_url": icon_url})
+
+    result = await client.receive_json()
+
+    assert not result["success"]
+    assert not oidc_provider.is_configured
+
+
 async def test_update_keeps_secret_when_omitted(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,

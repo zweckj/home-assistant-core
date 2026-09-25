@@ -257,6 +257,7 @@ class AuthProvidersView(HomeAssistantView):
                 "id": provider.id,
                 "type": provider.type,
             }
+            | ({"icon_url": icon_url} if (icon_url := provider.icon_url) else {})
             for provider in hass.auth.auth_providers
             if provider.async_can_start_login(context)
         ]

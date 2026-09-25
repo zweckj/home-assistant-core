@@ -51,6 +51,7 @@ class OidcConfig:
     client_id: str
     client_secret: str | None = None
     name: str | None = None
+    icon_url: str | None = None
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
     username_claim: str = DEFAULT_USERNAME_CLAIM
     display_name_claim: str = DEFAULT_DISPLAY_NAME_CLAIM
@@ -131,6 +132,7 @@ def _config_from_dict(data: Any) -> OidcConfig:
         not isinstance(config.issuer, str)
         or not isinstance(config.client_id, str)
         or not (config.client_secret is None or isinstance(config.client_secret, str))
+        or not (config.icon_url is None or isinstance(config.icon_url, str))
         or not isinstance(config.scopes, list)
         or any(not isinstance(scope, str) for scope in config.scopes)
         or not isinstance(config.username_claim, str)

@@ -2821,6 +2821,7 @@ async def test_login_starts_over_a_usable_transport(
                 "allow_insecure_transport": "yes",
             }
         },
+        {"config": {"issuer": ISSUER, "client_id": CLIENT_ID, "icon_url": 1}},
         {
             "config": {"issuer": 1, "client_id": CLIENT_ID},
             "sessions": {
@@ -2849,6 +2850,7 @@ async def test_login_starts_over_a_usable_transport(
         "config-container",
         "config-field",
         "insecure-transport-not-a-bool",
+        "icon-url-not-a-string",
         "config-field-with-session",
         "sessions-container",
         "session-container",

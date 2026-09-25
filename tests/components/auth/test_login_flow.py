@@ -1395,3 +1395,34 @@ async def test_oidc_provider_is_offered_under_its_name(
     resp = await client.get("/auth/providers")
 
     assert [prv["name"] for prv in (await resp.json())["providers"]] == [expected]
+
+
+@pytest.mark.parametrize(
+    ("icon_url", "expected"),
+    [
+        (
+            "https://idp.example.com/logo.svg",
+            {"icon_url": "https://idp.example.com/logo.svg"},
+        ),
+        (None, {}),
+    ],
+    ids=["configured", "unset"],
+)
+async def test_oidc_provider_is_offered_with_its_icon(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    icon_url: str | None,
+    expected: dict[str, str],
+) -> None:
+    """Test the login screen only gets an icon when one is configured."""
+    client = await async_setup_auth(hass, aiohttp_client, [{"type": "oidc"}])
+    await hass.auth.auth_providers[0].async_set_config(
+        OidcConfig(issuer=_OIDC_ISSUER, client_id="home-assistant", icon_url=icon_url)
+    )
+
+    resp = await client.get("/auth/providers")
+
+    assert (await resp.json())["providers"] == [
+        {"name": "OpenID Connect", "id": None, "type": "oidc"} | expected
+    ]

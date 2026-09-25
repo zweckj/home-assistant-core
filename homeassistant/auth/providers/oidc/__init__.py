@@ -165,6 +165,12 @@ class OidcAuthProvider(AuthProvider):
         return super().name
 
     @property
+    @override
+    def icon_url(self) -> str | None:
+        """Return the icon the login screen shows next to the name."""
+        return self.oidc_config.icon_url if self.is_configured else None
+
+    @property
     def oidc_config(self) -> OidcConfig:
         """Return the settings, which every login and session implies exist."""
         if self.data is None or self.data.config is None:

@@ -88,11 +88,30 @@ def _name(value: Any) -> str | None:
     return name
 
 
+def _icon_url(value: str) -> str:
+    """Validate an icon the public login screen can load."""
+    try:
+        url = URL(value)
+    except ValueError as err:
+        raise probatio.Invalid("must be an https URL or a local path") from err
+    remote = url.absolute and url.scheme == "https" and url.user is None
+    local = not url.absolute and not url.scheme and value.startswith("/")
+    # Browsers read a backslash as a slash, so "/\host" would leave the instance.
+    if "\\" in value or not (remote or local):
+        raise probatio.Invalid(
+            "must be an https URL without credentials or a local path"
+        )
+    return value
+
+
 CONFIG_SCHEMA: VolDictType = {
     probatio.Required("issuer"): probatio.All(str, _issuer_url),
     probatio.Required("client_id"): str,
     probatio.Optional("client_secret"): probatio.Any(str, None),
     probatio.Optional("name", default=None): _name,
+    probatio.Optional("icon_url", default=None): probatio.Any(
+        None, probatio.All(str, _icon_url)
+    ),
     probatio.Optional("scopes", default=lambda: list(DEFAULT_SCOPES)): probatio.All(
         [str], probatio.Length(min=1), _scopes
     ),
@@ -162,6 +181,7 @@ def _config_to_dict(config: OidcConfig | None) -> dict[str, Any] | None:
         # The secret is write only, the UI only needs to know it is set.
         "client_secret_set": bool(config.client_secret),
         "name": config.name,
+        "icon_url": config.icon_url,
         "scopes": config.scopes,
         "username_claim": config.username_claim,
         "display_name_claim": config.display_name_claim,
@@ -245,6 +265,7 @@ async def websocket_update(
         client_id=msg["client_id"],
         client_secret=client_secret,
         name=msg["name"],
+        icon_url=msg["icon_url"],
         scopes=msg["scopes"],
         username_claim=msg["username_claim"],
         display_name_claim=msg["display_name_claim"],
