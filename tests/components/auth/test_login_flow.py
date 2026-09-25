@@ -801,11 +801,7 @@ async def test_oidc_callback_renews_the_browser_cookie(
     aiohttp_client: ClientSessionGenerator,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Test the finish step gets a full cookie budget after the provider detour.
-
-    A slow login at the provider would otherwise use up the cookie before the
-    frontend posts the last step.
-    """
+    """Test the finish step gets a full cookie budget after the provider detour."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
     state = await _start_oidc_login(client)
 
@@ -969,12 +965,7 @@ async def test_oidc_withdrawing_admin_reaches_an_open_connection(
     aiohttp_client: ClientSessionGenerator,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Test a demotion takes effect on a connection that is already open.
-
-    A connection holds on to the user it authenticated as, and that user caches
-    whether it is an administrator, so recording the new groups is not by itself
-    enough to end privileged access.
-    """
+    """Test a demotion takes effect on a connection that is already open."""
     assert await async_setup_component(hass, "websocket_api", {})
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
     # Owners are never demoted, and the first account created owns the instance.
@@ -1013,12 +1004,7 @@ async def test_oidc_deadline_disconnects_an_open_connection(
     aiohttp_client: ClientSessionGenerator,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Test the deadline closes a connection the identity provider disowned.
-
-    The Home Assistant refresh token and the access token minted from it both
-    outlive the deadline, so refusing to issue new tokens leaves an established
-    connection alone until the session teardown revokes them.
-    """
+    """Test the deadline closes a connection the identity provider disowned."""
     assert await async_setup_component(hass, "websocket_api", {})
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
     access_token = await _oidc_sign_in(hass, client)
@@ -1256,11 +1242,7 @@ async def test_oidc_callback_requires_the_browser_that_started_the_login(
     aiohttp_client: ClientSessionGenerator,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Test a login cannot be finished in a browser that did not start it.
-
-    Without this a stolen state parameter could sign somebody into an account
-    they never authenticated as.
-    """
+    """Test a login cannot be finished in a browser that did not start it."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
     state = await _start_oidc_login(client)
     client.session.cookie_jar.clear()

@@ -1,12 +1,8 @@
 """OpenID Connect auth provider.
 
-Sign in is delegated to an external identity provider using the authorization
-code flow with PKCE. The provider is configured from the UI.
-
-Because the identity provider is only consulted while signing in, every session
-carries a deadline. A background task silently refreshes it against the identity
-provider, and drops all Home Assistant refresh tokens as soon as the identity
-provider says the session is gone.
+Signs in through an external identity provider with the authorization code flow
+and PKCE. Sessions are revalidated against the identity provider in the
+background and ended as soon as it says they are gone.
 """
 
 import asyncio
@@ -133,11 +129,7 @@ class OidcAuthProvider(AuthProvider):
 
     @callback
     def _async_schedule_revalidation(self) -> None:
-        """Run the timer only while there is a provider to revalidate against.
-
-        The provider ships enabled, so an install that never configures it must
-        not pay for a recurring job that would return immediately.
-        """
+        """Run the revalidation timer only while the provider is configured."""
         if self.is_configured:
             if self._unsub_revalidate is None:
                 self._unsub_revalidate = async_track_time_interval(
@@ -189,8 +181,7 @@ class OidcAuthProvider(AuthProvider):
             if data.config == config:
                 return
 
-            # Sessions only stop meaning anything when who issued them changes.
-            # Renaming the provider must not sign every user out.
+            # Only a change of who issued the sessions invalidates them.
             if (
                 config is not None
                 and data.config is not None
@@ -242,14 +233,7 @@ class OidcAuthProvider(AuthProvider):
 
     @callback
     def async_redirect_uri(self) -> str:
-        """Return the redirect URI to use for the current request.
-
-        A login carries the identity provider's authorization code and, on the
-        way back, Home Assistant's own tokens through the browser. Anything
-        reachable from outside therefore has to be HTTPS; the internal URL is
-        left alone so a local install keeps working over plain HTTP. An
-        administrator can waive this for an install they know is not exposed.
-        """
+        """Return the redirect URI, refusing plain HTTP reachable from outside."""
         url = get_url(self.hass, require_current_request=True)
         if (
             not url.startswith("https://")
@@ -351,19 +335,6 @@ class OidcAuthProvider(AuthProvider):
                 "Revoke removed OIDC session",
             )
 
-    async def async_sync_admin(
-        self, credentials: Credentials, claims: Mapping[str, Any]
-    ) -> None:
-        """Line the account up with the group memberships of the identity."""
-        if credentials.is_new or self.data is None:
-            return
-        session = self.data.sessions.get(credentials.id)
-        await self._async_apply_admin_grant(
-            credentials.id,
-            granted_by_provider=session is not None and session.is_admin,
-            grants_admin=self.oidc_config.grants_admin(claims),
-        )
-
     async def _async_user_for_credential(self, credential_id: str) -> User | None:
         """Return the user a credential belongs to."""
         for user in await self.store.async_get_users():
@@ -380,8 +351,7 @@ class OidcAuthProvider(AuthProvider):
     ) -> None:
         """Line a user's groups up with what the identity provider grants.
 
-        ``granted_by_provider`` is the grant as it stood before these claims, so
-        it has to be read before the session is rewritten.
+        granted_by_provider is the grant before these claims were applied.
         """
         user = await self._async_user_for_credential(credential_id)
         # Demoting the owner could leave the instance without an administrator.
@@ -409,8 +379,7 @@ class OidcAuthProvider(AuthProvider):
     ) -> None:
         """Reject a refresh token once the identity provider has to be consulted."""
         if refresh_token.token_type == TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN:
-            # Long lived access tokens never expire, so they deliberately opt out
-            # of revalidation and have to be revoked by hand.
+            # Long lived tokens opt out of revalidation and are revoked by hand.
             return
 
         if (credential := refresh_token.credential) is None:
@@ -449,16 +418,16 @@ class OidcAuthProvider(AuthProvider):
         tokens: TokenResponse,
         profile_claims: Mapping[str, Any] | None = None,
     ) -> str | None:
-        """Store a session while the caller holds the revalidation lock."""
+        """Store a session while the caller holds the revalidation lock.
+
+        Returns the refresh token this session replaced, if any.
+        """
         config = self.oidc_config
         data = await self._async_get_data()
         if profile_claims is None:
             profile_claims = claims
-        previous_refresh_token = (
-            previous.refresh_token
-            if (previous := data.sessions.get(credential_id)) is not None
-            else None
-        )
+        previous = data.sessions.get(credential_id)
+        replaced = previous.refresh_token if previous is not None else None
 
         session = OidcSession(
             credential_id=credential_id,
@@ -470,11 +439,7 @@ class OidcAuthProvider(AuthProvider):
         )
         session.mark_validated(config.revalidate_interval)
         data.async_set_session(session)
-        return (
-            previous_refresh_token
-            if previous_refresh_token != tokens.refresh_token
-            else None
-        )
+        return replaced if replaced != tokens.refresh_token else None
 
     async def async_complete_login(
         self,
@@ -486,13 +451,18 @@ class OidcAuthProvider(AuthProvider):
     ) -> str | None:
         """Apply identity claims and commit a session atomically."""
         async with self._revalidate_lock:
-            if (
-                not credentials.is_new
-                and await self.hass.auth.async_get_user_by_credentials(credentials)
-                is None
-            ):
-                raise InvalidAuthError("OIDC credentials were removed")
-            await self.async_sync_admin(credentials, claims)
+            if not credentials.is_new:
+                if (
+                    await self.hass.auth.async_get_user_by_credentials(credentials)
+                    is None
+                ):
+                    raise InvalidAuthError("OIDC credentials were removed")
+                session = (await self._async_get_data()).sessions.get(credentials.id)
+                await self._async_apply_admin_grant(
+                    credentials.id,
+                    granted_by_provider=session is not None and session.is_admin,
+                    grants_admin=self.oidc_config.grants_admin(claims),
+                )
             return await self._async_record_session(
                 credential_id=credentials.id,
                 claims=claims,
@@ -505,24 +475,20 @@ class OidcAuthProvider(AuthProvider):
         if not self.is_configured or self.data is None:
             return
 
-        # Runs before, and independently of, the lock below. A deadline that has
-        # already passed must not be postponed by an identity provider that is
-        # slow to answer somebody else's refresh.
+        # Expired first and outside the lock, so a slow identity provider cannot
+        # postpone a deadline that has already passed.
         await self._async_expire_sessions()
 
-        # A slow identity provider can make a pass outlast the interval, and
-        # refreshing the same session twice would burn a rotating refresh token.
+        # Refreshing a session twice would burn a rotating refresh token.
         if self._revalidate_lock.locked():
             _LOGGER.debug("Previous revalidation pass is still running")
             return
 
         async with self._revalidate_lock:
-            # One snapshot for the whole pass, so a reconfiguration midway cannot
-            # apply the old settings to some sessions and the new ones to others.
+            # One snapshot, so a reconfiguration midway cannot mix settings.
             data = self.data
             config = self.oidc_config
             timestamp = now.timestamp()
-            # Ended together, because ending one walks every user.
             expired: list[OidcSession] = []
             for session in list(data.sessions.values()):
                 if timestamp < session.refresh_after:
@@ -534,12 +500,7 @@ class OidcAuthProvider(AuthProvider):
                 await self._async_end_sessions(expired)
 
     async def _async_expire_sessions(self) -> None:
-        """End every session whose deadline has passed.
-
-        Purely local, so the bound on how long a withdrawn session keeps its
-        Home Assistant tokens is the worker interval rather than however long the
-        identity provider takes to respond.
-        """
+        """End every session whose deadline has passed, without network I/O."""
         assert self.data is not None
         now = time.time()
         if expired := [
@@ -554,20 +515,13 @@ class OidcAuthProvider(AuthProvider):
 
     @callback
     def _async_session_is_current(self, data: OidcStore, session: OidcSession) -> bool:
-        """Return if the store still holds this exact session.
-
-        A new login or a teardown puts a different object in its place, so
-        identity is what tells a worker that its result is stale.
-        """
+        """Return if the store still holds this exact session object."""
         return data.sessions.get(session.credential_id) is session
 
     async def _async_revalidate_session(
         self, data: OidcStore, config: OidcConfig, session: OidcSession
     ) -> bool:
-        """Ask the identity provider whether a session is still valid.
-
-        Returns whether the caller has to end it.
-        """
+        """Ask the identity provider about a session; return if it must end."""
         if session.refresh_token is None:
             return time.time() >= session.revalidate_after
 
@@ -594,8 +548,7 @@ class OidcAuthProvider(AuthProvider):
             _LOGGER.info("Identity provider revoked an OIDC session, signing it out")
             return True
         except OidcTransientError as err:
-            # Retried only while the grace window lasts; a provider that stays
-            # unreachable must not keep a session alive past its deadline.
+            # Retried only until the deadline, never past it.
             _LOGGER.debug("Could not revalidate OIDC session yet: %s", err)
             return time.time() >= session.revalidate_after
         except OidcError as err:
@@ -605,8 +558,7 @@ class OidcAuthProvider(AuthProvider):
         if not self._async_session_is_current(data, session):
             return False
 
-        # Only the token and the deadlines move; the display name and username
-        # are read once, while the Home Assistant user is created.
+        # The profile is read once at user creation; only the deadlines move.
         session.mark_validated(config.revalidate_interval)
         data.async_set_session(session)
         return False
@@ -618,12 +570,9 @@ class OidcAuthProvider(AuthProvider):
         session: OidcSession,
         claims: Mapping[str, Any],
     ) -> None:
-        """Apply group memberships a refreshed ID token states.
+        """Apply the group memberships a refreshed ID token states.
 
-        Only claims that actually carry the group list are authoritative. An
-        identity provider that leaves them out of refresh responses says nothing
-        about entitlement, so the grant is left for the next interactive login
-        rather than being read as renewed or withdrawn.
+        A refresh response without the groups claim says nothing about them.
         """
         if GROUPS_CLAIM not in claims:
             return
@@ -735,11 +684,7 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
     async def async_step_authorize(
         self, user_input: dict[str, str] | None = None
     ) -> AuthFlowResult:
-        """Collect the result of the redirect.
-
-        An external step may only move to another external step or to done, so
-        failures are recorded and reported by the next step.
-        """
+        """Record the result of the redirect for the finish step to report."""
         if user_input is not None:
             self._code = user_input.get("code")
             self._error = user_input.get("error")

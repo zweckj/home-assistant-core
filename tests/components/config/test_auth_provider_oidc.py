@@ -74,11 +74,7 @@ async def test_get_reports_a_discarded_configuration(
     hass_ws_client: WebSocketGenerator,
     oidc_provider: OidcAuthProvider,
 ) -> None:
-    """Test settings lost to corrupt storage are distinguishable from none.
-
-    Both leave the provider unconfigured, so without this an administrator
-    cannot tell that single sign-on stopped working.
-    """
+    """Test settings lost to corrupt storage are distinguishable from none."""
     assert oidc_provider.data is not None
     oidc_provider.data.config_discarded = True
 
@@ -660,11 +656,7 @@ async def test_unlink_ignores_a_password_from_a_disabled_provider(
     oidc_provider: OidcAuthProvider,
     hass_admin_user: MockUser,
 ) -> None:
-    """Test a stored password only counts while its provider still exists.
-
-    Removing the identity provider login would otherwise leave an account with
-    a credential nothing can authenticate against.
-    """
+    """Test a stored password only counts while its provider still exists."""
     await oidc_provider.async_set_config(
         OidcConfig(issuer=ISSUER, client_id=CLIENT_ID, allow_auto_create=False)
     )

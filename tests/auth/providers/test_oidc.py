@@ -288,11 +288,7 @@ async def test_discovery_requires_endpoints(
 async def test_discovery_allows_an_issuer_with_a_trailing_slash(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
 ) -> None:
-    """Test providers that end their issuer in a slash are usable.
-
-    Providers disagree on the trailing slash, and the advertised value is what
-    the ID token has to match.
-    """
+    """Test providers that end their issuer in a slash are usable."""
     issuer = f"{ISSUER}/"
     aioclient_mock.get(DISCOVERY_URL, json=discovery_document(issuer=issuer))
     client = OidcClient(hass, issuer=issuer, client_id=CLIENT_ID)
@@ -449,10 +445,7 @@ async def test_verify_id_token_rejects_foreign_signature(client: OidcClient) -> 
 async def test_verify_id_token_rejects_symmetric_algorithm(
     client: OidcClient,
 ) -> None:
-    """Test an ID token signed with the client secret is refused.
-
-    Accepting HS256 would let anyone holding the client secret mint tokens.
-    """
+    """Test an ID token signed with the client secret is refused."""
     token = jwt.encode(
         {
             "iss": ISSUER,
@@ -657,11 +650,7 @@ async def test_verify_id_token_rejects_a_key_not_published_for_signing(
     signing_key: rsa.RSAPrivateKey,
     metadata: dict[str, Any],
 ) -> None:
-    """Test a key the issuer did not publish for verifying is not trusted.
-
-    The signature is genuine; what is rejected is using a key for a purpose the
-    issuer declared it is not for.
-    """
+    """Test a key the issuer did not publish for verifying is not trusted."""
     client = _client_with_jwk(hass, aioclient_mock, _jwk(signing_key, **metadata))
 
     with pytest.raises(OidcIdTokenError, match="not published"):
@@ -692,11 +681,7 @@ async def test_verify_id_token_binds_the_algorithm_the_key_declares(
     aioclient_mock: AiohttpClientMocker,
     signing_key: rsa.RSAPrivateKey,
 ) -> None:
-    """Test a key declaring one algorithm cannot verify another.
-
-    The provider advertises both, so only the key's own declaration stops the
-    token being accepted under an algorithm it was not published for.
-    """
+    """Test a key declaring one algorithm cannot verify another."""
     client = _client_with_jwk(
         hass,
         aioclient_mock,
@@ -715,11 +700,7 @@ async def test_verify_id_token_allows_any_advertised_algorithm_without_a_declara
     aioclient_mock: AiohttpClientMocker,
     signing_key: rsa.RSAPrivateKey,
 ) -> None:
-    """Test a key that declares no algorithm is not pinned to a guessed one.
-
-    Binding the derived default would refuse providers that legitimately sign
-    RS384 or RS512 with an RSA key whose JWK states no algorithm.
-    """
+    """Test a key that declares no algorithm is not pinned to a guessed one."""
     client = _client_with_jwk(
         hass,
         aioclient_mock,
@@ -1148,11 +1129,7 @@ async def test_login_flow_issues_credentials_for_linking(
     mock_idp: AiohttpClientMocker,
     signing_key: rsa.RSAPrivateKey,
 ) -> None:
-    """Test an unknown identity can still be linked to an existing account.
-
-    Without auto creation there is no other way in, so the flow has to hand out
-    credentials that /auth/link_user can attach to the signed in user.
-    """
+    """Test an unknown identity can still be linked to an existing account."""
     await provider.async_set_config(
         OidcConfig(issuer=ISSUER, client_id=CLIENT_ID, allow_auto_create=False)
     )
@@ -1202,11 +1179,7 @@ async def _complete_login(
     userinfo: dict[str, Any] | None = None,
     **id_token_claims: Any,
 ) -> AuthFlowResult:
-    """Run a login flow to the end and return its result.
-
-    The mocks are rebuilt every time because the mocker answers with the first
-    registration that matches, which would replay a stale nonce.
-    """
+    """Run a login flow to the end and return its result."""
     mock_idp.clear_requests()
     mock_idp.get(DISCOVERY_URL, json=discovery_document())
     mock_idp.get(JWKS_URL, json=jwks)
@@ -1337,11 +1310,7 @@ async def test_login_strips_a_pre_existing_admin_that_loses_the_group(
     signing_key: rsa.RSAPrivateKey,
     jwks: dict[str, Any],
 ) -> None:
-    """Test seeing the group once puts the rights under the identity provider.
-
-    The account was made an administrator inside Home Assistant, so losing the
-    group has to demote it all the same.
-    """
+    """Test seeing the group once puts the rights under the identity provider."""
     result = await _complete_login(manager, mock_idp, signing_key, jwks, groups=[])
     user = await manager.async_get_or_create_user(result["result"])
     await manager.async_update_user(user, group_ids=[GROUP_ID_ADMIN])
@@ -1361,11 +1330,7 @@ async def test_login_restores_the_group_a_demoted_user_came_from(
     signing_key: rsa.RSAPrivateKey,
     jwks: dict[str, Any],
 ) -> None:
-    """Test a demotion gives back the rights the account had, not more.
-
-    Permissions come from the groups, so dropping a read only user into the
-    regular group would quietly widen their access.
-    """
+    """Test a demotion gives back the rights the account had, not more."""
     result = await _complete_login(manager, mock_idp, signing_key, jwks, groups=[])
     user = await manager.async_get_or_create_user(result["result"])
     await manager.async_update_user(user, group_ids=[GROUP_ID_READ_ONLY])
@@ -1535,10 +1500,7 @@ async def test_login_flow_skips_userinfo_for_a_known_account(
     signing_key: rsa.RSAPrivateKey,
     jwks: dict[str, Any],
 ) -> None:
-    """Test a returning user never costs a userinfo request.
-
-    The claims it fills in are only read while the account is built.
-    """
+    """Test a returning user never costs a userinfo request."""
     result = await _complete_login(
         manager, mock_idp, signing_key, jwks, name=None, preferred_username=None
     )
@@ -1558,11 +1520,7 @@ async def test_login_flow_rejects_userinfo_for_another_subject(
     signing_key: rsa.RSAPrivateKey,
     jwks: dict[str, Any],
 ) -> None:
-    """Test a mismatched userinfo subject stops the login.
-
-    OIDC Core 5.3.2 requires the response to be discarded, because a substituted
-    access token would otherwise import somebody else's claims.
-    """
+    """Test a mismatched userinfo subject stops the login."""
     await provider.async_set_config(
         OidcConfig(issuer=ISSUER, client_id=CLIENT_ID, allow_auto_create=True)
     )
@@ -1608,11 +1566,7 @@ async def test_login_flow_rejects_userinfo_without_a_subject(
 async def test_credentials_are_bound_to_the_issuer(
     manager: auth.AuthManager, provider: oidc_auth.OidcAuthProvider
 ) -> None:
-    """Test the same subject at another issuer is a different account.
-
-    A subject is only unique within an issuer, so repointing Home Assistant at
-    another identity provider must not hand over the existing accounts.
-    """
+    """Test the same subject at another issuer is a different account."""
     user = await manager.async_create_user("Alice")
     first = await provider.async_get_or_create_credentials(
         {"issuer": ISSUER, "subject": SUBJECT}
@@ -2146,11 +2100,7 @@ async def test_revalidation_leaves_the_groups_alone(
     provider: oidc_auth.OidcAuthProvider,
     mock_idp: AiohttpClientMocker,
 ) -> None:
-    """Test a background refresh does not restate the group membership.
-
-    Groups are only read while somebody signs in, so revalidation must not
-    reinterpret a session it never had claims for.
-    """
+    """Test a background refresh does not restate the group membership."""
     credentials = provider.async_create_credentials({"subject": SUBJECT})
     await provider.async_record_session(
         credential_id=credentials.id,
@@ -2226,12 +2176,7 @@ async def test_revalidation_withdraws_admin_the_provider_took_away(
     mock_idp: AiohttpClientMocker,
     signing_key: rsa.RSAPrivateKey,
 ) -> None:
-    """Test losing the admin group is applied without a new interactive login.
-
-    A refreshed ID token that states the groups is authoritative, so keeping the
-    rights until the user happens to sign in again would leave them stale for as
-    long as the identity provider keeps accepting the refresh.
-    """
+    """Test losing the admin group is applied without a new interactive login."""
     user, credentials = await _linked_admin(
         manager, provider, groups=["home_assistant_admin"]
     )
@@ -2345,11 +2290,7 @@ async def test_revalidation_without_group_claims_leaves_admin_alone(
     mock_idp: AiohttpClientMocker,
     signing_key: rsa.RSAPrivateKey,
 ) -> None:
-    """Test an ID token that omits the groups says nothing about entitlement.
-
-    Reading a refresh that carries no group list as an empty one would demote
-    every user of an identity provider that simply leaves them out.
-    """
+    """Test an ID token that omits the groups says nothing about entitlement."""
     user, credentials = await _linked_admin(
         manager, provider, groups=["home_assistant_admin"]
     )
@@ -2463,11 +2404,7 @@ async def test_revalidation_ends_a_session_past_its_deadline(
     status: int,
     body: dict[str, Any],
 ) -> None:
-    """Test the deadline terminates access even while refreshes keep failing.
-
-    Refusing to mint new tokens is not revocation: the Home Assistant tokens
-    already issued have to go, which is what closes existing connections.
-    """
+    """Test the deadline terminates access even while refreshes keep failing."""
     user = await _non_owner_user(manager)
     credentials = provider.async_create_credentials({"subject": SUBJECT})
     await manager.async_link_user(user, credentials)
@@ -2496,11 +2433,7 @@ async def test_expiry_is_not_delayed_by_a_slow_identity_provider(
     manager: auth.AuthManager,
     provider: oidc_auth.OidcAuthProvider,
 ) -> None:
-    """Test one stuck refresh cannot hold up another session's deadline.
-
-    The worker walks sessions serially, so tying revocation to that walk would
-    let an unresponsive identity provider extend everybody's access.
-    """
+    """Test one stuck refresh cannot hold up another session's deadline."""
     slow = provider.async_create_credentials({"subject": "slow-user"})
     await provider.async_record_session(
         credential_id=slow.id,
@@ -2717,11 +2650,7 @@ async def test_editing_settings_keeps_existing_sessions(
     provider: oidc_auth.OidcAuthProvider,
     change: dict[str, Any],
 ) -> None:
-    """Test an edit that keeps the same issuer does not sign everybody out.
-
-    Renaming the provider used to log out every user, revoke their tokens and
-    strip administrator rights the provider had granted.
-    """
+    """Test an edit that keeps the same issuer does not sign everybody out."""
     user = await manager.async_create_user("Alice")
     credentials = provider.async_create_credentials({"subject": SUBJECT})
     await manager.async_link_user(user, credentials)
@@ -2795,11 +2724,7 @@ async def _start_login(
 async def test_login_refuses_plain_http_reachable_from_outside(
     manager: auth.AuthManager,
 ) -> None:
-    """Test a login is not started over a connection strangers can read.
-
-    The browser carries the authorization code out and Home Assistant's own
-    tokens back, so plain HTTP would hand both to anyone on the path.
-    """
+    """Test a login is not started over a connection strangers can read."""
     result = await _start_login(manager, "http://ha.example.com", internal=False)
 
     assert result["type"] is FlowResultType.ABORT
@@ -2876,10 +2801,7 @@ async def test_login_starts_over_a_usable_transport(
     url: str,
     internal: bool,
 ) -> None:
-    """Test HTTPS and the internal URL both remain usable.
-
-    A local install served over plain HTTP is a deliberate exception.
-    """
+    """Test HTTPS and the internal URL both remain usable."""
     result = await _start_login(manager, url, internal=internal)
 
     assert result["type"] is FlowResultType.EXTERNAL_STEP

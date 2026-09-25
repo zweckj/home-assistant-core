@@ -479,8 +479,7 @@ def _create_auth_code_store(
         try:
             await provider.async_auth_code_expired(credentials)
         except Exception:
-            # Detached from any caller, so a failure would otherwise leave a
-            # session behind the provider with no trace of why.
+            # Runs detached, so log rather than lose the failure.
             _LOGGER.exception(
                 "Error cleaning up after an expired %s authorization code",
                 credentials.auth_provider_type,
@@ -488,9 +487,7 @@ def _create_auth_code_store(
 
     @callback
     def store_result(
-        client_id: str,
-        result: Credentials,
-        purpose: AuthCodePurpose,
+        client_id: str, result: Credentials, purpose: AuthCodePurpose
     ) -> str:
         """Store flow result and return a code to retrieve it."""
         if not isinstance(result, Credentials):
@@ -514,9 +511,7 @@ def _create_auth_code_store(
 
     @callback
     def retrieve_result(
-        client_id: str,
-        code: str,
-        purpose: AuthCodePurpose,
+        client_id: str, code: str, purpose: AuthCodePurpose
     ) -> Credentials | None:
         """Retrieve flow result."""
         key = (client_id, code)

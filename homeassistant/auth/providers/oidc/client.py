@@ -1,8 +1,7 @@
 """OpenID Connect relying party client.
 
-Home Assistant already depends on PyJWT, so the cryptography and the registered
-claim validation are delegated to it. Everything that needs I/O is done here with
-aiohttp, because PyJWT's own ``PyJWKClient`` fetches over blocking urllib.
+Cryptography and claim validation come from PyJWT; all I/O goes through aiohttp,
+since PyJWT's own key client fetches with blocking urllib.
 """
 
 import asyncio
@@ -38,9 +37,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# The hash an at_hash claim is built with is dictated by the signing algorithm.
-# EdDSA is left out on purpose: OpenID Connect does not pin a hash for it, so
-# rather than guess we skip the check for it.
+# The at_hash digest follows the signing algorithm. OpenID Connect pins none for
+# EdDSA, so it is left out and its at_hash goes unchecked.
 _AT_HASH_ALGORITHMS: dict[str, str] = {
     "RS256": "sha256",
     "PS256": "sha256",
@@ -68,11 +66,7 @@ type JWKDict = dict[str, Any]
 
 
 def _may_verify_signatures(jwk: JWKDict) -> bool:
-    """Return if a JWK is published for verifying signatures.
-
-    RFC 7517 makes ``use`` and ``key_ops`` optional, so a key that states
-    neither stays usable; one that states something else is taken at its word.
-    """
+    """Return if a JWK may verify signatures; use and key_ops are optional."""
     if (use := jwk.get("use")) is not None and use != "sig":
         return False
     if (key_ops := jwk.get("key_ops")) is not None:
@@ -93,11 +87,7 @@ class OidcTokenError(OidcError):
 
 
 class OidcInvalidGrantError(OidcTokenError):
-    """Raised when a grant is rejected and will never succeed again.
-
-    This is how an identity provider reports that a session was revoked or that
-    the user is no longer allowed to sign in.
-    """
+    """Raised when the identity provider revoked a grant for good."""
 
 
 class OidcTransientError(OidcError):
@@ -234,8 +224,7 @@ class OidcClient:
         if not isinstance(document, dict):
             raise OidcDiscoveryError("Discovery document is not a JSON object")
 
-        # Issuer identifiers are compared exactly, including a trailing slash.
-        # Accepting metadata for another identifier would break issuer binding.
+        # Compared exactly, trailing slash included, to keep issuer binding.
         advertised = document.get("issuer")
         if not isinstance(advertised, str) or advertised != self.issuer:
             raise OidcDiscoveryError(
@@ -268,8 +257,7 @@ class OidcClient:
                 jwks_uri=_require_https(
                     document["jwks_uri"], "jwks_uri", allow_http=allow_http
                 ),
-                # Both carry credentials, so they get the same treatment as the
-                # endpoints the spec makes mandatory.
+                # Both carry tokens, so they are held to the same rule.
                 userinfo_endpoint=_optional_https(
                     document.get("userinfo_endpoint"),
                     "userinfo_endpoint",
@@ -413,8 +401,7 @@ class OidcClient:
         if refresh_token is not None and not isinstance(refresh_token, str):
             raise OidcTokenError("Token endpoint returned a non-string refresh_token")
 
-        # The token is sent to the userinfo endpoint as a bearer, so anything the
-        # provider labels differently would be used in a way it did not intend.
+        # Sent to userinfo as a bearer, so any other token type is refused.
         token_type = body.get("token_type")
         if not isinstance(token_type, str) or token_type.lower() != "bearer":
             raise OidcTokenError(
@@ -540,8 +527,7 @@ class OidcClient:
         """Return the public key for a key id, refetching the JWKS if needed."""
         entry = await self._async_lookup_key(kid)
 
-        # An unknown key id usually means the provider rotated its keys, but the
-        # refetch is rate limited so bogus ones cannot hammer the provider.
+        # An unknown key id usually means rotation; the refetch is rate limited.
         if entry is None and (
             time.time() - self._jwks_fetched_at >= JWKS_REFETCH_COOLDOWN
         ):
@@ -576,8 +562,7 @@ class OidcClient:
                     or any(not isinstance(key, dict) for key in keys)
                 ):
                     raise OidcIdTokenError("Provider key set is not a JWKS object")
-                # Parsed one by one so the JWK metadata stays paired with the key
-                # it belongs to; PyJWKSet drops what it cannot read.
+                # One by one, so each key stays paired with its JWK metadata.
                 parsed: list[tuple[JWKDict, jwt.PyJWK]] = []
                 for key in keys:
                     try:
@@ -612,17 +597,14 @@ class OidcClient:
         except jwt.InvalidTokenError as err:
             raise OidcIdTokenError(f"Malformed ID token: {err}") from err
 
-        # Checked up front so an unacceptable algorithm gives a clear error, but
-        # jwt.decode is still handed the full list so it does its own matching.
+        # Checked up front for a clear error; jwt.decode still matches the list.
         if (algorithm := header.get("alg")) not in algorithms:
             raise OidcIdTokenError(f"ID token uses unaccepted algorithm {algorithm!r}")
 
         raw, jwk = await self._async_signing_key(header.get("kid"))
 
-        # Handing PyJWT the JWK binds verification to the algorithm the key
-        # declares. Only when it declares one: PyJWK otherwise derives a default
-        # from the key type, which would reject a provider legitimately signing
-        # RS384 or RS512 with an RSA key that states no algorithm.
+        # A JWK that declares its algorithm pins verification to it. One that
+        # does not would get a key-type default that rejects valid RS384/RS512.
         key: Any = jwk if raw.get("alg") else jwk.key
 
         try:
@@ -638,8 +620,8 @@ class OidcClient:
         except jwt.InvalidTokenError as err:
             raise OidcIdTokenError(f"ID token rejected: {err}") from err
 
-        # With more than one audience the authorized party has to name us, so a
-        # token minted for another client cannot be replayed here.
+        # With several audiences, azp has to name us so another client's token
+        # cannot be replayed here.
         audience = claims["aud"]
         authorized_party = claims.get("azp")
         if isinstance(audience, list) and len(audience) > 1 and not authorized_party:
@@ -657,11 +639,7 @@ class OidcClient:
     def _verify_at_hash(
         self, claims: dict[str, Any], algorithm: str, access_token: str | None
     ) -> None:
-        """Check that the ID token was issued with this access token.
-
-        Optional for the authorization code flow, so it is only enforced when the
-        provider sends it.
-        """
+        """Check the ID token was issued with this access token, if it says so."""
         if (at_hash := claims.get("at_hash")) is None or access_token is None:
             return
 
@@ -674,9 +652,7 @@ class OidcClient:
             raise OidcIdTokenError("Access token is not ASCII encoded") from err
 
         if expected is None:
-            # Only EdDSA reaches this, because OpenID Connect pins no hash for
-            # it. Logged loudly because a binding the provider offered is going
-            # unchecked.
+            # Only EdDSA gets here; warn since an offered binding goes unchecked.
             _LOGGER.warning(
                 "ID token carries an at_hash that cannot be checked for"
                 " algorithm %s, the access token binding is unverified",

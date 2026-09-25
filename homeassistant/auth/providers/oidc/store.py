@@ -63,14 +63,7 @@ class OidcConfig:
     def trust_key(
         self,
     ) -> tuple[str, str, str | None, tuple[str, ...], str | None, bool]:
-        """Return the fields an existing session is only meaningful under.
-
-        Who issued it, and the group that decided what it was allowed to do. A
-        change to the mapping is an authorization change, so the grants made
-        under the old one are not carried over. Relaxing or tightening transport
-        security changes what a session could have been exposed to, so it
-        counts too.
-        """
+        """Return the settings whose change ends every existing session."""
         return (
             self.issuer,
             self.client_id,
