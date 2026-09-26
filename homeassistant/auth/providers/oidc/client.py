@@ -12,7 +12,6 @@ import hashlib
 import logging
 import time
 from typing import Any
-from urllib.parse import quote
 
 from aiohttp import ClientError
 import jwt
@@ -29,8 +28,10 @@ from homeassistant.exceptions import (
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.oauth2 import (
+    ClientAuthMethod,
     async_token_request,
     build_authorize_url,
+    client_auth,
     compute_code_challenge,
 )
 
@@ -393,32 +394,19 @@ class OidcClient:
 
     def _client_auth(
         self, metadata: ProviderMetadata, data: dict[str, str]
-    ) -> tuple[dict[str, str], dict[str, str]]:
+    ) -> tuple[dict[str, Any], dict[str, str]]:
         """Return the payload and headers that authenticate us as the client."""
         methods = metadata.token_endpoint_auth_methods_supported
-        if self.client_secret is None:
-            return {**data, "client_id": self.client_id}, {}
+        method: ClientAuthMethod
         if not methods or "client_secret_basic" in methods:
-            return data, {"Authorization": self._basic_auth_header()}
-        if "client_secret_post" in methods:
-            return {
-                **data,
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-            }, {}
-        raise OidcTokenError(
-            "The provider offers no supported client authentication method"
-        )
-
-    def _basic_auth_header(self) -> str:
-        """Return the HTTP basic authorization header value."""
-        assert self.client_secret is not None
-        # RFC 6749 section 2.3.1 requires form encoding before base64.
-        credentials = (
-            f"{quote(self.client_id, safe='')}:{quote(self.client_secret, safe='')}"
-        )
-        encoded = base64.b64encode(credentials.encode()).decode()
-        return f"Basic {encoded}"
+            method = "client_secret_basic"
+        elif "client_secret_post" in methods or self.client_secret is None:
+            method = "client_secret_post"
+        else:
+            raise OidcTokenError(
+                "The provider offers no supported client authentication method"
+            )
+        return client_auth(data, self.client_id, self.client_secret, method)
 
     async def async_merge_userinfo(
         self, claims: dict[str, Any], access_token: str
