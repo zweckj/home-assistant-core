@@ -6,9 +6,9 @@ since PyJWT's own key client fetches with blocking urllib.
 
 import asyncio
 import base64
+from collections.abc import Callable
 from dataclasses import dataclass
 import hashlib
-import hmac
 import logging
 import time
 from typing import Any
@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 from aiohttp import ClientError
 import jwt
+import probatio
 from yarl import URL
 
 from homeassistant.core import HomeAssistant
@@ -69,7 +70,7 @@ def _compute_at_hash(access_token: str, algorithm: str) -> str | None:
     """Return the at_hash an access token should have for a signing algorithm."""
     if (hash_name := _AT_HASH_ALGORITHMS.get(algorithm)) is None:
         return None
-    digest = hashlib.new(hash_name, access_token.encode("ascii")).digest()
+    digest = hashlib.new(hash_name, access_token.encode()).digest()
     # OpenID Connect hashes the token and keeps the left-most half.
     half = digest[: len(digest) // 2]
     return base64.urlsafe_b64encode(half).decode("ascii").rstrip("=")
@@ -83,7 +84,7 @@ def _may_verify_signatures(jwk: JWKDict) -> bool:
     if (use := jwk.get("use")) is not None and use != "sig":
         return False
     if (key_ops := jwk.get("key_ops")) is not None:
-        return isinstance(key_ops, list) and "verify" in key_ops
+        return "verify" in key_ops
     return True
 
 
@@ -139,41 +140,77 @@ class TokenResponse:
     refresh_token: str | None = None
 
 
-def _require_https(url: str, field: str, *, allow_http: bool = False) -> str:
-    """Return an unambiguous HTTPS endpoint URL."""
+def _https_url(allow_http: bool) -> Callable[[str], str]:
+    """Return a validator for an unambiguous HTTPS endpoint URL."""
     schemes = {"https", "http"} if allow_http else {"https"}
-    try:
-        parsed = URL(url)
-    except (TypeError, ValueError) as err:
-        raise OidcDiscoveryError(f"{field} must be an https URL") from err
-    if (
-        parsed.scheme not in schemes
-        or not parsed.host
-        or parsed.user is not None
-        or parsed.fragment
-    ):
-        raise OidcDiscoveryError(
-            f"{field} must be an https URL without credentials or a fragment"
-        )
-    return url
+
+    def validate(value: str) -> str:
+        try:
+            url = URL(value)
+        except ValueError as err:
+            raise probatio.Invalid("must be an https URL") from err
+        if (
+            url.scheme not in schemes
+            or not url.host
+            or url.user is not None
+            or url.fragment
+        ):
+            raise probatio.Invalid(
+                "must be an https URL without credentials or a fragment"
+            )
+        return value
+
+    return validate
 
 
-def _optional_https(url: Any, field: str, *, allow_http: bool = False) -> str | None:
-    """Return an optional endpoint, rejecting anything that is not HTTPS."""
-    if url is None:
-        return None
-    if not isinstance(url, str):
-        raise OidcDiscoveryError(f"{field} is not a URL")
-    return _require_https(url, field, allow_http=allow_http)
+_STRINGS = probatio.All([str], probatio.Coerce(tuple))
 
 
-def _string_tuple(value: Any, field: str) -> tuple[str, ...]:
-    """Return a validated tuple of strings from discovery metadata."""
-    if value is None:
-        return ()
-    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-        raise OidcDiscoveryError(f"{field} must be an array of strings")
-    return tuple(value)
+def _discovery_schema(allow_http: bool) -> probatio.Schema:
+    """Return the schema for the parts of a discovery document that we use."""
+    endpoint = probatio.All(str, _https_url(allow_http))
+    return probatio.Schema(
+        {
+            probatio.Required("issuer"): str,
+            probatio.Required("authorization_endpoint"): endpoint,
+            probatio.Required("token_endpoint"): endpoint,
+            probatio.Required("jwks_uri"): endpoint,
+            # Both carry tokens, so they are held to the same rule.
+            probatio.Optional("userinfo_endpoint"): probatio.Any(endpoint, None),
+            probatio.Optional("revocation_endpoint"): probatio.Any(endpoint, None),
+            probatio.Optional("id_token_signing_alg_values_supported"): _STRINGS,
+            probatio.Optional("token_endpoint_auth_methods_supported"): _STRINGS,
+            probatio.Optional("scopes_supported"): _STRINGS,
+            probatio.Optional("code_challenge_methods_supported"): _STRINGS,
+        },
+        extra=probatio.REMOVE_EXTRA,
+    )
+
+
+_TOKEN_RESPONSE_SCHEMA = probatio.Schema(
+    {
+        probatio.Required("access_token"): str,
+        # Sent to userinfo as a bearer, so any other token type is refused.
+        probatio.Required("token_type"): probatio.All(str, probatio.Lower, "bearer"),
+        probatio.Optional("id_token"): probatio.Any(str, None),
+        probatio.Optional("refresh_token"): probatio.Any(str, None),
+    },
+    extra=probatio.REMOVE_EXTRA,
+)
+
+_JWKS_SCHEMA = probatio.Schema(
+    {probatio.Required("keys"): list}, extra=probatio.ALLOW_EXTRA
+)
+
+# Checked per key, so one malformed key does not take the whole set down.
+_JWK_SCHEMA = probatio.Schema(
+    {probatio.Optional("use"): str, probatio.Optional("key_ops"): [str]},
+    extra=probatio.ALLOW_EXTRA,
+)
+
+_USERINFO_SCHEMA = probatio.Schema(
+    {probatio.Required("sub"): str}, extra=probatio.ALLOW_EXTRA
+)
 
 
 class OidcClient:
@@ -223,71 +260,28 @@ class OidcClient:
 
     def _parse_metadata(self, document: Any) -> ProviderMetadata:
         """Validate and convert a discovery document."""
-        if not isinstance(document, dict):
-            raise OidcDiscoveryError("Discovery document is not a JSON object")
+        try:
+            parsed = _discovery_schema(self.allow_insecure_transport)(document)
+        except probatio.Invalid as err:
+            raise OidcDiscoveryError(f"Discovery document is invalid: {err}") from err
 
         # Compared exactly, trailing slash included, to keep issuer binding.
-        advertised = document.get("issuer")
-        if not isinstance(advertised, str) or advertised != self.issuer:
+        if parsed["issuer"] != self.issuer:
             raise OidcDiscoveryError(
-                f"Discovery document issuer {advertised!r} does not"
+                f"Discovery document issuer {parsed['issuer']!r} does not"
                 f" match the configured issuer {self.issuer!r}"
             )
 
-        challenge_methods = _string_tuple(
-            document.get("code_challenge_methods_supported"),
-            "code_challenge_methods_supported",
-        )
+        challenge_methods = parsed.pop("code_challenge_methods_supported", ())
         if challenge_methods and PKCE_CHALLENGE_METHOD not in challenge_methods:
             raise OidcDiscoveryError(
                 f"The provider does not offer the {PKCE_CHALLENGE_METHOD} PKCE"
                 f" challenge method, it only offers {', '.join(challenge_methods)}"
             )
 
-        allow_http = self.allow_insecure_transport
-        try:
-            return ProviderMetadata(
-                issuer=advertised,
-                authorization_endpoint=_require_https(
-                    document["authorization_endpoint"],
-                    "authorization_endpoint",
-                    allow_http=allow_http,
-                ),
-                token_endpoint=_require_https(
-                    document["token_endpoint"], "token_endpoint", allow_http=allow_http
-                ),
-                jwks_uri=_require_https(
-                    document["jwks_uri"], "jwks_uri", allow_http=allow_http
-                ),
-                # Both carry tokens, so they are held to the same rule.
-                userinfo_endpoint=_optional_https(
-                    document.get("userinfo_endpoint"),
-                    "userinfo_endpoint",
-                    allow_http=allow_http,
-                ),
-                revocation_endpoint=_optional_https(
-                    document.get("revocation_endpoint"),
-                    "revocation_endpoint",
-                    allow_http=allow_http,
-                ),
-                id_token_signing_alg_values_supported=_string_tuple(
-                    document.get("id_token_signing_alg_values_supported"),
-                    "id_token_signing_alg_values_supported",
-                ),
-                token_endpoint_auth_methods_supported=_string_tuple(
-                    document.get("token_endpoint_auth_methods_supported"),
-                    "token_endpoint_auth_methods_supported",
-                ),
-                scopes_supported=_string_tuple(
-                    document.get("scopes_supported"), "scopes_supported"
-                ),
-            )
-        except KeyError as err:
-            raise OidcDiscoveryError(
-                f"Discovery document is missing {err.args[0]}"
-            ) from err
-        except TypeError as err:
-            raise OidcDiscoveryError(f"Discovery document is malformed: {err}") from err
+        return ProviderMetadata(
+            **{key: value for key, value in parsed.items() if value is not None}
+        )
 
     async def _async_fetch_json(self, url: str, what: str) -> Any:
         """Fetch and decode a JSON document."""
@@ -386,29 +380,15 @@ class OidcClient:
         except ValueError as err:
             raise OidcTokenError("Token endpoint returned invalid JSON") from err
 
-        if not isinstance(body, dict) or not isinstance(
-            access_token := body.get("access_token"), str
-        ):
-            raise OidcTokenError("Token endpoint response is missing an access token")
-
-        id_token = body.get("id_token")
-        if id_token is not None and not isinstance(id_token, str):
-            raise OidcTokenError("Token endpoint returned a non-string id_token")
-        refresh_token = body.get("refresh_token")
-        if refresh_token is not None and not isinstance(refresh_token, str):
-            raise OidcTokenError("Token endpoint returned a non-string refresh_token")
-
-        # Sent to userinfo as a bearer, so any other token type is refused.
-        token_type = body.get("token_type")
-        if not isinstance(token_type, str) or token_type.lower() != "bearer":
-            raise OidcTokenError(
-                f"Token endpoint returned unsupported token type {token_type!r}"
-            )
+        try:
+            body = _TOKEN_RESPONSE_SCHEMA(body)
+        except probatio.Invalid as err:
+            raise OidcTokenError(f"Token endpoint response is invalid: {err}") from err
 
         return TokenResponse(
-            access_token=access_token,
-            id_token=id_token,
-            refresh_token=refresh_token,
+            access_token=body["access_token"],
+            id_token=body.get("id_token"),
+            refresh_token=body.get("refresh_token"),
         )
 
     def _client_auth(
@@ -440,11 +420,13 @@ class OidcClient:
         encoded = base64.b64encode(credentials.encode()).decode()
         return f"Basic {encoded}"
 
-    async def async_userinfo(self, access_token: str) -> dict[str, Any]:
-        """Return the claims from the userinfo endpoint."""
+    async def async_merge_userinfo(
+        self, claims: dict[str, Any], access_token: str
+    ) -> dict[str, Any]:
+        """Complete the ID token claims with the userinfo endpoint."""
         metadata = await self.async_metadata()
         if not metadata.userinfo_endpoint:
-            raise OidcError("The provider does not offer a userinfo endpoint")
+            return claims
 
         session = async_get_clientsession(self.hass)
         try:
@@ -469,21 +451,14 @@ class OidcClient:
             raise OidcInvalidGrantError("The identity provider rejected the token")
         if status >= 500:
             raise OidcTransientError(f"Userinfo endpoint returned status {status}")
-        if status >= 400 or not isinstance(body, dict):
+        if status >= 400:
             raise OidcError(f"Userinfo endpoint returned status {status}")
 
-        return body
-
-    async def async_merge_userinfo(
-        self, claims: dict[str, Any], access_token: str
-    ) -> dict[str, Any]:
-        """Complete the ID token claims with the userinfo endpoint."""
-        metadata = await self.async_metadata()
-        if not metadata.userinfo_endpoint:
-            return claims
-
-        info = await self.async_userinfo(access_token)
-        if info.get("sub") != claims["sub"]:
+        try:
+            info: dict[str, Any] = _USERINFO_SCHEMA(body)
+        except probatio.Invalid as err:
+            raise OidcError(f"Userinfo response is invalid: {err}") from err
+        if info["sub"] != claims["sub"]:
             raise OidcIdTokenError("Userinfo response describes a different subject")
         return info | claims
 
@@ -553,18 +528,19 @@ class OidcClient:
             ):
                 metadata = await self.async_metadata()
                 document = await self._async_fetch_json(metadata.jwks_uri, "key set")
-                if (
-                    not isinstance(document, dict)
-                    or not isinstance(keys := document.get("keys"), list)
-                    or any(not isinstance(key, dict) for key in keys)
-                ):
-                    raise OidcIdTokenError("Provider key set is not a JWKS object")
+                try:
+                    keys = _JWKS_SCHEMA(document)["keys"]
+                except probatio.Invalid as err:
+                    raise OidcIdTokenError(
+                        "Provider key set is not a JWKS object"
+                    ) from err
                 # One by one, so each key stays paired with its JWK metadata.
                 parsed: list[tuple[JWKDict, jwt.PyJWK]] = []
                 for key in keys:
                     try:
+                        _JWK_SCHEMA(key)
                         parsed.append((key, jwt.PyJWK(key)))
-                    except (jwt.PyJWTError, TypeError, ValueError) as err:
+                    except (probatio.Invalid, jwt.PyJWTError, ValueError) as err:
                         _LOGGER.debug("Ignoring unusable JWK: %s", err)
                 if not parsed:
                     raise OidcIdTokenError("Provider key set has no usable key")
@@ -618,10 +594,12 @@ class OidcClient:
             raise OidcIdTokenError(f"ID token rejected: {err}") from err
 
         # With several audiences, azp has to name us so another client's token
-        # cannot be replayed here.
-        audience = claims["aud"]
+        # cannot be replayed here. PyJWT already checked that aud includes us.
         authorized_party = claims.get("azp")
-        if isinstance(audience, list) and len(audience) > 1 and not authorized_party:
+        if not authorized_party and claims["aud"] not in (
+            self.client_id,
+            [self.client_id],
+        ):
             raise OidcIdTokenError("ID token has multiple audiences but no azp claim")
         if authorized_party is not None and authorized_party != self.client_id:
             raise OidcIdTokenError("ID token azp claim names a different client")
@@ -640,15 +618,7 @@ class OidcClient:
         if (at_hash := claims.get("at_hash")) is None or access_token is None:
             return
 
-        if not isinstance(at_hash, str):
-            raise OidcIdTokenError("ID token at_hash claim is not a string")
-
-        try:
-            expected = _compute_at_hash(access_token, algorithm)
-        except UnicodeEncodeError as err:
-            raise OidcIdTokenError("Access token is not ASCII encoded") from err
-
-        if expected is None:
+        if (expected := _compute_at_hash(access_token, algorithm)) is None:
             # Only EdDSA gets here; warn since an offered binding goes unchecked.
             _LOGGER.warning(
                 "ID token carries an at_hash that cannot be checked for"
@@ -657,7 +627,8 @@ class OidcClient:
             )
             return
 
-        if not hmac.compare_digest(at_hash, expected):
+        # at_hash is public, so there is no timing to protect.
+        if at_hash != expected:
             raise OidcIdTokenError(
                 "ID token at_hash does not match the access token it came with"
             )

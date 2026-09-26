@@ -151,10 +151,9 @@ from homeassistant.components.http.auth import (
 from homeassistant.components.http.ban import log_invalid_auth
 from homeassistant.components.http.data_validator import RequestDataValidator
 from homeassistant.components.http.view import HomeAssistantView
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2AuthorizeCallbackView
-from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
@@ -172,7 +171,6 @@ DATA_STORE: HassKey[StoreResultType] = HassKey(DOMAIN)
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 DELETE_CURRENT_TOKEN_DELAY = 2
-AUTH_CODE_EXPIRATION = timedelta(minutes=10)
 
 
 def create_auth_code(
@@ -184,7 +182,7 @@ def create_auth_code(
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Component to allow users to login."""
-    store_result, retrieve_result = _create_auth_code_store(hass)
+    store_result, retrieve_result = _create_auth_code_store()
 
     hass.data[DATA_STORE] = store_result
 
@@ -306,9 +304,11 @@ class TokenView(HomeAssistantView):
         try:
             user = await hass.auth.async_get_or_create_user(credential)
         except InvalidAuthError as exc:
+            _LOGGER.warning(
+                "Rejected a %s sign in: %s", credential.auth_provider_type, exc
+            )
             return self.json(
-                {"error": "access_denied", "error_description": str(exc)},
-                status_code=HTTPStatus.FORBIDDEN,
+                {"error": "access_denied"}, status_code=HTTPStatus.FORBIDDEN
             )
 
         if user_access_error := async_user_not_allowed_do_auth(hass, user):
@@ -453,37 +453,11 @@ class LinkUserView(HomeAssistantView):
 
 
 @callback
-def _create_auth_code_store(
-    hass: HomeAssistant,
-) -> tuple[StoreResultType, RetrieveResultType]:
+def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
     """Create an in memory store."""
     temp_results: dict[
-        tuple[str, str],
-        tuple[datetime, Credentials, AuthCodePurpose, CALLBACK_TYPE],
+        tuple[str, str], tuple[datetime, Credentials, AuthCodePurpose]
     ] = {}
-
-    async def async_cleanup(credentials: Credentials) -> None:
-        """Let the provider clean up after its last unused code expires."""
-        if any(stored[1] is credentials for stored in temp_results.values()):
-            return
-        provider = hass.auth.get_auth_provider(
-            credentials.auth_provider_type, credentials.auth_provider_id
-        )
-        if provider is None:
-            _LOGGER.warning(
-                "Cannot clean up after an expired %s authorization code, the"
-                " provider is gone; it may still hold the session",
-                credentials.auth_provider_type,
-            )
-            return
-        try:
-            await provider.async_auth_code_expired(credentials)
-        except Exception:
-            # Runs detached, so log rather than lose the failure.
-            _LOGGER.exception(
-                "Error cleaning up after an expired %s authorization code",
-                credentials.auth_provider_type,
-            )
 
     @callback
     def store_result(
@@ -494,18 +468,10 @@ def _create_auth_code_store(
             raise TypeError("result has to be a Credentials instance")
 
         code = uuid.uuid4().hex
-        key = (client_id, code)
-
-        async def async_expire(_: datetime) -> None:
-            if (stored := temp_results.pop(key, None)) is not None:
-                await async_cleanup(stored[1])
-
-        cancel_expiration = async_call_later(hass, AUTH_CODE_EXPIRATION, async_expire)
-        temp_results[key] = (
+        temp_results[(client_id, code)] = (
             dt_util.utcnow(),
             result,
             purpose,
-            cancel_expiration,
         )
         return code
 
@@ -519,25 +485,21 @@ def _create_auth_code_store(
         if (stored := temp_results.get(key)) is None:
             return None
 
-        created, result, stored_purpose, cancel_expiration = stored
+        created, result, stored_purpose = stored
         # A code minted to attach an identity must not buy tokens, and a login
         # code must not silently attach an identity to whoever is signed in.
         if stored_purpose != purpose:
             return None
 
-        temp_results.pop(key)
-        cancel_expiration()
+        del temp_results[key]
 
         # OAuth 4.2.1
         # The authorization code MUST expire shortly after it is issued to
         # mitigate the risk of leaks.  A maximum authorization code lifetime of
         # 10 minutes is RECOMMENDED.
-        if dt_util.utcnow() - created < AUTH_CODE_EXPIRATION:
+        if dt_util.utcnow() - created < timedelta(minutes=10):
             return result
 
-        hass.async_create_task(
-            async_cleanup(result), "Clean up expired authorization code"
-        )
         return None
 
     return store_result, retrieve_result

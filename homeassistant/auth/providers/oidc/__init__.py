@@ -53,6 +53,7 @@ from .const import (
     GROUPS_CLAIM,
     PROVIDER_TYPE,
     REVALIDATE_CHECK_INTERVAL,
+    UNCLAIMED_SESSION_TIMEOUT,
 )
 from .store import OidcConfig, OidcSession, OidcStore
 
@@ -99,6 +100,8 @@ class OidcAuthProvider(AuthProvider):
         self._pending_credentials: WeakValueDictionary[tuple[str, str], Credentials] = (
             WeakValueDictionary()
         )
+        # New credentials holding a session, with the deadline for claiming them.
+        self._unclaimed: dict[str, tuple[Credentials, float]] = {}
         self._unsub_revalidate: CALLBACK_TYPE | None = None
 
     @property
@@ -208,6 +211,7 @@ class OidcAuthProvider(AuthProvider):
                 data.async_set_config(config)
                 self._client = None
                 self._pending_credentials.clear()
+                self._unclaimed.clear()
                 self._async_schedule_revalidation()
 
         if old_client is not None:
@@ -320,12 +324,6 @@ class OidcAuthProvider(AuthProvider):
         """Drop the identity provider session when the credentials are removed."""
         await self._async_remove_credentials_session(credentials)
 
-    @override
-    async def async_auth_code_expired(self, credentials: Credentials) -> None:
-        """Drop an unlinked identity provider session when its code expires."""
-        if credentials.is_new:
-            await self._async_remove_credentials_session(credentials)
-
     async def _async_remove_credentials_session(self, credentials: Credentials) -> None:
         """Drop and revoke the session for a credential."""
         async with self._config_lock, self._revalidate_lock:
@@ -384,18 +382,19 @@ class OidcAuthProvider(AuthProvider):
         self, refresh_token: RefreshToken, remote_ip: str | None = None
     ) -> None:
         """Reject a refresh token once the identity provider has to be consulted."""
-        if refresh_token.token_type == TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN:
+        if (
+            refresh_token.token_type == TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
+            or (credential := refresh_token.credential) is None
+        ):
             # Long lived tokens opt out of revalidation and are revoked by hand.
             return
 
-        if (credential := refresh_token.credential) is None:
-            return
-        if not self.is_configured:
-            raise InvalidAuthError("Sign in with the identity provider again")
-
-        assert self.data is not None
-        session = self.data.sessions.get(credential.id)
-        if session is None:
+        data = self.data
+        if (
+            data is None
+            or data.config is None
+            or (session := data.sessions.get(credential.id)) is None
+        ):
             raise InvalidAuthError("Sign in with the identity provider again")
 
         if time.time() >= session.revalidate_after:
@@ -469,12 +468,19 @@ class OidcAuthProvider(AuthProvider):
                     granted_by_provider=session is not None and session.is_admin,
                     grants_admin=self.oidc_config.grants_admin(claims),
                 )
-            return await self._async_record_session(
+            replaced = await self._async_record_session(
                 credential_id=credentials.id,
                 claims=claims,
                 tokens=tokens,
                 profile_claims=profile_claims,
             )
+
+        if credentials.is_new:
+            self._unclaimed[credentials.id] = (
+                credentials,
+                time.time() + UNCLAIMED_SESSION_TIMEOUT.total_seconds(),
+            )
+        return replaced
 
     async def _async_revalidate_sessions(self, now: datetime) -> None:
         """Enforce the deadlines and refresh whatever is due."""
@@ -483,6 +489,7 @@ class OidcAuthProvider(AuthProvider):
 
         # Expired first and outside the lock, so a slow identity provider cannot
         # postpone a deadline that has already passed.
+        await self._async_drop_unclaimed_sessions()
         await self._async_expire_sessions()
 
         # Refreshing a session twice would burn a rotating refresh token.
@@ -504,6 +511,16 @@ class OidcAuthProvider(AuthProvider):
 
             if expired:
                 await self._async_end_sessions(expired)
+
+    async def _async_drop_unclaimed_sessions(self) -> None:
+        """Drop sessions of logins whose authorization code was never used."""
+        now = time.time()
+        for credential_id, (credentials, deadline) in list(self._unclaimed.items()):
+            if credentials.is_new and now < deadline:
+                continue
+            del self._unclaimed[credential_id]
+            if credentials.is_new:
+                await self._async_remove_credentials_session(credentials)
 
     async def _async_expire_sessions(self) -> None:
         """End every session whose deadline has passed, without network I/O."""
@@ -531,25 +548,9 @@ class OidcAuthProvider(AuthProvider):
         if session.refresh_token is None:
             return time.time() >= session.revalidate_after
 
+        client = self.async_client()
         try:
-            client = self.async_client()
             tokens = await client.async_refresh_token(session.refresh_token)
-            if not self._async_session_is_current(data, session):
-                return False
-            if tokens.refresh_token:
-                session.refresh_token = tokens.refresh_token
-                data.async_set_session(session)
-            if tokens.id_token is not None:
-                claims = await client.async_verify_id_token(
-                    tokens.id_token, access_token=tokens.access_token
-                )
-                if claims["sub"] != session.subject:
-                    _LOGGER.warning(
-                        "Refreshed ID token describes a different subject,"
-                        " signing out the OIDC session"
-                    )
-                    return True
-                await self._async_apply_refreshed_groups(data, config, session, claims)
         except OidcInvalidGrantError:
             _LOGGER.info("Identity provider revoked an OIDC session, signing it out")
             return True
@@ -560,6 +561,31 @@ class OidcAuthProvider(AuthProvider):
         except OidcError as err:
             _LOGGER.warning("Error revalidating OIDC session: %s", err)
             return time.time() >= session.revalidate_after
+
+        if not self._async_session_is_current(data, session):
+            return False
+        if tokens.refresh_token:
+            session.refresh_token = tokens.refresh_token
+            data.async_set_session(session)
+
+        if tokens.id_token is not None:
+            try:
+                claims = await client.async_verify_id_token(
+                    tokens.id_token, access_token=tokens.access_token
+                )
+            except OidcTransientError as err:
+                _LOGGER.debug("Could not verify the refreshed ID token yet: %s", err)
+                return time.time() >= session.revalidate_after
+            except OidcError as err:
+                _LOGGER.warning("Refreshed ID token rejected: %s", err)
+                return time.time() >= session.revalidate_after
+            if claims["sub"] != session.subject:
+                _LOGGER.warning(
+                    "Refreshed ID token describes a different subject,"
+                    " signing out the OIDC session"
+                )
+                return True
+            await self._async_apply_refreshed_groups(data, config, session, claims)
 
         if not self._async_session_is_current(data, session):
             return False
@@ -611,8 +637,10 @@ class OidcAuthProvider(AuthProvider):
 
         for user in await self.store.async_get_users():
             user_credential_ids = {credentials.id for credentials in user.credentials}
+            group_ids = {group.id for group in user.groups}
             if (
                 user.is_owner
+                or GROUP_ID_ADMIN not in group_ids
                 or not user_credential_ids & admin_credential_ids
                 or any(
                     session.is_admin
@@ -622,9 +650,6 @@ class OidcAuthProvider(AuthProvider):
             ):
                 continue
 
-            group_ids = {group.id for group in user.groups}
-            if GROUP_ID_ADMIN not in group_ids:
-                continue
             group_ids.remove(GROUP_ID_ADMIN)
             await self.hass.auth.async_update_user(
                 user, group_ids=sorted(group_ids or {GROUP_ID_USER})

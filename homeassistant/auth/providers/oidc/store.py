@@ -1,11 +1,13 @@
 """Storage for the OpenID Connect auth provider."""
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 import logging
 import math
 import time
 from typing import Any
+
+import probatio
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
@@ -117,69 +119,59 @@ class OidcSession:
         self.refresh_after = now + revalidate_interval * REVALIDATE_REFRESH_RATIO
 
 
-def _from_dict[_T](cls: type[_T], data: Mapping[str, Any]) -> _T:
-    """Build a dataclass, ignoring keys written by a newer version."""
-    known = {item.name for item in fields(cls)}  # type: ignore[arg-type]
-    return cls(**{key: value for key, value in data.items() if key in known})
+def _finite(value: float) -> float:
+    """Reject a timestamp that could never be reached or compared."""
+    if not math.isfinite(value):
+        raise probatio.Invalid("must be a finite number")
+    return value
 
 
-def _config_from_dict(data: Any) -> OidcConfig:
-    """Deserialize and validate stored provider configuration."""
-    if not isinstance(data, Mapping):
-        raise TypeError("configuration is not an object")
-    config = _from_dict(OidcConfig, data)
-    if (
-        not isinstance(config.issuer, str)
-        or not isinstance(config.client_id, str)
-        or not (config.client_secret is None or isinstance(config.client_secret, str))
-        or not (config.icon_url is None or isinstance(config.icon_url, str))
-        or not isinstance(config.scopes, list)
-        or any(not isinstance(scope, str) for scope in config.scopes)
-        or not isinstance(config.username_claim, str)
-        or not isinstance(config.display_name_claim, str)
-        or not (config.admin_group is None or isinstance(config.admin_group, str))
-        or type(config.allow_auto_create) is not bool
-        or type(config.allow_insecure_transport) is not bool
-        or type(config.revalidate_interval) is not int
-        or not MIN_REVALIDATE_INTERVAL
-        <= config.revalidate_interval
-        <= MAX_REVALIDATE_INTERVAL
-    ):
-        raise TypeError("configuration has invalid fields")
-    return config
+_OPTIONAL_STR = probatio.Any(str, None)
+_TIMESTAMP = probatio.All(probatio.Any(int, float), _finite)
 
+# Keys written by a newer version are dropped rather than rejected.
+_STORAGE_SCHEMA = probatio.Schema(
+    {
+        probatio.Optional("config"): probatio.Any(dict, None),
+        probatio.Optional("sessions"): probatio.Any(dict, None),
+    },
+    extra=probatio.REMOVE_EXTRA,
+)
 
-def _session_from_dict(data: Any) -> OidcSession:
-    """Deserialize and validate a stored identity provider session."""
-    if not isinstance(data, Mapping):
-        raise TypeError("session is not an object")
-    session = _from_dict(OidcSession, data)
-    if (
-        not isinstance(session.credential_id, str)
-        or not isinstance(session.subject, str)
-        or not isinstance(session.revalidate_after, int | float)
-        or isinstance(session.revalidate_after, bool)
-        or not math.isfinite(session.revalidate_after)
-        or not isinstance(session.refresh_after, int | float)
-        or isinstance(session.refresh_after, bool)
-        or not math.isfinite(session.refresh_after)
-        or not (session.refresh_token is None or isinstance(session.refresh_token, str))
-        or not (session.username is None or isinstance(session.username, str))
-        or not (session.display_name is None or isinstance(session.display_name, str))
-        or type(session.is_admin) is not bool
-    ):
-        raise TypeError("session has invalid fields")
-    return session
+_CONFIG_SCHEMA = probatio.Schema(
+    {
+        probatio.Required("issuer"): str,
+        probatio.Required("client_id"): str,
+        probatio.Optional("client_secret"): _OPTIONAL_STR,
+        probatio.Optional("name"): _OPTIONAL_STR,
+        probatio.Optional("icon_url"): _OPTIONAL_STR,
+        probatio.Optional("scopes"): [str],
+        probatio.Optional("username_claim"): str,
+        probatio.Optional("display_name_claim"): str,
+        probatio.Optional("admin_group"): _OPTIONAL_STR,
+        probatio.Optional("allow_auto_create"): bool,
+        probatio.Optional("allow_insecure_transport"): bool,
+        probatio.Optional("revalidate_interval"): probatio.All(
+            int,
+            probatio.Range(min=MIN_REVALIDATE_INTERVAL, max=MAX_REVALIDATE_INTERVAL),
+        ),
+    },
+    extra=probatio.REMOVE_EXTRA,
+)
 
-
-def _session_entry_from_dict(credential_id: Any, data: Any) -> OidcSession:
-    """Deserialize a session entry and validate its storage key."""
-    if not isinstance(credential_id, str):
-        raise TypeError("session key is not a string")
-    session = _session_from_dict(data)
-    if session.credential_id != credential_id:
-        raise TypeError("session credential ID does not match its key")
-    return session
+_SESSION_SCHEMA = probatio.Schema(
+    {
+        probatio.Required("credential_id"): str,
+        probatio.Required("subject"): str,
+        probatio.Optional("revalidate_after"): _TIMESTAMP,
+        probatio.Optional("refresh_after"): _TIMESTAMP,
+        probatio.Optional("refresh_token"): _OPTIONAL_STR,
+        probatio.Optional("username"): _OPTIONAL_STR,
+        probatio.Optional("display_name"): _OPTIONAL_STR,
+        probatio.Optional("is_admin"): bool,
+    },
+    extra=probatio.REMOVE_EXTRA,
+)
 
 
 class OidcStore:
@@ -203,34 +195,29 @@ class OidcStore:
         data: Any = await self._store.async_load()
         if data is None:
             return
-        if not isinstance(data, Mapping):
-            _LOGGER.error("Discarding unreadable OIDC storage")
+
+        try:
+            data = _STORAGE_SCHEMA(data)
+            if (raw_config := data.get("config")) is not None:
+                self.config = OidcConfig(**_CONFIG_SCHEMA(raw_config))
+        except probatio.Invalid:
+            _LOGGER.exception("Discarding unreadable OIDC configuration")
             self.config_discarded = True
             return
-
-        if (raw_config := data.get("config")) is not None:
-            try:
-                self.config = _config_from_dict(raw_config)
-            except TypeError:
-                _LOGGER.exception("Discarding unreadable OIDC configuration")
-                self.config_discarded = True
 
         if self.config is None:
             return
 
-        raw_sessions = data.get("sessions")
-        if raw_sessions is None:
-            return
-        if not isinstance(raw_sessions, Mapping):
-            _LOGGER.error("Discarding unreadable OIDC sessions")
-            return
-
-        for credential_id, raw_session in raw_sessions.items():
+        for credential_id, raw_session in (data.get("sessions") or {}).items():
             try:
-                session = _session_entry_from_dict(credential_id, raw_session)
-                self.sessions[credential_id] = session
-            except TypeError:
+                session = OidcSession(**_SESSION_SCHEMA(raw_session))
+            except probatio.Invalid:
                 _LOGGER.exception("Discarding unreadable OIDC session")
+                continue
+            if session.credential_id != credential_id:
+                _LOGGER.error("Discarding an OIDC session stored under another key")
+                continue
+            self.sessions[credential_id] = session
 
     @callback
     def _data_to_save(self) -> dict[str, Any]:

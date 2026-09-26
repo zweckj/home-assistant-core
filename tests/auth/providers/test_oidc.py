@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import patch
 
 from cryptography.hazmat.primitives.asymmetric import rsa
+from freezegun.api import FrozenDateTimeFactory
 import jwt
 from jwt.algorithms import RSAAlgorithm
 import pytest
@@ -38,6 +39,7 @@ from homeassistant.auth.providers.oidc.const import (
     REVALIDATE_REFRESH_RATIO,
     STORAGE_KEY,
     STORAGE_VERSION,
+    UNCLAIMED_SESSION_TIMEOUT,
 )
 from homeassistant.auth.providers.oidc.store import OidcConfig, OidcStore
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
@@ -334,7 +336,7 @@ async def test_token_response_must_be_a_bearer_token(
     """Test a token the provider does not call a bearer is refused."""
     mock_idp.post(TOKEN_URL, json={"access_token": "at", "token_type": "mac"})
 
-    with pytest.raises(OidcTokenError, match="token type"):
+    with pytest.raises(OidcTokenError, match="token_type"):
         await client.async_refresh_token("refresh")
 
 
@@ -388,7 +390,7 @@ async def test_userinfo_does_not_follow_redirects(
     )
 
     with pytest.raises(OidcError, match="redirects"):
-        await client.async_userinfo("at")
+        await client.async_merge_userinfo({"sub": SUBJECT}, "at")
 
 
 async def test_revocation_ignores_discovery_failure(
@@ -523,8 +525,8 @@ async def test_verify_id_token_rejects_foreign_at_hash(
 async def test_verify_id_token_rejects_non_ascii_access_token(
     client: OidcClient, signing_key: rsa.RSAPrivateKey
 ) -> None:
-    """Test malformed access-token encoding is reported as an OIDC error."""
-    with pytest.raises(OidcIdTokenError, match="ASCII"):
+    """Test a non-ASCII access token fails the binding instead of crashing."""
+    with pytest.raises(OidcIdTokenError, match="at_hash"):
         await client.async_verify_id_token(
             make_id_token(signing_key, at_hash="unused"),
             access_token="non-ascii-\u00e9",
@@ -635,12 +637,13 @@ def _client_with_jwk(
 
 
 @pytest.mark.parametrize(
-    "metadata",
+    ("metadata", "match"),
     [
-        {"use": "enc"},
-        {"key_ops": ["encrypt"]},
-        {"key_ops": "verify"},
-        {"use": 1},
+        ({"use": "enc"}, "not published"),
+        ({"key_ops": ["encrypt"]}, "not published"),
+        # A malformed key is dropped when the key set loads.
+        ({"key_ops": "verify"}, "no usable key"),
+        ({"use": 1}, "no usable key"),
     ],
     ids=["encryption-use", "no-verify-operation", "malformed-ops", "malformed-use"],
 )
@@ -649,11 +652,12 @@ async def test_verify_id_token_rejects_a_key_not_published_for_signing(
     aioclient_mock: AiohttpClientMocker,
     signing_key: rsa.RSAPrivateKey,
     metadata: dict[str, Any],
+    match: str,
 ) -> None:
     """Test a key the issuer did not publish for verifying is not trusted."""
     client = _client_with_jwk(hass, aioclient_mock, _jwk(signing_key, **metadata))
 
-    with pytest.raises(OidcIdTokenError, match="not published"):
+    with pytest.raises(OidcIdTokenError, match=match):
         await client.async_verify_id_token(make_id_token(signing_key))
 
 
@@ -2093,6 +2097,45 @@ async def test_revalidation_cannot_restore_removed_credentials(
 
     assert credentials.id not in provider.data.sessions
     assert credentials not in user.credentials
+
+
+async def test_unclaimed_login_session_is_dropped(
+    hass: HomeAssistant,
+    provider: oidc_auth.OidcAuthProvider,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test a login whose authorization code is never used leaves no session."""
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await provider.async_complete_login(
+        credentials, {"sub": SUBJECT}, oidc_auth.TokenResponse(access_token="at")
+    )
+    assert credentials.id in provider.data.sessions
+
+    freezer.tick(UNCLAIMED_SESSION_TIMEOUT)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert credentials.id not in provider.data.sessions
+
+
+async def test_claimed_login_session_is_kept(
+    hass: HomeAssistant,
+    manager: auth.AuthManager,
+    provider: oidc_auth.OidcAuthProvider,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test a login whose credentials were saved keeps its session."""
+    credentials = provider.async_create_credentials({"subject": SUBJECT})
+    await provider.async_complete_login(
+        credentials, {"sub": SUBJECT}, oidc_auth.TokenResponse(access_token="at")
+    )
+    await manager.async_link_user(await _non_owner_user(manager), credentials)
+
+    freezer.tick(UNCLAIMED_SESSION_TIMEOUT)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert credentials.id in provider.data.sessions
 
 
 async def test_revalidation_leaves_the_groups_alone(

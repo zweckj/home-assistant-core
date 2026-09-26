@@ -3,7 +3,7 @@
 from datetime import timedelta
 from http import HTTPStatus
 import logging
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
@@ -221,13 +221,55 @@ async def test_auth_code_provider_rejection_removes_refresh_token(
     assert user.refresh_tokens == {}
 
 
-def test_auth_code_store_expiration(
+async def test_auth_code_rejected_user_does_not_leak_the_reason(
     hass: HomeAssistant,
-    mock_credential: Credentials,
-    freezer: FrozenDateTimeFactory,
+    aiohttp_client: ClientSessionGenerator,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a provider refusing the user is logged but not told to the client."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    code = (await resp.json())["result"]
+
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider.async_user_meta_for_credentials",
+        side_effect=InvalidAuthError("internal detail"),
+    ):
+        resp = await client.post(
+            "/auth/token",
+            data={
+                "client_id": CLIENT_ID,
+                "grant_type": "authorization_code",
+                "code": code,
+            },
+        )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+    assert await resp.json() == {"error": "access_denied"}
+    assert "internal detail" in caplog.text
+
+
+def test_auth_code_store_expiration(
+    mock_credential, freezer: FrozenDateTimeFactory
 ) -> None:
     """Test that the auth code store will not return expired tokens."""
-    store, retrieve = auth._create_auth_code_store(hass)
+    store, retrieve = auth._create_auth_code_store()
     client_id = "bla"
     now = utcnow()
 
@@ -244,48 +286,24 @@ def test_auth_code_store_expiration(
     assert retrieve(client_id, code, "authorize") == mock_credential
 
 
-def test_auth_code_store_separates_code_purposes(
-    hass: HomeAssistant,
-    mock_credential: Credentials,
-) -> None:
-    """Test that login and account-linking codes are not interchangeable."""
-    store, retrieve = auth._create_auth_code_store(hass)
+def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
+    """Test a code minted for one purpose cannot be redeemed for the other."""
+    store, retrieve = auth._create_auth_code_store()
     client_id = "bla"
 
-    login_code = store(client_id, mock_credential, "authorize")
-    link_code = store(client_id, mock_credential, "link_user")
+    code = store(client_id, mock_credential, "link_user")
+    assert retrieve(client_id, code, "authorize") is None
+    # The mismatch must not consume the code either.
+    assert retrieve(client_id, code, "link_user") == mock_credential
 
-    assert retrieve(client_id, login_code, "authorize") == mock_credential
-    assert retrieve(client_id, link_code, "authorize") is None
-    assert retrieve(client_id, link_code, "link_user") == mock_credential
-
-
-async def test_auth_code_store_expires_unused_code(
-    hass: HomeAssistant,
-    mock_credential: Credentials,
-) -> None:
-    """Test an unused code expires and its provider can clean up state."""
-    provider = AsyncMock()
-    with (
-        patch(
-            "homeassistant.components.auth.async_call_later"
-        ) as mock_async_call_later,
-        patch.object(hass.auth, "get_auth_provider", return_value=provider),
-    ):
-        store, retrieve = auth._create_auth_code_store(hass)
-        code = store("bla", mock_credential, "authorize")
-        expire = mock_async_call_later.call_args.args[2]
-        await expire(utcnow())
-
-    assert retrieve("bla", code, "authorize") is None
-    provider.async_auth_code_expired.assert_awaited_once_with(mock_credential)
+    code = store(client_id, mock_credential, "authorize")
+    assert retrieve(client_id, code, "link_user") is None
+    assert retrieve(client_id, code, "authorize") == mock_credential
 
 
-def test_auth_code_store_requires_credentials(
-    hass: HomeAssistant, mock_credential: Credentials
-) -> None:
+def test_auth_code_store_requires_credentials(mock_credential) -> None:
     """Test we require credentials."""
-    store, _retrieve = auth._create_auth_code_store(hass)
+    store, _retrieve = auth._create_auth_code_store()
 
     with pytest.raises(TypeError):
         store(None, MockUser(), "authorize")

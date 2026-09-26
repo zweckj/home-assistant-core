@@ -65,3 +65,7 @@ MAX_REVALIDATE_INTERVAL: Final = 30 * 86400
 # room to retry before the session is hard expired.
 REVALIDATE_REFRESH_RATIO: Final = 0.5
 REVALIDATE_CHECK_INTERVAL: Final = timedelta(minutes=1)
+
+# Outlives the ten minute authorization code, so a code exchanged at the last
+# moment still finds its session.
+UNCLAIMED_SESSION_TIMEOUT: Final = timedelta(minutes=11)
