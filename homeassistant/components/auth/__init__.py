@@ -128,7 +128,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from logging import getLogger
-from typing import Any, cast
+from typing import Any, Literal, cast
 import uuid
 
 from aiohttp import web
@@ -162,8 +162,9 @@ from . import indieauth, login_flow, mfa_setup_flow
 
 DOMAIN = "auth"
 
-type StoreResultType = Callable[[str, Credentials], str]
-type RetrieveResultType = Callable[[str, str], Credentials | None]
+type AuthCodePurpose = Literal["authorize", "link_user"]
+type StoreResultType = Callable[[str, Credentials, AuthCodePurpose], str]
+type RetrieveResultType = Callable[[str, str, AuthCodePurpose], Credentials | None]
 DATA_STORE: HassKey[StoreResultType] = HassKey(DOMAIN)
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
@@ -174,7 +175,7 @@ def create_auth_code(
     hass: HomeAssistant, client_id: str, credential: Credentials
 ) -> str:
     """Create an authorization code to fetch tokens."""
-    return hass.data[DATA_STORE](client_id, credential)
+    return hass.data[DATA_STORE](client_id, credential, "authorize")
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -290,7 +291,7 @@ class TokenView(HomeAssistantView):
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 
-        credential = self._retrieve_auth(client_id, code)
+        credential = self._retrieve_auth(client_id, code, "authorize")
 
         if credential is None or not isinstance(credential, Credentials):
             return self.json(
@@ -421,7 +422,9 @@ class LinkUserView(HomeAssistantView):
         hass = request.app[KEY_HASS]
         user: User = request["hass_user"]
 
-        credentials = self._retrieve_credentials(data["client_id"], data["code"])
+        credentials = self._retrieve_credentials(
+            data["client_id"], data["code"], "link_user"
+        )
 
         if credentials is None:
             return self.json_message("Invalid code", status_code=HTTPStatus.BAD_REQUEST)
@@ -441,10 +444,14 @@ class LinkUserView(HomeAssistantView):
 @callback
 def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
     """Create an in memory store."""
-    temp_results: dict[tuple[str, str], tuple[datetime, Credentials]] = {}
+    temp_results: dict[
+        tuple[str, str], tuple[datetime, Credentials, AuthCodePurpose]
+    ] = {}
 
     @callback
-    def store_result(client_id: str, result: Credentials) -> str:
+    def store_result(
+        client_id: str, result: Credentials, purpose: AuthCodePurpose
+    ) -> str:
         """Store flow result and return a code to retrieve it."""
         if not isinstance(result, Credentials):
             raise TypeError("result has to be a Credentials instance")
@@ -453,18 +460,27 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
         temp_results[(client_id, code)] = (
             dt_util.utcnow(),
             result,
+            purpose,
         )
         return code
 
     @callback
-    def retrieve_result(client_id: str, code: str) -> Credentials | None:
+    def retrieve_result(
+        client_id: str, code: str, purpose: AuthCodePurpose
+    ) -> Credentials | None:
         """Retrieve flow result."""
         key = (client_id, code)
 
-        if key not in temp_results:
+        if (stored := temp_results.get(key)) is None:
             return None
 
-        created, result = temp_results.pop(key)
+        created, result, stored_purpose = stored
+        # A code minted to attach an identity must not buy tokens, and a login
+        # code must not silently attach an identity to whoever is signed in.
+        if stored_purpose != purpose:
+            return None
+
+        del temp_results[key]
 
         # OAuth 4.2.1
         # The authorization code MUST expire shortly after it is issued to
