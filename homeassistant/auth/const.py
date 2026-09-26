@@ -9,3 +9,7 @@ REFRESH_TOKEN_EXPIRATION = timedelta(days=90).total_seconds()
 GROUP_ID_ADMIN = "system-admin"
 GROUP_ID_USER = "system-users"
 GROUP_ID_READ_ONLY = "system-read-only"
+
+# Here rather than in the auth component so providers can build redirect URIs.
+LOGIN_CALLBACK_PATH = "/auth/login_callback"
+LOGIN_STATE_EXPIRATION = 300

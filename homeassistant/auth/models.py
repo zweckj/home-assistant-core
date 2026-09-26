@@ -27,9 +27,12 @@ class AuthFlowContext(FlowContext, total=False):
     """Typed context dict for auth flow."""
 
     ip_address: IPv4Address | IPv6Address
+    client_id: str
     redirect_uri: str
     # Attaching credentials to the signed in user via /auth/link_user.
     link_user: bool
+    # Binds an external step to the browser that started it.
+    browser_token: str
 
 
 class AuthFlowResult(FlowResult[AuthFlowContext, tuple[str, str]], total=False):
