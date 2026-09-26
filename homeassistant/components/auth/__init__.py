@@ -160,6 +160,8 @@ from homeassistant.util.hass_dict import HassKey
 
 from . import indieauth, login_flow, mfa_setup_flow
 
+_LOGGER = getLogger(__name__)
+
 DOMAIN = "auth"
 
 type AuthCodePurpose = Literal["authorize", "link_user"]
@@ -299,7 +301,15 @@ class TokenView(HomeAssistantView):
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 
-        user = await hass.auth.async_get_or_create_user(credential)
+        try:
+            user = await hass.auth.async_get_or_create_user(credential)
+        except InvalidAuthError as exc:
+            _LOGGER.warning(
+                "Rejected a %s sign in: %s", credential.auth_provider_type, exc
+            )
+            return self.json(
+                {"error": "access_denied"}, status_code=HTTPStatus.FORBIDDEN
+            )
 
         if user_access_error := async_user_not_allowed_do_auth(hass, user):
             return self.json(
@@ -318,6 +328,7 @@ class TokenView(HomeAssistantView):
                 refresh_token, request.remote
             )
         except InvalidAuthError as exc:
+            hass.auth.async_remove_refresh_token(refresh_token)
             return self.json(
                 {"error": "access_denied", "error_description": str(exc)},
                 status_code=HTTPStatus.FORBIDDEN,
