@@ -28,6 +28,8 @@ class AuthFlowContext(FlowContext, total=False):
 
     ip_address: IPv4Address | IPv6Address
     redirect_uri: str
+    # Attaching credentials to the signed in user via /auth/link_user.
+    link_user: bool
 
 
 class AuthFlowResult(FlowResult[AuthFlowContext, tuple[str, str]], total=False):
