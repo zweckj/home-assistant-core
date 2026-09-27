@@ -171,6 +171,100 @@ async def test_auth_code_checks_local_only_user(
     assert error["error"] == "access_denied"
 
 
+async def test_auth_code_provider_rejection_removes_refresh_token(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a failed code exchange does not leave an unusable refresh token."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    code = (await resp.json())["result"]
+
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider.async_validate_refresh_token",
+        side_effect=InvalidAuthError("Invalid access"),
+    ):
+        resp = await client.post(
+            "/auth/token",
+            data={
+                "client_id": CLIENT_ID,
+                "grant_type": "authorization_code",
+                "code": code,
+            },
+        )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+    users = await hass.auth.async_get_users()
+    user = next(
+        user
+        for user in users
+        if any(
+            credentials.auth_provider_type == "insecure_example"
+            for credentials in user.credentials
+        )
+    )
+    assert user.refresh_tokens == {}
+
+
+async def test_auth_code_rejected_user_does_not_leak_the_reason(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a provider refusing the user is logged but not told to the client."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    code = (await resp.json())["result"]
+
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider.async_user_meta_for_credentials",
+        side_effect=InvalidAuthError("internal detail"),
+    ):
+        resp = await client.post(
+            "/auth/token",
+            data={
+                "client_id": CLIENT_ID,
+                "grant_type": "authorization_code",
+                "code": code,
+            },
+        )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+    assert await resp.json() == {"error": "access_denied"}
+    assert "internal detail" in caplog.text
+
+
 def test_auth_code_store_expiration(
     mock_credential, freezer: FrozenDateTimeFactory
 ) -> None:

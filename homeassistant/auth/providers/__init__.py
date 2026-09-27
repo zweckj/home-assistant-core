@@ -81,6 +81,11 @@ class AuthProvider:
         return self.config.get(CONF_NAME, self.DEFAULT_TITLE)  # type: ignore[no-any-return]
 
     @property
+    def icon_url(self) -> str | None:
+        """Return the icon the login screen shows next to the name."""
+        return None
+
+    @property
     def support_mfa(self) -> bool:
         """Return whether multi-factor auth supported by the auth provider."""
         return True
