@@ -3,9 +3,13 @@
 from datetime import timedelta
 from http import HTTPStatus
 import logging
+from typing import Any
 from unittest.mock import patch
 
+from aiohttp import FormData
+from aiohttp.test_utils import TestClient
 from freezegun.api import FrozenDateTimeFactory
+from multidict import MultiDict
 import pytest
 
 from homeassistant.auth import InvalidAuthError
@@ -175,7 +179,7 @@ def test_auth_code_store_expiration(
     mock_credential, freezer: FrozenDateTimeFactory
 ) -> None:
     """Test that the auth code store will not return expired tokens."""
-    store, retrieve = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store()
     client_id = "bla"
     now = utcnow()
 
@@ -189,27 +193,80 @@ def test_auth_code_store_expiration(
     code = store(client_id, mock_credential, "authorize")
 
     freezer.move_to(now + timedelta(minutes=9, seconds=59))
-    assert retrieve(client_id, code, "authorize") == mock_credential
+    entry = retrieve(client_id, code, "authorize")
+    assert entry is not None
+    assert entry.credentials == mock_credential
 
 
 def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
     """Test a code minted for one purpose cannot be redeemed for the other."""
-    store, retrieve = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store()
     client_id = "bla"
 
     code = store(client_id, mock_credential, "link_user")
     assert retrieve(client_id, code, "authorize") is None
     # The mismatch must not consume the code either.
-    assert retrieve(client_id, code, "link_user") == mock_credential
+    entry = retrieve(client_id, code, "link_user")
+    assert entry is not None
+    assert entry.credentials == mock_credential
 
     code = store(client_id, mock_credential, "authorize")
     assert retrieve(client_id, code, "link_user") is None
-    assert retrieve(client_id, code, "authorize") == mock_credential
+    entry = retrieve(client_id, code, "authorize")
+    assert entry is not None
+    assert entry.credentials == mock_credential
+
+
+def test_auth_code_store_discards_codes_of_revoked_credentials(
+    mock_credential,
+) -> None:
+    """Test pending codes die with the sessions of their credentials."""
+    store, retrieve, discard = auth._create_auth_code_store()
+    client_id = "bla"
+    other_credential = Credentials(
+        id="other",
+        auth_provider_type="insecure_example",
+        auth_provider_id=None,
+        data={"username": "other-user"},
+        is_new=False,
+    )
+
+    revoked_code = store(client_id, mock_credential, "authorize")
+    kept_code = store(client_id, other_credential, "authorize")
+
+    discard(mock_credential)
+
+    assert retrieve(client_id, revoked_code, "authorize") is None
+    entry = retrieve(client_id, kept_code, "authorize")
+    assert entry is not None
+    assert entry.credentials == other_credential
+
+
+async def test_auth_code_is_refused_after_the_credentials_are_revoked(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a login code cannot buy a session once the login was revoked."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    credentials = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(credentials)
+    code = await _async_login_for_code(client)
+
+    await hass.auth.async_remove_refresh_tokens_for_credentials(credentials)
+
+    resp = await client.post(
+        "/auth/token",
+        data={"client_id": CLIENT_ID, "grant_type": "authorization_code", "code": code},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert (await resp.json())["error"] == "invalid_request"
 
 
 def test_auth_code_store_requires_credentials(mock_credential) -> None:
     """Test we require credentials."""
-    store, _retrieve = auth._create_auth_code_store()
+    store, _retrieve, _ = auth._create_auth_code_store()
 
     with pytest.raises(TypeError):
         store(None, MockUser(), "authorize")
@@ -776,3 +833,211 @@ async def test_ws_refresh_token_set_expiry_error(
         "code": "invalid_token_id",
         "message": "Received invalid token",
     }
+
+
+RFC7636_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+RFC7636_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+
+async def _async_login_for_code(
+    client: TestClient, code_challenge: str | None = None
+) -> str:
+    """Run the login flow and return the authorization code."""
+    payload: dict[str, Any] = {
+        "client_id": CLIENT_ID,
+        "handler": ["insecure_example", None],
+        "redirect_uri": CLIENT_REDIRECT_URI,
+    }
+    if code_challenge is not None:
+        payload["code_challenge"] = code_challenge
+        payload["code_challenge_method"] = "S256"
+    resp = await client.post("/auth/login_flow", json=payload)
+    assert resp.status == HTTPStatus.OK
+    step = await resp.json()
+
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    assert resp.status == HTTPStatus.OK
+    step = await resp.json()
+    return step["result"]
+
+
+@pytest.mark.parametrize(
+    "parameter", ["client_id", "grant_type", "code", "redirect_uri", "code_verifier"]
+)
+async def test_pkce_token_request_rejects_duplicate_parameters(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    parameter: str,
+) -> None:
+    """Test ambiguous token parameters are rejected without consuming the code."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    code = await _async_login_for_code(client, RFC7636_CHALLENGE)
+    token_data = MultiDict(
+        {
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "code_verifier": RFC7636_VERIFIER,
+        }
+    )
+    token_data.add(parameter, "other")
+
+    resp = await client.post("/auth/token", data=token_data)
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert (await resp.json())["error"] == "invalid_request"
+
+    resp = await client.post("/auth/token", data=dict(token_data))
+    assert resp.status == HTTPStatus.OK
+
+
+async def test_pkce_token_request_rejects_file_verifier(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a multipart file cannot be used as a code verifier."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    code = await _async_login_for_code(client, RFC7636_CHALLENGE)
+    token_data = {
+        "client_id": CLIENT_ID,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": CLIENT_REDIRECT_URI,
+    }
+    form_data = FormData(token_data)
+    form_data.add_field("code_verifier", RFC7636_VERIFIER.encode(), filename="verifier")
+
+    resp = await client.post("/auth/token", data=form_data)
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert (await resp.json())["error"] == "invalid_request"
+
+    resp = await client.post(
+        "/auth/token", data={**token_data, "code_verifier": RFC7636_VERIFIER}
+    )
+    assert resp.status == HTTPStatus.OK
+
+
+async def test_auth_code_pkce_success(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test login flow and token exchange with PKCE S256."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    code = await _async_login_for_code(client, RFC7636_CHALLENGE)
+
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": RFC7636_VERIFIER,
+        },
+    )
+    assert resp.status == HTTPStatus.OK
+    tokens = await resp.json()
+    assert hass.auth.async_validate_access_token(tokens["access_token"]) is not None
+
+
+async def test_auth_code_pkce_missing_code_verifier(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test token exchange fails when code_verifier is missing for PKCE code."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    code = await _async_login_for_code(client, RFC7636_CHALLENGE)
+
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+        },
+    )
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    result = await resp.json()
+    assert result["error"] == "invalid_request"
+    assert result["error_description"] == "Code verifier required"
+
+
+@pytest.mark.parametrize(
+    "invalid_verifier",
+    [
+        "wrong_verifier_123456789012345678901234567890123",  # valid length, wrong content
+        "short",  # < 43 chars
+        "a" * 129,  # > 128 chars
+        "non_ascii_verifier_with_unicode_characters_✓_123456",  # non-ascii
+    ],
+    ids=["wrong", "too_short", "too_long", "non_ascii"],
+)
+async def test_auth_code_pkce_invalid_code_verifier(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    invalid_verifier: str,
+) -> None:
+    """Test token exchange fails when code_verifier is invalid."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    code = await _async_login_for_code(client, RFC7636_CHALLENGE)
+
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": invalid_verifier,
+        },
+    )
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    result = await resp.json()
+    assert result["error"] == "invalid_grant"
+    assert result["error_description"] == "Invalid code verifier"
+
+
+async def test_auth_code_without_challenge_succeeds(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test token exchange succeeds when flow was started without code_challenge and no verifier sent."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    code = await _async_login_for_code(client)
+
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+        },
+    )
+    assert resp.status == HTTPStatus.OK
+    tokens = await resp.json()
+    assert hass.auth.async_validate_access_token(tokens["access_token"]) is not None
+
+
+async def test_auth_code_unexpected_verifier_rejected(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test token exchange fails when client sends code_verifier but no code_challenge was registered."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    code = await _async_login_for_code(client)
+
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": RFC7636_VERIFIER,
+        },
+    )
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    result = await resp.json()
+    assert result["error"] == "invalid_request"
+    assert "no code challenge was present" in result["error_description"]
