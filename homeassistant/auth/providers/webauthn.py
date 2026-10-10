@@ -2,6 +2,7 @@
 
 from asyncio import Lock
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 import logging
 from time import time
@@ -36,7 +37,7 @@ import yarl
 from homeassistant.const import CONF_ID
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.network import is_hass_url
+from homeassistant.helpers.network import NoURLAvailableError, get_url, is_hass_url
 from homeassistant.helpers.storage import Store
 from homeassistant.util.network import is_ip_address
 
@@ -109,6 +110,24 @@ def _async_relying_party(hass: HomeAssistant, origin: str) -> _RelyingParty:
         raise InvalidAuthError(f"{origin} is not a known Home Assistant URL.")
 
     return _RelyingParty(url.host, str(url))
+
+
+@callback
+def _async_served_relying_party_ids(hass: HomeAssistant) -> set[str]:
+    """Return the relying party IDs a passkey ceremony can currently run for."""
+    bases = [hass.config.internal_url, hass.config.external_url]
+    with suppress(NoURLAvailableError):
+        bases.append(get_url(hass, require_cloud=True))
+
+    rp_ids: set[str] = set()
+    for base in bases:
+        if base is None:
+            continue
+        try:
+            rp_ids.add(_async_relying_party(hass, base).id)
+        except InvalidAuthError:
+            continue
+    return rp_ids
 
 
 @callback
@@ -247,12 +266,13 @@ class WebAuthnDataStore:
         credential_backed_up: bool,
     ) -> None:
         """Update credential data in after a successful authentication."""
-        if registration := self._data.get(user_id, {}).get(credential_id):
-            registration.sign_count = new_sign_count
-            registration.credential_device_type = credential_device_type
-            registration.credential_backed_up = credential_backed_up
-            registration.last_used_at = time()
-            await self._async_save()
+        if (registration := self._data.get(user_id, {}).get(credential_id)) is None:
+            raise CredentialNotFoundError("Credential not found.")
+        registration.sign_count = new_sign_count
+        registration.credential_device_type = credential_device_type
+        registration.credential_backed_up = credential_backed_up
+        registration.last_used_at = time()
+        await self._async_save()
 
     @property
     def has_credentials(self) -> bool:
@@ -267,6 +287,16 @@ class WebAuthnDataStore:
             PublicKeyCredentialDescriptor(id=base64url_to_bytes(cred_id))
             for cred_id in self._data.get(user_id, {})
         ]
+
+    def has_usable_credential(
+        self, user_id: str, rp_ids: set[str], *, excluding: str | None = None
+    ) -> bool:
+        """Return if the user keeps a passkey for one of the relying parties."""
+        return any(
+            credential.rp_id in rp_ids
+            for credential_id, credential in self._data.get(user_id, {}).items()
+            if credential_id != excluding
+        )
 
     def get_credential(
         self, user_id: str, credential_id: str
@@ -349,6 +379,14 @@ class WebAuthnProvider(AuthProvider):
     def async_can_start_login(self, context: AuthFlowContext) -> bool:
         """Return if anybody has a passkey to sign in with."""
         return self.data is not None and self.data.has_credentials
+
+    @callback
+    @override
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return if the account keeps a passkey it can still sign in with."""
+        return self.data is not None and self.data.has_usable_credential(
+            credentials.data[CONF_USER_ID], _async_served_relying_party_ids(self.hass)
+        )
 
     async def async_start_registration(
         self, user: User, origin: str
@@ -509,13 +547,17 @@ class WebAuthnProvider(AuthProvider):
             raise InvalidAuthError("Authentication failed.") from err
 
         # Update the sign count and other info
-        await data.async_update_user_registration(
-            user_id=user_id,
-            credential_id=bytes_to_base64url(response.credential_id),
-            new_sign_count=response.new_sign_count,
-            credential_device_type=response.credential_device_type,
-            credential_backed_up=response.credential_backed_up,
-        )
+        try:
+            await data.async_update_user_registration(
+                user_id=user_id,
+                credential_id=bytes_to_base64url(response.credential_id),
+                new_sign_count=response.new_sign_count,
+                credential_device_type=response.credential_device_type,
+                credential_backed_up=response.credential_backed_up,
+            )
+        except CredentialNotFoundError as err:
+            # The passkey was deleted while its assertion was being verified.
+            raise InvalidAuthError("Passkey is no longer registered.") from err
         return user_id
 
     @override
@@ -574,9 +616,14 @@ class WebAuthnProvider(AuthProvider):
         data = await self._async_get_data()
 
         credentials = self._async_user_credentials(user)
+        registration = data.get_credential(user.id, credential_id)
+        rp_ids = _async_served_relying_party_ids(self.hass)
+        # Only a passkey for a relying party this instance still serves can sign
+        # in, so a stale one neither protects the account nor counts as fallback.
         if (
-            data.get_credential(user.id, credential_id) is not None
-            and len(data.get_registered_credentials(user.id)) == 1
+            registration is not None
+            and registration.rp_id in rp_ids
+            and not data.has_usable_credential(user.id, rp_ids, excluding=credential_id)
             and credentials is not None
             and not self.hass.auth.async_has_other_login_method(user, credentials)
         ):

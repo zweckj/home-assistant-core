@@ -2,14 +2,16 @@
 
 from ipaddress import ip_address
 import time
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, Mock, patch
 
 import pytest
+from webauthn.helpers.bytes_to_base64url import bytes_to_base64url
 from webauthn.helpers.structs import CredentialDeviceType
 
 from homeassistant.auth.models import AuthFlowContext, Credentials, User
 from homeassistant.auth.providers import webauthn
 from homeassistant.core import HomeAssistant
+from homeassistant.core_config import async_process_ha_core_config
 from homeassistant.data_entry_flow import FlowResultType
 
 from tests.common import CLIENT_ID
@@ -30,7 +32,10 @@ async def provider(hass: HomeAssistant) -> webauthn.WebAuthnProvider:
 
 
 async def _store_passkey(
-    provider: webauthn.WebAuthnProvider, user_id: str, credential_id: str
+    provider: webauthn.WebAuthnProvider,
+    user_id: str,
+    credential_id: str,
+    rp_id: str = "ha.example.com",
 ) -> None:
     """Register a passkey without running a ceremony."""
     assert provider.data is not None
@@ -38,7 +43,7 @@ async def _store_passkey(
         user_id,
         webauthn.WebAuthnCredential(
             credential_id=credential_id,
-            rp_id="ha.example.com",
+            rp_id=rp_id,
             credential_public_key="public-key",
             sign_count=0,
             credential_device_type=CredentialDeviceType.MULTI_DEVICE,
@@ -108,6 +113,97 @@ async def test_deleting_one_of_several_passkeys_revokes_the_sessions(
     assert credentials in user.credentials
     assert provider.data is not None
     assert len(provider.data.list_credentials_meta(user.id)) == 1
+
+
+async def test_deleting_a_passkey_revokes_its_pending_logins(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a code minted before the deletion cannot be redeemed afterwards."""
+    user, credentials = await _linked_user(
+        hass, provider, "credential-1", "credential-2"
+    )
+    revoked: list[Credentials] = []
+    hass.auth.async_add_credentials_revoked_listener(revoked.append)
+
+    await provider.async_delete_credential(user, "credential-1")
+
+    assert revoked == [credentials]
+
+
+async def test_login_fails_when_the_passkey_is_deleted_during_verification(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a passkey deleted mid-ceremony cannot finish signing in."""
+    credential_id = bytes_to_base64url(b"credential-1")
+    user, _ = await _linked_user(hass, provider, credential_id)
+    assert provider.data is not None
+    parsed = Mock(id=credential_id, response=Mock(user_handle=user.id.encode()))
+
+    def delete_then_verify(**kwargs: object) -> Mock:
+        provider.data._data[user.id].pop(credential_id)  # type: ignore[union-attr]
+        return Mock(
+            credential_id=b"credential-1",
+            new_sign_count=1,
+            credential_device_type=CredentialDeviceType.MULTI_DEVICE,
+            credential_backed_up=True,
+        )
+
+    with (
+        patch(f"{webauthn.__name__}._async_relying_party", return_value=RELYING_PARTY),
+        patch(
+            f"{webauthn.__name__}.parse_authentication_credential_json",
+            return_value=parsed,
+        ),
+        patch(
+            f"{webauthn.__name__}.verify_authentication_response",
+            side_effect=delete_then_verify,
+        ),
+        pytest.raises(webauthn.InvalidAuthError),
+    ):
+        await provider.async_verify_authentication("assertion", b"challenge", ORIGIN)
+
+
+async def test_last_passkey_guard_ignores_passkeys_for_unserved_relying_parties(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a passkey for a relying party HA no longer serves is no fallback."""
+    await async_process_ha_core_config(hass, {"external_url": ORIGIN})
+    user, _ = await _linked_user(hass, provider, "live-key")
+    await _store_passkey(provider, user.id, "stale-key", rp_id="old.example.com")
+    assert provider.data is not None
+
+    with pytest.raises(webauthn.LastLoginMethodError):
+        await provider.async_delete_credential(user, "live-key")
+
+    await provider.async_delete_credential(user, "stale-key")
+
+    assert [
+        meta.credential_id for meta in provider.data.list_credentials_meta(user.id)
+    ] == ["live-key"]
+
+
+@pytest.mark.parametrize(
+    ("rp_ids", "expected"),
+    [
+        pytest.param(["ha.example.com"], True, id="served"),
+        pytest.param(["old.example.com"], False, id="unserved"),
+        pytest.param([], False, id="no-passkeys"),
+    ],
+)
+async def test_can_login_with_credentials_needs_a_usable_passkey(
+    hass: HomeAssistant,
+    provider: webauthn.WebAuthnProvider,
+    rp_ids: list[str],
+    expected: bool,
+) -> None:
+    """Test only a passkey for a served relying party keeps the account open."""
+    await async_process_ha_core_config(hass, {"external_url": ORIGIN})
+    user, credentials = await _linked_user(hass, provider)
+    for index, rp_id in enumerate(rp_ids):
+        await _store_passkey(provider, user.id, f"credential-{index}", rp_id=rp_id)
+
+    assert provider.async_can_login_with_credentials(credentials) is expected
+    assert hass.auth.async_has_other_login_method(user) is expected
 
 
 @pytest.mark.parametrize("context", [None, CONTEXT])
