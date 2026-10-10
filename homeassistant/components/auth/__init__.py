@@ -214,9 +214,10 @@ def create_auth_code(
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Component to allow users to login."""
-    store_result, retrieve_result = _create_auth_code_store()
+    store_result, retrieve_result, discard_results = _create_auth_code_store()
 
     hass.data[DATA_STORE] = store_result
+    hass.auth.async_add_credentials_revoked_listener(discard_results)
 
     hass.http.register_view(TokenView(retrieve_result))
     hass.http.register_view(RevokeTokenView())
@@ -530,7 +531,9 @@ class LinkUserView(HomeAssistantView):
 
 
 @callback
-def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
+def _create_auth_code_store() -> tuple[
+    StoreResultType, RetrieveResultType, Callable[[Credentials], None]
+]:
     """Create an in memory store."""
     temp_results: dict[tuple[str, str], AuthCodeEntry] = {}
 
@@ -584,7 +587,17 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
 
         return None
 
-    return store_result, retrieve_result
+    @callback
+    def discard_results(credentials: Credentials) -> None:
+        """Drop every unredeemed code issued for the credentials.
+
+        A code is as good as a session, so it must not outlive a revocation.
+        """
+        for key, entry in list(temp_results.items()):
+            if entry.credentials.id == credentials.id:
+                del temp_results[key]
+
+    return store_result, retrieve_result, discard_results
 
 
 @websocket_api.websocket_command({probatio.Required("type"): "auth/current_user"})
