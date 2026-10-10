@@ -416,6 +416,9 @@ async def test_login_flow_marks_account_linking(
 ) -> None:
     """Test the flow can tell an account link apart from a plain sign in."""
     client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_user(name="Hello")
+    refresh_token = await hass.auth.async_create_refresh_token(user, CLIENT_ID)
+    access_token = hass.auth.async_create_access_token(refresh_token)
 
     body = {
         "client_id": CLIENT_ID,
@@ -425,12 +428,18 @@ async def test_login_flow_marks_account_linking(
     if flow_type is not None:
         body["type"] = flow_type
 
-    resp = await client.post("/auth/login_flow", json=body)
+    resp = await client.post(
+        "/auth/login_flow",
+        json=body,
+        headers={"authorization": f"Bearer {access_token}"},
+    )
 
     assert resp.status == HTTPStatus.OK
     flow_id = (await resp.json())["flow_id"]
 
-    assert hass.auth.login_flow.async_get(flow_id)["context"]["link_user"] is expected
+    context = hass.auth.login_flow.async_get(flow_id)["context"]
+    assert context["link_user"] is expected
+    assert context.get("link_user_id") == (user.id if expected else None)
 
 
 async def test_concurrent_requests_cannot_advance_the_same_flow(

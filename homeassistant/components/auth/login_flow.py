@@ -80,7 +80,7 @@ from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager
 from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
 from homeassistant.components import onboarding
-from homeassistant.components.http import KEY_HASS
+from homeassistant.components.http import KEY_HASS, KEY_HASS_USER
 from homeassistant.components.http.auth import async_user_not_allowed_do_auth
 from homeassistant.components.http.ban import (
     log_invalid_auth,
@@ -323,6 +323,7 @@ class LoginFlowBaseView(HomeAssistantView):
             "link_user" if link_user else "authorize",
             code_challenge=context.get("code_challenge"),
             code_challenge_method=context.get("code_challenge_method"),
+            link_user_id=context.get("link_user_id"),
         )  # type: ignore[typeddict-item]
 
         return self.json(result)
@@ -386,13 +387,22 @@ class LoginFlowIndexView(LoginFlowBaseView):
             )
 
         handler: tuple[str, str] = tuple(data["handler"])
+        link_user = data["type"] == "link_user"
 
         flow_context = AuthFlowContext(
             ip_address=ip_address(request.remote),  # type: ignore[arg-type]
             redirect_uri=redirect_uri,
-            link_user=data["type"] == "link_user",
+            link_user=link_user,
             origin=request.headers.get(hdrs.ORIGIN),
         )
+        if link_user:
+            # The code is tied to the account that started attaching an
+            # identity, so only a signed in user can start such a flow.
+            if (user := request.get(KEY_HASS_USER)) is None:
+                return self.json_message(
+                    "Authentication required", HTTPStatus.UNAUTHORIZED
+                )
+            flow_context["link_user_id"] = user.id
         if code_challenge and code_challenge_method:
             flow_context["code_challenge"] = code_challenge
             flow_context["code_challenge_method"] = code_challenge_method

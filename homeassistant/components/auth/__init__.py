@@ -180,6 +180,7 @@ class AuthCodeEntry:
     purpose: AuthCodePurpose
     code_challenge: str | None = None
     code_challenge_method: str | None = None
+    link_user_id: str | None = None
 
 
 class StoreResultType(Protocol):
@@ -192,6 +193,7 @@ class StoreResultType(Protocol):
         purpose: AuthCodePurpose,
         code_challenge: str | None = None,
         code_challenge_method: str | None = None,
+        link_user_id: str | None = None,
     ) -> str:
         """Store flow result and return a code to retrieve it."""
 
@@ -506,7 +508,13 @@ class LinkUserView(HomeAssistantView):
 
         entry = self._retrieve_credentials(data["client_id"], data["code"], "link_user")
 
-        if entry is None or entry.code_challenge is not None:
+        # The code only attaches an identity to the account that started the
+        # link flow, so a delivered code cannot plant one on another user.
+        if (
+            entry is None
+            or entry.code_challenge is not None
+            or entry.link_user_id != user.id
+        ):
             return self.json_message("Invalid code", status_code=HTTPStatus.BAD_REQUEST)
 
         linked_user = await hass.auth.async_get_user_by_credentials(entry.credentials)
@@ -533,6 +541,7 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
         purpose: AuthCodePurpose,
         code_challenge: str | None = None,
         code_challenge_method: str | None = None,
+        link_user_id: str | None = None,
     ) -> str:
         """Store flow result and return a code to retrieve it."""
         if not isinstance(result, Credentials):
@@ -545,6 +554,7 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
             purpose=purpose,
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method,
+            link_user_id=link_user_id,
         )
         return code
 
