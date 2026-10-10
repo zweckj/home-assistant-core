@@ -273,7 +273,7 @@ def test_auth_code_store_expiration(
     mock_credential, freezer: FrozenDateTimeFactory
 ) -> None:
     """Test that the auth code store will not return expired tokens."""
-    store, retrieve = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store()
     client_id = "bla"
     now = utcnow()
 
@@ -294,7 +294,7 @@ def test_auth_code_store_expiration(
 
 def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
     """Test a code minted for one purpose cannot be redeemed for the other."""
-    store, retrieve = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store()
     client_id = "bla"
 
     code = store(client_id, mock_credential, "link_user")
@@ -311,9 +311,56 @@ def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
     assert entry.credentials == mock_credential
 
 
+def test_auth_code_store_discards_codes_of_revoked_credentials(
+    mock_credential,
+) -> None:
+    """Test pending codes die with the sessions of their credentials."""
+    store, retrieve, discard = auth._create_auth_code_store()
+    client_id = "bla"
+    other_credential = Credentials(
+        id="other",
+        auth_provider_type="insecure_example",
+        auth_provider_id=None,
+        data={"username": "other-user"},
+        is_new=False,
+    )
+
+    revoked_code = store(client_id, mock_credential, "authorize")
+    kept_code = store(client_id, other_credential, "authorize")
+
+    discard(mock_credential)
+
+    assert retrieve(client_id, revoked_code, "authorize") is None
+    entry = retrieve(client_id, kept_code, "authorize")
+    assert entry is not None
+    assert entry.credentials == other_credential
+
+
+async def test_auth_code_is_refused_after_the_credentials_are_revoked(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a login code cannot buy a session once the login was revoked."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    credentials = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(credentials)
+    code = await _async_login_for_code(client)
+
+    await hass.auth.async_remove_refresh_tokens_for_credentials(credentials)
+
+    resp = await client.post(
+        "/auth/token",
+        data={"client_id": CLIENT_ID, "grant_type": "authorization_code", "code": code},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert (await resp.json())["error"] == "invalid_request"
+
+
 def test_auth_code_store_requires_credentials(mock_credential) -> None:
     """Test we require credentials."""
-    store, _retrieve = auth._create_auth_code_store()
+    store, _retrieve, _ = auth._create_auth_code_store()
 
     with pytest.raises(TypeError):
         store(None, MockUser(), "authorize")
