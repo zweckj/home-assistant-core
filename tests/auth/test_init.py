@@ -1567,6 +1567,29 @@ async def test_remove_refresh_tokens_for_credentials(mock_hass) -> None:
     assert manager.async_get_refresh_token(unrelated.id) is unrelated
 
 
+async def test_remove_refresh_tokens_for_credentials_notifies_listeners(
+    mock_hass,
+) -> None:
+    """Test state derived from a login can be dropped alongside its sessions."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+    revoked: list[Credentials] = []
+    remove_listener = manager.async_add_credentials_revoked_listener(revoked.append)
+
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+    assert revoked == [credentials]
+
+    remove_listener()
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+    assert revoked == [credentials]
+
+
 async def test_remove_refresh_tokens_for_detached_credentials(mock_hass) -> None:
     """Test sessions can still be ended after the credentials were removed."""
     manager = await auth.auth_manager_from_config(

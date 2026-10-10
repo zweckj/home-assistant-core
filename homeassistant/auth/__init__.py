@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from functools import partial
 import logging
@@ -197,6 +197,9 @@ class AuthManager:
         # Stops two logins racing on one new credential from creating two users.
         self._credential_lock = asyncio.Lock()
         self._revoke_callbacks: dict[str, set[CALLBACK_TYPE]] = {}
+        self._credentials_revoked_listeners: set[
+            Callable[[models.Credentials], None]
+        ] = set()
         self._expire_callback: CALLBACK_TYPE | None = None
         self._remove_expired_job = HassJob(
             self._async_remove_expired_refresh_tokens, job_type=HassJobType.Callback
@@ -463,6 +466,26 @@ class AuthManager:
                     and refresh_token.credential.id == credentials.id
                 ):
                     self.async_remove_refresh_token(refresh_token)
+
+        for listener in list(self._credentials_revoked_listeners):
+            listener(credentials)
+
+    @callback
+    def async_add_credentials_revoked_listener(
+        self, listener: Callable[[models.Credentials], None]
+    ) -> CALLBACK_TYPE:
+        """Call the listener whenever every login for some credentials is revoked.
+
+        Lets holders of state derived from a login, such as pending
+        authorization codes, drop it together with the sessions.
+        """
+        self._credentials_revoked_listeners.add(listener)
+
+        @callback
+        def remove_listener() -> None:
+            self._credentials_revoked_listeners.discard(listener)
+
+        return remove_listener
 
     async def async_enable_user_mfa(
         self, user: models.User, mfa_module_id: str, data: Any
