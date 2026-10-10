@@ -28,6 +28,10 @@ class AuthFlowContext(FlowContext, total=False):
 
     ip_address: IPv4Address | IPv6Address
     redirect_uri: str
+    # Attaching credentials to the signed in user via /auth/link_user.
+    link_user: bool
+    link_user_id: str
+    origin: str | None
     code_challenge: str
     code_challenge_method: str
 

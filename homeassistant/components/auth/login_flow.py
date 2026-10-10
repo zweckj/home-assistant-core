@@ -71,16 +71,16 @@ an authorization code.
 
 from http import HTTPStatus
 from ipaddress import ip_address
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from aiohttp import web
+from aiohttp import hdrs, web
 import probatio
 
 from homeassistant import data_entry_flow
-from homeassistant.auth import AuthManagerFlowManager, InvalidAuthError
+from homeassistant.auth import AuthManagerFlowManager
 from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
 from homeassistant.components import onboarding
-from homeassistant.components.http import KEY_HASS
+from homeassistant.components.http import KEY_HASS, KEY_HASS_USER
 from homeassistant.components.http.auth import async_user_not_allowed_do_auth
 from homeassistant.components.http.ban import (
     log_invalid_auth,
@@ -100,10 +100,6 @@ from homeassistant.util.network import is_local
 from . import indieauth
 
 if TYPE_CHECKING:
-    from homeassistant.auth.providers.trusted_networks import (
-        TrustedNetworksAuthProvider,
-    )
-
     from . import StoreResultType
 
 
@@ -216,30 +212,17 @@ class AuthProvidersView(HomeAssistantView):
             )
 
         cloud_connection = is_cloud_connection(hass)
+        context = AuthFlowContext(ip_address=remote_address)
 
-        providers = []
-        for provider in hass.auth.auth_providers:
-            if provider.type == "trusted_networks":
-                if cloud_connection:
-                    # Skip quickly as trusted networks are not available on cloud
-                    continue
-
-                try:
-                    cast("TrustedNetworksAuthProvider", provider).async_validate_access(
-                        remote_address
-                    )
-                except InvalidAuthError:
-                    # Not a trusted network, so we don't expose that
-                    # trusted_network authenticator is setup
-                    continue
-
-            providers.append(
-                {
-                    "name": provider.name,
-                    "id": provider.id,
-                    "type": provider.type,
-                }
-            )
+        providers = [
+            {
+                "name": provider.name,
+                "id": provider.id,
+                "type": provider.type,
+            }
+            for provider in hass.auth.auth_providers
+            if provider.async_can_start_login(context)
+        ]
 
         preselect_remember_me = not cloud_connection and is_local(remote_address)
 
@@ -315,6 +298,7 @@ class LoginFlowBaseView(HomeAssistantView):
 
         result.pop("data")
         context = result.pop("context")
+        link_user = context.get("link_user", False)
 
         result_obj = result.pop("result")
 
@@ -328,13 +312,18 @@ class LoginFlowBaseView(HomeAssistantView):
                 f"Login blocked: {user_access_error}", HTTPStatus.FORBIDDEN
             )
 
-        process_success_login(request)
+        # Attaching an identity is not a sign in, so it must not clear the
+        # failed login counter for the address.
+        if not link_user:
+            process_success_login(request)
         # We overwrite the Credentials object with the string code to retrieve it.
         result["result"] = self._store_result(
             client_id,
             result_obj,
+            "link_user" if link_user else "authorize",
             code_challenge=context.get("code_challenge"),
             code_challenge_method=context.get("code_challenge_method"),
+            link_user_id=context.get("link_user_id"),
         )  # type: ignore[typeddict-item]
 
         return self.json(result)
@@ -366,9 +355,7 @@ class LoginFlowIndexView(LoginFlowBaseView):
                 ),
                 probatio.Optional("code_challenge_method"): str,
                 probatio.Optional("response_type"): str,
-                probatio.Optional(
-                    "type", default="authorize"
-                ): str,  # not used, kept for backwards compatibility
+                probatio.Optional("type", default="authorize"): str,
             }
         )
     )
@@ -400,11 +387,22 @@ class LoginFlowIndexView(LoginFlowBaseView):
             )
 
         handler: tuple[str, str] = tuple(data["handler"])
+        link_user = data["type"] == "link_user"
 
         flow_context = AuthFlowContext(
             ip_address=ip_address(request.remote),  # type: ignore[arg-type]
             redirect_uri=redirect_uri,
+            link_user=link_user,
+            origin=request.headers.get(hdrs.ORIGIN),
         )
+        if link_user:
+            # The code is tied to the account that started attaching an
+            # identity, so only a signed in user can start such a flow.
+            if (user := request.get(KEY_HASS_USER)) is None:
+                return self.json_message(
+                    "Authentication required", HTTPStatus.UNAUTHORIZED
+                )
+            flow_context["link_user_id"] = user.id
         if code_challenge and code_challenge_method:
             flow_context["code_challenge"] = code_challenge
             flow_context["code_challenge_method"] = code_challenge_method
@@ -429,6 +427,16 @@ class LoginFlowResourceView(LoginFlowBaseView):
 
     url = "/auth/login_flow/{flow_id}"
     name = "api:auth:login_flow:resource"
+
+    def __init__(
+        self,
+        flow_mgr: AuthManagerFlowManager,
+        store_result: StoreResultType,
+    ) -> None:
+        """Initialize the login flow resource view."""
+        super().__init__(flow_mgr, store_result)
+        # A concurrent request for the same flow gets a conflict instead of racing.
+        self._flows_in_progress: set[str] = set()
 
     async def get(self, request: web.Request) -> web.Response:
         """Do not allow getting status of a flow in progress."""
@@ -455,7 +463,15 @@ class LoginFlowResourceView(LoginFlowBaseView):
             flow = self._flow_mgr.async_get(flow_id)
             if flow["context"]["ip_address"] != ip_address(request.remote):  # type: ignore[arg-type]
                 return self.json_message("IP address changed", HTTPStatus.BAD_REQUEST)
-            result = await self._flow_mgr.async_configure(flow_id, data)
+            if flow_id in self._flows_in_progress:
+                return self.json_message(
+                    "Flow request already in progress", HTTPStatus.CONFLICT
+                )
+            self._flows_in_progress.add(flow_id)
+            try:
+                result = await self._flow_mgr.async_configure(flow_id, data)
+            finally:
+                self._flows_in_progress.discard(flow_id)
         except data_entry_flow.UnknownFlow:
             return self.json_message("Invalid flow specified", HTTPStatus.NOT_FOUND)
         except probatio.Invalid:
