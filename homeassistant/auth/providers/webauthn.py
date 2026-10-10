@@ -73,6 +73,10 @@ DEFAULT_CREDENTIAL_NAME: Final = "Passkey"
 # survives moving to a new device.
 RESTORE_RP_ID: Final = "my.home-assistant.io"
 RESTORE_ORIGINS: Final[list[str]] = [f"https://{RESTORE_RP_ID}"]
+# Every installation shares that relying party and nothing in a restore
+# assertion names the instance it was made for, so a sign in could be relayed
+# from one instance to another. Held back until a login path binds assertions.
+RESTORE_KEYS_ENABLED: Final = False
 
 
 def _disallow_id(conf: dict[str, Any]) -> dict[str, Any]:
@@ -107,6 +111,8 @@ def _async_relying_party(
 ) -> _RelyingParty:
     """Return the relying party for a restore key or an HTTPS browser origin."""
     if restore:
+        if not RESTORE_KEYS_ENABLED:
+            raise InvalidAuthError("Restore keys are not available yet.")
         return _RelyingParty(RESTORE_RP_ID, RESTORE_ORIGINS)
     if origin is None:
         raise InvalidAuthError("No origin to run a WebAuthn ceremony for.")
