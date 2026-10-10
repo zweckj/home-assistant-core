@@ -32,6 +32,7 @@ class AuthFlowContext(FlowContext, total=False):
     code_challenge_method: str
     # Attaching credentials to the signed in user via /auth/link_user.
     link_user: bool
+    link_user_id: str
 
 
 class AuthFlowResult(FlowResult[AuthFlowContext, tuple[str, str]], total=False):
