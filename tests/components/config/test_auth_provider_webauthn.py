@@ -388,6 +388,40 @@ async def test_registration_challenge_expires(
     assert await provider.async_list_credentials_meta(user) == []
 
 
+async def test_restore_key_registration_is_held_back(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    webauthn_account: tuple[WebAuthnProvider, User],
+) -> None:
+    """Test nobody can register a restore key while restore keys are held back."""
+    _, user = webauthn_account
+    client = await _connect_user(hass, aiohttp_client, user, {"Origin": ORIGIN})
+
+    await client.send_json(
+        {"id": 1, "type": "config/auth_provider/webauthn/register", "restore": True}
+    )
+    response = await client.receive_json()
+    assert not response["success"]
+    assert response["error"]["code"] == "invalid_origin"
+    assert response["error"]["message"] == "Restore keys are not available yet."
+
+    # A pending browser registration cannot be finished as a restore key either.
+    await client.send_json({"id": 2, "type": "config/auth_provider/webauthn/register"})
+    assert (await client.receive_json())["success"]
+    await client.send_json(
+        {
+            "id": 3,
+            "type": "config/auth_provider/webauthn/register_verify",
+            "credential": {},
+            "restore": True,
+        }
+    )
+    response = await client.receive_json()
+    assert not response["success"]
+    assert response["error"]["code"] == "invalid_auth"
+    assert response["error"]["message"] == "Restore keys are not available yet."
+
+
 async def test_cannot_delete_last_login_method(
     hass: HomeAssistant,
     aiohttp_client: ClientSessionGenerator,

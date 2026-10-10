@@ -115,6 +115,53 @@ async def test_deleting_one_of_several_passkeys_revokes_the_sessions(
     assert len(provider.data.list_credentials_meta(user.id)) == 1
 
 
+@pytest.mark.parametrize("origin", [None, ORIGIN])
+def test_restore_keys_are_held_back(hass: HomeAssistant, origin: str | None) -> None:
+    """Test no ceremony runs for the shared restore relying party yet."""
+    with pytest.raises(webauthn.InvalidAuthError):
+        webauthn._async_relying_party(hass, origin, restore=True)
+
+
+def test_restore_relying_party_is_shared_once_enabled(hass: HomeAssistant) -> None:
+    """Test restore keys use the companion app relying party, not the origin."""
+    with patch(f"{webauthn.__name__}.RESTORE_KEYS_ENABLED", True):
+        relying_party = webauthn._async_relying_party(hass, None, restore=True)
+
+    assert relying_party == webauthn._RelyingParty(
+        webauthn.RESTORE_RP_ID, webauthn.RESTORE_ORIGINS
+    )
+
+
+async def test_login_flow_refuses_a_restore_ceremony(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a restore key cannot sign in while restore keys are held back."""
+    await _linked_user(hass, provider, "credential-1")
+
+    result = await hass.auth.login_flow.async_init(
+        (provider.type, provider.id),
+        context=AuthFlowContext(ip_address=ip_address("192.168.1.10"), restore=True),
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "invalid_origin"
+
+
+async def test_last_passkey_guard_ignores_restore_keys(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a restore key does not count as a way to sign in."""
+    await async_process_ha_core_config(hass, {"external_url": ORIGIN})
+    user, credentials = await _linked_user(hass, provider, "live-key")
+    await _store_passkey(provider, user.id, "restore-key", rp_id=webauthn.RESTORE_RP_ID)
+
+    with pytest.raises(webauthn.LastLoginMethodError):
+        await provider.async_delete_credential(user, "live-key")
+
+    await provider.async_delete_credential(user, "restore-key")
+    assert provider.async_can_login_with_credentials(credentials) is True
+
+
 async def test_deleting_a_passkey_revokes_its_pending_logins(
     hass: HomeAssistant, provider: webauthn.WebAuthnProvider
 ) -> None:
@@ -298,7 +345,7 @@ async def test_step_up_succeeds_with_the_users_passkey(
             STEP_UP_CONTEXT,
         )
 
-    verify.assert_awaited_once_with("assertion", b"challenge", ORIGIN)
+    verify.assert_awaited_once_with("assertion", b"challenge", ORIGIN, False)
     assert user.id not in provider._pending_step_up_challenges
 
 
@@ -403,7 +450,7 @@ async def test_login_flow_signs_in_against_the_browser_origin(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"] is credentials
-    verify.assert_awaited_once_with("assertion", ANY, ORIGIN)
+    verify.assert_awaited_once_with("assertion", ANY, ORIGIN, False)
     assert relying_party.call_args.args[1] == ORIGIN
 
 
