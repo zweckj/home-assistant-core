@@ -1,0 +1,11 @@
+{
+  "domain": "openid_connect",
+  "name": "OpenID Connect",
+  "codeowners": ["@zweckj"],
+  "config_flow": true,
+  "dependencies": ["auth"],
+  "documentation": "https://www.home-assistant.io/integrations/openid_connect",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "quality_scale": "bronze"
+}

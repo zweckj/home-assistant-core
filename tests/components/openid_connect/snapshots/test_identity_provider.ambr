@@ -1,0 +1,136 @@
+# serializer version: 1
+# name: test_get_identity_provider[custom-scopes-claims]
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': False,
+    'client_id': 'client-id',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'sub',
+      'admin_group': None,
+      'discovery_url': None,
+      'display_name_claim': 'given_name',
+      'issuer': 'https://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
+      'required_claims': dict({
+      }),
+      'scopes': tuple(
+        'openid',
+        'groups',
+        'offline_access',
+      ),
+      'username_claim': 'email',
+    }),
+    'revalidate_interval': None,
+  })
+# ---
+# name: test_get_identity_provider[insecure-transport]
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': True,
+    'client_id': 'client-id',
+    'client_secret': None,
+    'protocol': dict({
+      'account_name_claim': 'email',
+      'admin_group': None,
+      'discovery_url': None,
+      'display_name_claim': 'name',
+      'issuer': 'http://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
+      'required_claims': dict({
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+        'email',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': None,
+  })
+# ---
+# name: test_get_identity_provider[link-defaults-confidential]
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': False,
+    'client_id': 'confidential-client',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'email',
+      'admin_group': None,
+      'discovery_url': None,
+      'display_name_claim': 'name',
+      'issuer': 'https://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
+      'required_claims': dict({
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+        'email',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': None,
+  })
+# ---
+# name: test_get_identity_provider[provision-admin-group-interval]
+  dict({
+    'accounts': <AccountPolicy.PROVISION: 'provision'>,
+    'allow_insecure_transport': False,
+    'client_id': 'client-id',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'email',
+      'admin_group': 'home-assistant-admins',
+      'discovery_url': None,
+      'display_name_claim': 'name',
+      'issuer': 'https://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
+      'required_claims': dict({
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+        'email',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': datetime.timedelta(seconds=3600),
+  })
+# ---
+# name: test_get_identity_provider[public-client]
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': False,
+    'client_id': 'public-client',
+    'client_secret': None,
+    'protocol': dict({
+      'account_name_claim': 'email',
+      'admin_group': None,
+      'discovery_url': None,
+      'display_name_claim': 'name',
+      'issuer': 'https://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
+      'required_claims': dict({
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+        'email',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': None,
+  })
+# ---
