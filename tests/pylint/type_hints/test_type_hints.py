@@ -252,6 +252,55 @@ def test_valid_discovery_info(
         type_hint_checker.visit_asyncfunctiondef(func_node)
 
 
+def test_valid_identity_provider_platform(
+    linter: UnittestLinter, type_hint_checker: BaseChecker
+) -> None:
+    """Ensure valid hints are accepted for identity_provider."""
+    func_node = astroid.extract_node(
+        """
+    def get_identity_provider( #@
+        entry: ConfigEntry,
+    ) -> IdentityProvider:
+        pass
+    """,
+        "homeassistant.components.pylint_test.identity_provider",
+    )
+    type_hint_checker.visit_module(func_node.parent)
+
+    with assert_no_messages(linter):
+        type_hint_checker.visit_functiondef(func_node)
+
+
+def test_invalid_identity_provider_platform_return(
+    linter: UnittestLinter, type_hint_checker: BaseChecker
+) -> None:
+    """Ensure invalid return hints are rejected for identity_provider."""
+    func_node = astroid.extract_node(
+        """
+    def get_identity_provider( #@
+        entry: ConfigEntry,
+    ) -> str:
+        pass
+    """,
+        "homeassistant.components.pylint_test.identity_provider",
+    )
+    type_hint_checker.visit_module(func_node.parent)
+
+    with assert_adds_messages(
+        linter,
+        pylint.testutils.MessageTest(
+            msg_id="home-assistant-return-type",
+            node=func_node,
+            args=("IdentityProvider", "get_identity_provider"),
+            line=2,
+            col_offset=0,
+            end_line=2,
+            end_col_offset=25,
+        ),
+    ):
+        type_hint_checker.visit_functiondef(func_node)
+
+
 def test_invalid_list_dict_str_any(
     linter: UnittestLinter, type_hint_checker: BaseChecker
 ) -> None:

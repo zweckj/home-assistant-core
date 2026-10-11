@@ -31,6 +31,8 @@ class AuthFlowContext(FlowContext, total=False):
     redirect_uri: str
     # Attaching credentials to the signed in user via /auth/link_user.
     link_user: bool
+    # User who started a /auth/link_user flow.
+    user_id: str
     # Binds an external step to the browser that started it.
     browser_token: str
 

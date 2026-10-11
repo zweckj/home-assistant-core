@@ -16,7 +16,11 @@ from yarl import URL
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH
 from homeassistant.auth.providers.oidc import OidcAuthProvider
 from homeassistant.auth.providers.oidc.client import OidcTransientError, TokenResponse
-from homeassistant.auth.providers.oidc.store import OidcConfig
+from homeassistant.auth.providers.oidc.spec import (
+    AccountPolicy,
+    IdentityProvider,
+    OpenIDConnect,
+)
 from homeassistant.components.websocket_api import (
     auth as websocket_auth,
     http as websocket_http,
@@ -134,6 +138,28 @@ async def test_fetch_auth_providers_skips_providers_that_cannot_start_login(
 
     assert resp.status == HTTPStatus.OK
     assert (await resp.json())["providers"] == []
+
+
+async def test_fetch_auth_providers_includes_domain(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test fetching auth providers includes the brand domain when set."""
+    client = await async_setup_auth(hass, aiohttp_client, BASE_CONFIG)
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider.domain",
+        new=property(lambda self: "insecure_example"),
+    ):
+        resp = await client.get("/auth/providers")
+
+    assert resp.status == HTTPStatus.OK
+    assert (await resp.json())["providers"] == [
+        {
+            "name": "Example",
+            "type": "insecure_example",
+            "id": None,
+            "domain": "insecure_example",
+        }
+    ]
 
 
 async def test_fetch_auth_providers_onboarding(
@@ -519,8 +545,8 @@ async def test_login_callback_rejects_a_flow_that_is_not_parked(
 
 @pytest.mark.parametrize(
     ("flow_type", "expected"),
-    [("authorize", False), ("link_user", True), (None, False)],
-    ids=["authorize", "link-user", "default"],
+    [("authorize", False), (None, False)],
+    ids=["authorize", "default"],
 )
 async def test_login_flow_marks_account_linking(
     hass: HomeAssistant,
@@ -545,6 +571,32 @@ async def test_login_flow_marks_account_linking(
     flow_id = (await resp.json())["flow_id"]
 
     assert hass.auth.login_flow.async_get(flow_id)["context"]["link_user"] is expected
+
+
+async def test_login_flow_marks_account_linking_for_authenticated_user(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test the link flow records the user who started it."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_user(name="Hello")
+    refresh_token = await hass.auth.async_create_refresh_token(user, CLIENT_ID)
+    access_token = hass.auth.async_create_access_token(refresh_token)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+        headers={"authorization": "Bearer " + access_token},
+    )
+
+    assert resp.status == HTTPStatus.OK
+    flow = hass.auth.login_flow.async_get((await resp.json())["flow_id"])
+    assert flow["context"]["link_user"] is True
+    assert flow["context"]["user_id"] == user.id
 
 
 async def test_concurrent_requests_cannot_advance_the_same_flow(
@@ -721,6 +773,7 @@ async def test_well_known_protected_resource_no_url(
     assert resp.status == 404
 
 
+_OIDC_IDP_ID = "test-idp"
 _OIDC_ISSUER = "https://idp.example.com"
 _OIDC_DISCOVERY = {
     "issuer": _OIDC_ISSUER,
@@ -743,8 +796,18 @@ async def _setup_oidc(
     aioclient_mock.get(f"{_OIDC_ISSUER}/jwks", json={"keys": []})
 
     client = await async_setup_auth(hass, aiohttp_client, [{"type": "oidc"}])
-    await hass.auth.auth_providers[0].async_set_config(
-        OidcConfig(issuer=_OIDC_ISSUER, client_id="home-assistant")
+    await hass.auth.auth_providers[0].async_register_identity_provider(
+        _OIDC_IDP_ID,
+        domain="openid_connect",
+        title="Example ID",
+        spec=IdentityProvider(
+            client_id="home-assistant",
+            protocol=OpenIDConnect(
+                issuer=_OIDC_ISSUER, admin_group="home_assistant_admin"
+            ),
+            accounts=AccountPolicy.PROVISION,
+            revalidate_interval=timedelta(hours=1),
+        ),
     )
     return client
 
@@ -759,7 +822,7 @@ async def _start_oidc_login(client: TestClient) -> str:
             "/auth/login_flow",
             json={
                 "client_id": CLIENT_ID,
-                "handler": ["oidc", None],
+                "handler": ["oidc", _OIDC_IDP_ID],
                 "redirect_uri": CLIENT_REDIRECT_URI,
             },
         )
@@ -824,15 +887,10 @@ async def test_oidc_complete_http_login(
 ) -> None:
     """Test the complete OIDC browser flow issues Home Assistant tokens."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
-    provider = hass.auth.auth_providers[0]
-    assert isinstance(provider, OidcAuthProvider)
-    await provider.async_set_config(
-        OidcConfig(
-            issuer=_OIDC_ISSUER,
-            client_id="home-assistant",
-            allow_auto_create=True,
-        )
-    )
+    root = hass.auth.auth_providers[0]
+    assert isinstance(root, OidcAuthProvider)
+    provider = root.async_get_child_provider(_OIDC_IDP_ID)
+    assert provider is not None
     state = await _start_oidc_login(client)
     oidc_client = provider.async_client()
 
@@ -893,15 +951,10 @@ _OIDC_CLAIMS = {
 
 async def _oidc_sign_in(hass: HomeAssistant, client: TestClient, **claims: Any) -> str:
     """Complete a browser login and return a Home Assistant access token."""
-    provider = hass.auth.auth_providers[0]
-    assert isinstance(provider, OidcAuthProvider)
-    await provider.async_set_config(
-        OidcConfig(
-            issuer=_OIDC_ISSUER,
-            client_id="home-assistant",
-            allow_auto_create=True,
-        )
-    )
+    root = hass.auth.auth_providers[0]
+    assert isinstance(root, OidcAuthProvider)
+    provider = root.async_get_child_provider(_OIDC_IDP_ID)
+    assert provider is not None
     state = await _start_oidc_login(client)
     oidc_client = provider.async_client()
 
@@ -974,7 +1027,10 @@ async def test_oidc_withdrawing_admin_reaches_an_open_connection(
     websocket = await _authenticated_socket(client, access_token)
     assert (await _fire_event(websocket, 1))["success"]
 
-    provider = hass.auth.auth_providers[0]
+    root = hass.auth.auth_providers[0]
+    assert isinstance(root, OidcAuthProvider)
+    provider = root.async_get_child_provider(_OIDC_IDP_ID)
+    assert provider is not None
     oidc_client = provider.async_client()
     session = next(iter(provider.data.sessions.values()))
     session.refresh_after = time.time() - 1
@@ -1010,7 +1066,11 @@ async def test_oidc_deadline_disconnects_an_open_connection(
     access_token = await _oidc_sign_in(hass, client)
     websocket = await _authenticated_socket(client, access_token)
 
-    provider = hass.auth.auth_providers[0]
+    root = hass.auth.auth_providers[0]
+    assert isinstance(root, OidcAuthProvider)
+    provider = root.async_get_child_provider(_OIDC_IDP_ID)
+    assert provider is not None
+    assert provider.data is not None
     session = next(iter(provider.data.sessions.values()))
     session.refresh_after = time.time() - 1
     session.revalidate_after = time.time() - 1
@@ -1035,15 +1095,10 @@ async def test_concurrent_oidc_finish_posts_execute_once(
 ) -> None:
     """Test only one request can execute a flow's final OIDC step."""
     client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
-    provider = hass.auth.auth_providers[0]
-    assert isinstance(provider, OidcAuthProvider)
-    await provider.async_set_config(
-        OidcConfig(
-            issuer=_OIDC_ISSUER,
-            client_id="home-assistant",
-            allow_auto_create=True,
-        )
-    )
+    root = hass.auth.auth_providers[0]
+    assert isinstance(root, OidcAuthProvider)
+    provider = root.async_get_child_provider(_OIDC_IDP_ID)
+    assert provider is not None
     state = await _start_oidc_login(client)
     resp = await client.get(
         f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
@@ -1115,7 +1170,7 @@ async def test_oidc_callback_rejects_invalid_client_redirect(
             "/auth/login_flow",
             json={
                 "client_id": CLIENT_ID,
-                "handler": ["oidc", None],
+                "handler": ["oidc", _OIDC_IDP_ID],
                 "redirect_uri": "https://other.example.com/callback",
             },
         )
@@ -1328,7 +1383,7 @@ async def test_oidc_callback_rejects_changed_ip(
         return_value="https://ha.example.com",
     ):
         result = await hass.auth.login_flow.async_init(
-            ("oidc", None),
+            ("oidc", _OIDC_IDP_ID),
             context={
                 "ip_address": ip_address("1.2.3.4"),
                 "redirect_uri": CLIENT_REDIRECT_URI,
@@ -1352,77 +1407,47 @@ async def test_login_callback_without_an_external_login(
     assert resp.status == 400
 
 
-async def test_oidc_provider_hidden_until_configured(
+async def test_oidc_provider_hidden_until_registered(
     hass: HomeAssistant,
     aiohttp_client: ClientSessionGenerator,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Test an unconfigured provider is not offered as a way to sign in."""
+    """Test the root is hidden and only active children are offered."""
     client = await async_setup_auth(hass, aiohttp_client, [{"type": "oidc"}])
 
     resp = await client.get("/auth/providers")
     assert (await resp.json())["providers"] == []
 
-    await hass.auth.auth_providers[0].async_set_config(
-        OidcConfig(issuer=_OIDC_ISSUER, client_id="home-assistant")
-    )
-
-    resp = await client.get("/auth/providers")
-    assert [prv["type"] for prv in (await resp.json())["providers"]] == ["oidc"]
-
-
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [
-        ("Contoso ID", "Contoso ID"),
-        (None, "OpenID Connect"),
-    ],
-    ids=["configured", "default"],
-)
-async def test_oidc_provider_is_offered_under_its_name(
-    hass: HomeAssistant,
-    aiohttp_client: ClientSessionGenerator,
-    aioclient_mock: AiohttpClientMocker,
-    name: str | None,
-    expected: str,
-) -> None:
-    """Test the login screen can offer a recognisable name to sign in with."""
-    client = await async_setup_auth(hass, aiohttp_client, [{"type": "oidc"}])
-    await hass.auth.auth_providers[0].async_set_config(
-        OidcConfig(issuer=_OIDC_ISSUER, client_id="home-assistant", name=name)
-    )
-
-    resp = await client.get("/auth/providers")
-
-    assert [prv["name"] for prv in (await resp.json())["providers"]] == [expected]
-
-
-@pytest.mark.parametrize(
-    ("icon_url", "expected"),
-    [
-        (
-            "https://idp.example.com/logo.svg",
-            {"icon_url": "https://idp.example.com/logo.svg"},
+    await hass.auth.auth_providers[0].async_register_identity_provider(
+        _OIDC_IDP_ID,
+        domain="openid_connect",
+        title="Example ID",
+        spec=IdentityProvider(
+            client_id="home-assistant",
+            protocol=OpenIDConnect(issuer=_OIDC_ISSUER),
         ),
-        (None, {}),
-    ],
-    ids=["configured", "unset"],
-)
-async def test_oidc_provider_is_offered_with_its_icon(
-    hass: HomeAssistant,
-    aiohttp_client: ClientSessionGenerator,
-    aioclient_mock: AiohttpClientMocker,
-    icon_url: str | None,
-    expected: dict[str, str],
-) -> None:
-    """Test the login screen only gets an icon when one is configured."""
-    client = await async_setup_auth(hass, aiohttp_client, [{"type": "oidc"}])
-    await hass.auth.auth_providers[0].async_set_config(
-        OidcConfig(issuer=_OIDC_ISSUER, client_id="home-assistant", icon_url=icon_url)
     )
 
     resp = await client.get("/auth/providers")
-
     assert (await resp.json())["providers"] == [
-        {"name": "OpenID Connect", "id": None, "type": "oidc"} | expected
+        {
+            "name": "Example ID",
+            "id": _OIDC_IDP_ID,
+            "type": "oidc",
+            "domain": "openid_connect",
+        }
     ]
+
+
+async def test_dormant_oidc_provider_is_hidden(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test suspended children are hidden from new logins."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    hass.auth.auth_providers[0].async_suspend_identity_provider(_OIDC_IDP_ID)
+
+    resp = await client.get("/auth/providers")
+
+    assert (await resp.json())["providers"] == []

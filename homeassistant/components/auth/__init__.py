@@ -142,6 +142,20 @@ from homeassistant.auth.models import (
     RefreshToken,
     User,
 )
+from homeassistant.auth.providers.oidc import (
+    AccountPolicy,
+    ClaimRule,
+    Equals,
+    IdentityProvider,
+    IdentityProviderError,
+    NotEquals,
+    OAuth2Profile,
+    OneOf,
+    OpenIDConnect,
+    ProviderMetadata,
+    async_discover_identity_provider,
+    async_validate_identity_provider,
+)
 from homeassistant.components import websocket_api
 from homeassistant.components.http import KEY_HASS
 from homeassistant.components.http.auth import (
@@ -159,14 +173,47 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
 
 from . import indieauth, login_flow, mfa_setup_flow
+from .identity_provider_flow import (
+    IdentityProviderConfigFlow,
+    IdentityProviderFlowError,
+    IdentityProviderSetup,
+)
+from .identity_providers import (
+    async_get_redirect_uris,
+    async_identity_providers_enabled,
+    async_setup_identity_providers,
+)
+
+__all__ = [
+    "AccountPolicy",
+    "ClaimRule",
+    "Equals",
+    "IdentityProvider",
+    "IdentityProviderConfigFlow",
+    "IdentityProviderError",
+    "IdentityProviderFlowError",
+    "IdentityProviderSetup",
+    "NotEquals",
+    "OAuth2Profile",
+    "OneOf",
+    "OpenIDConnect",
+    "ProviderMetadata",
+    "async_discover_identity_provider",
+    "async_get_redirect_uris",
+    "async_identity_providers_enabled",
+    "async_setup_identity_providers",
+    "async_validate_identity_provider",
+]
 
 _LOGGER = getLogger(__name__)
 
 DOMAIN = "auth"
 
 type AuthCodePurpose = Literal["authorize", "link_user"]
-type StoreResultType = Callable[[str, Credentials, AuthCodePurpose], str]
-type RetrieveResultType = Callable[[str, str, AuthCodePurpose], Credentials | None]
+type StoreResultType = Callable[[str, Credentials, AuthCodePurpose, str | None], str]
+type RetrieveResultType = Callable[
+    [str, str, AuthCodePurpose, str | None], Credentials | None
+]
 DATA_STORE: HassKey[StoreResultType] = HassKey(DOMAIN)
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
@@ -177,14 +224,15 @@ def create_auth_code(
     hass: HomeAssistant, client_id: str, credential: Credentials
 ) -> str:
     """Create an authorization code to fetch tokens."""
-    return hass.data[DATA_STORE](client_id, credential, "authorize")
+    return hass.data[DATA_STORE](client_id, credential, "authorize", None)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Component to allow users to login."""
-    store_result, retrieve_result = _create_auth_code_store()
+    store_result, retrieve_result, discard_results = _create_auth_code_store(hass)
 
     hass.data[DATA_STORE] = store_result
+    hass.auth.async_add_credentials_revoked_listener(discard_results)
 
     hass.http.register_view(TokenView(retrieve_result))
     hass.http.register_view(RevokeTokenView())
@@ -201,6 +249,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     login_flow.async_setup(hass, store_result)
     mfa_setup_flow.async_setup(hass)
+    await async_setup_identity_providers(hass)
 
     return True
 
@@ -293,7 +342,7 @@ class TokenView(HomeAssistantView):
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 
-        credential = self._retrieve_auth(client_id, code, "authorize")
+        credential = self._retrieve_auth(client_id, code, "authorize", None)
 
         if credential is None or not isinstance(credential, Credentials):
             return self.json(
@@ -434,7 +483,7 @@ class LinkUserView(HomeAssistantView):
         user: User = request["hass_user"]
 
         credentials = self._retrieve_credentials(
-            data["client_id"], data["code"], "link_user"
+            data["client_id"], data["code"], "link_user", user.id
         )
 
         if credentials is None:
@@ -453,15 +502,20 @@ class LinkUserView(HomeAssistantView):
 
 
 @callback
-def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
+def _create_auth_code_store(
+    hass: HomeAssistant,
+) -> tuple[StoreResultType, RetrieveResultType, Callable[[Credentials], None]]:
     """Create an in memory store."""
     temp_results: dict[
-        tuple[str, str], tuple[datetime, Credentials, AuthCodePurpose]
+        tuple[str, str], tuple[datetime, Credentials, AuthCodePurpose, str | None]
     ] = {}
 
     @callback
     def store_result(
-        client_id: str, result: Credentials, purpose: AuthCodePurpose
+        client_id: str,
+        result: Credentials,
+        purpose: AuthCodePurpose,
+        user_id: str | None,
     ) -> str:
         """Store flow result and return a code to retrieve it."""
         if not isinstance(result, Credentials):
@@ -472,12 +526,13 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
             dt_util.utcnow(),
             result,
             purpose,
+            user_id,
         )
         return code
 
     @callback
     def retrieve_result(
-        client_id: str, code: str, purpose: AuthCodePurpose
+        client_id: str, code: str, purpose: AuthCodePurpose, user_id: str | None
     ) -> Credentials | None:
         """Retrieve flow result."""
         key = (client_id, code)
@@ -485,10 +540,10 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
         if (stored := temp_results.get(key)) is None:
             return None
 
-        created, result, stored_purpose = stored
+        created, result, stored_purpose, stored_user_id = stored
         # A code minted to attach an identity must not buy tokens, and a login
         # code must not silently attach an identity to whoever is signed in.
-        if stored_purpose != purpose:
+        if stored_purpose != purpose or stored_user_id != user_id:
             return None
 
         del temp_results[key]
@@ -497,12 +552,31 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
         # The authorization code MUST expire shortly after it is issued to
         # mitigate the risk of leaks.  A maximum authorization code lifetime of
         # 10 minutes is RECOMMENDED.
-        if dt_util.utcnow() - created < timedelta(minutes=10):
-            return result
+        if dt_util.utcnow() - created >= timedelta(minutes=10):
+            return None
 
-        return None
+        # Providers can be removed at runtime; a code outliving its provider
+        # would otherwise attach an orphaned credential.
+        if (
+            hass.auth.get_auth_provider(
+                result.auth_provider_type, result.auth_provider_id
+            )
+            is None
+        ):
+            return None
+        return result
 
-    return store_result, retrieve_result
+    @callback
+    def discard_results(credentials: Credentials) -> None:
+        """Drop every unredeemed code issued for the credentials.
+
+        A code is as good as a session, so it must not outlive a revocation.
+        """
+        for key, stored in list(temp_results.items()):
+            if stored[1].id == credentials.id:
+                del temp_results[key]
+
+    return store_result, retrieve_result, discard_results
 
 
 @websocket_api.websocket_command({probatio.Required("type"): "auth/current_user"})

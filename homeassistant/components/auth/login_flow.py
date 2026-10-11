@@ -25,9 +25,9 @@ are identified by type and id.
 Pass in parameter 'type' to say what the resulting authorization code is for.
 The default is 'authorize', which mints a code for POST /auth/token to exchange
 for tokens. Use 'link_user' to attach the credentials to the user who is already
-signed in; that code is only redeemable at POST /auth/link_user, and a provider
-may allow the login purely so it can be linked even when it would refuse to
-create a new user.
+signed in; starting that flow requires the user's bearer token, the code is only
+redeemable by that user at POST /auth/link_user, and a provider may allow the
+login purely so it can be linked even when it would refuse to create a new user.
 
 {
     "client_id": "https://hassbian.local:8123/",
@@ -82,9 +82,9 @@ from yarl import URL
 from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH, LOGIN_STATE_EXPIRATION
-from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
+from homeassistant.auth.models import AuthFlowContext, AuthFlowResult, User
 from homeassistant.components import onboarding
-from homeassistant.components.http import KEY_HASS
+from homeassistant.components.http import KEY_AUTHENTICATED, KEY_HASS, KEY_HASS_USER
 from homeassistant.components.http.auth import async_user_not_allowed_do_auth
 from homeassistant.components.http.ban import (
     log_invalid_auth,
@@ -257,7 +257,7 @@ class AuthProvidersView(HomeAssistantView):
                 "id": provider.id,
                 "type": provider.type,
             }
-            | ({"icon_url": icon_url} if (icon_url := provider.icon_url) else {})
+            | ({"domain": domain} if (domain := provider.domain) is not None else {})
             for provider in hass.auth.auth_providers
             if provider.async_can_start_login(context)
         ]
@@ -335,7 +335,9 @@ class LoginFlowBaseView(HomeAssistantView):
             return self.json_message("Invalid redirect URI", HTTPStatus.FORBIDDEN)
 
         result.pop("data")
-        link_user = result.pop("context").get("link_user", False)
+        context = result.pop("context")
+        link_user = context.get("link_user", False)
+        link_user_id = context.get("user_id") if link_user else None
 
         result_obj = result.pop("result")
 
@@ -358,6 +360,7 @@ class LoginFlowBaseView(HomeAssistantView):
             client_id,
             result_obj,
             "link_user" if link_user else "authorize",
+            link_user_id,
         )
 
         return self.json(result)
@@ -397,12 +400,29 @@ class LoginFlowIndexView(LoginFlowBaseView):
             return self.json_message("Invalid client id", HTTPStatus.BAD_REQUEST)
 
         handler: tuple[str, str] = tuple(data["handler"])
+        link_user = data["type"] == "link_user"
+        user_id: str | None = None
+        if link_user:
+            # The http middleware only authenticates active users.
+            if not request[KEY_AUTHENTICATED]:
+                return self.json_message(
+                    "Authentication required", HTTPStatus.UNAUTHORIZED
+                )
+            user: User = request[KEY_HASS_USER]
+            if user.system_generated:
+                return self.json_message(
+                    "System users cannot link credentials", HTTPStatus.FORBIDDEN
+                )
+            user_id = user.id
+
         context = AuthFlowContext(
             ip_address=ip_address(request.remote),  # type: ignore[arg-type]
             client_id=client_id,
             redirect_uri=redirect_uri,
-            link_user=data["type"] == "link_user",
+            link_user=link_user,
         )
+        if user_id is not None:
+            context["user_id"] = user_id
 
         try:
             result = await self._flow_mgr.async_init(

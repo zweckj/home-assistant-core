@@ -1,131 +1,27 @@
-"""Offer API to configure the OpenID Connect auth provider."""
+"""Offer self-service OpenID Connect auth provider actions."""
 
-import logging
-from typing import Any
+from typing import Any, cast
 
 import probatio
-from yarl import URL
 
-from homeassistant.auth.const import LOGIN_CALLBACK_PATH
+from homeassistant.auth.models import Credentials
 from homeassistant.auth.providers.oidc import (
     OidcAuthProvider,
-    OidcConfig,
+    OidcIdentityProvider,
     async_get_provider,
 )
-from homeassistant.auth.providers.oidc.client import OidcClient, OidcError
-from homeassistant.auth.providers.oidc.const import (
-    DEFAULT_ADMIN_GROUP,
-    DEFAULT_DISPLAY_NAME_CLAIM,
-    DEFAULT_REVALIDATE_INTERVAL,
-    DEFAULT_SCOPES,
-    DEFAULT_USERNAME_CLAIM,
-    MAX_REVALIDATE_INTERVAL,
-    MIN_REVALIDATE_INTERVAL,
-    PROVIDER_TYPE,
-)
+from homeassistant.auth.providers.oidc.const import PROVIDER_TYPE
+from homeassistant.auth.providers.oidc.spec import AccountPolicy
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.network import NoURLAvailableError, get_url
-from homeassistant.helpers.typing import VolDictType
-
-_LOGGER = logging.getLogger(__name__)
 
 
 @callback
 def async_setup(hass: HomeAssistant) -> bool:
     """Enable the OpenID Connect configuration commands."""
-    websocket_api.async_register_command(hass, websocket_get)
-    websocket_api.async_register_command(hass, websocket_update)
-    websocket_api.async_register_command(hass, websocket_delete)
-    websocket_api.async_register_command(hass, websocket_test)
+    websocket_api.async_register_command(hass, websocket_list)
     websocket_api.async_register_command(hass, websocket_unlink)
     return True
-
-
-def _issuer_url(value: str) -> str:
-    """Validate an issuer URL, leaving the scheme to the transport setting."""
-    try:
-        url = URL(value)
-    except ValueError as err:
-        raise probatio.Invalid("must be an http or https URL") from err
-    if url.scheme not in ("https", "http") or not url.host:
-        raise probatio.Invalid("must be an http or https URL")
-    if url.user is not None:
-        raise probatio.Invalid("must not contain credentials")
-    if url.query_string or url.fragment:
-        raise probatio.Invalid("must not contain a query or fragment")
-    return value
-
-
-@callback
-def _insecure_issuer(
-    connection: websocket_api.ActiveConnection, msg: dict[str, Any]
-) -> bool:
-    """Report back an http issuer the administrator did not allow."""
-    if msg["allow_insecure_transport"] or URL(msg["issuer"]).scheme == "https":
-        return False
-    connection.send_error(
-        msg["id"],
-        "insecure_transport",
-        "The issuer must be an https URL unless insecure transport is allowed",
-    )
-    return True
-
-
-def _scopes(value: list[str]) -> list[str]:
-    """Validate the requested scopes."""
-    if "openid" not in value:
-        raise probatio.Invalid("the openid scope is required")
-    return value
-
-
-def _name(value: Any) -> str | None:
-    """Validate the name the login screen offers the provider under."""
-    if value is None:
-        return None
-    if not isinstance(value, str) or not (name := value.strip()):
-        raise probatio.Invalid("must be a name")
-    return name
-
-
-def _icon_url(value: str) -> str:
-    """Validate an icon the public login screen can load."""
-    try:
-        url = URL(value)
-    except ValueError as err:
-        raise probatio.Invalid("must be an https URL or a local path") from err
-    remote = url.absolute and url.scheme == "https" and url.user is None
-    local = not url.absolute and not url.scheme and value.startswith("/")
-    # Browsers read a backslash as a slash, so "/\host" would leave the instance.
-    if "\\" in value or not (remote or local):
-        raise probatio.Invalid(
-            "must be an https URL without credentials or a local path"
-        )
-    return value
-
-
-CONFIG_SCHEMA: VolDictType = {
-    probatio.Required("issuer"): probatio.All(str, _issuer_url),
-    probatio.Required("client_id"): str,
-    probatio.Optional("client_secret"): probatio.Any(str, None),
-    probatio.Optional("name", default=None): _name,
-    probatio.Optional("icon_url", default=None): probatio.Any(
-        None, probatio.All(str, _icon_url)
-    ),
-    probatio.Optional("scopes", default=lambda: list(DEFAULT_SCOPES)): probatio.All(
-        [str], probatio.Length(min=1), _scopes
-    ),
-    probatio.Optional("username_claim", default=DEFAULT_USERNAME_CLAIM): str,
-    probatio.Optional("display_name_claim", default=DEFAULT_DISPLAY_NAME_CLAIM): str,
-    probatio.Optional("admin_group", default=DEFAULT_ADMIN_GROUP): probatio.Any(
-        str, None
-    ),
-    probatio.Optional("allow_auto_create", default=False): bool,
-    probatio.Optional("allow_insecure_transport", default=False): bool,
-    probatio.Optional("revalidate_interval"): probatio.All(
-        int, probatio.Range(min=MIN_REVALIDATE_INTERVAL, max=MAX_REVALIDATE_INTERVAL)
-    ),
-}
 
 
 @callback
@@ -135,172 +31,105 @@ def _async_provider(
     msg: dict[str, Any],
 ) -> OidcAuthProvider | None:
     """Return the provider, reporting back when it is not enabled."""
-    try:
-        return async_get_provider(hass)
-    except RuntimeError:
-        connection.send_error(
-            msg["id"], "not_enabled", "The OIDC auth provider is not enabled"
-        )
-        return None
+    if (provider := async_get_provider(hass)) is not None:
+        return provider
+    connection.send_error(
+        msg["id"], "not_enabled", "The OIDC auth provider is not enabled"
+    )
+    return None
 
 
-@callback
-def _async_redirect_uris(hass: HomeAssistant) -> list[str]:
-    """Return the redirect URIs to register with the identity provider."""
-    uris: list[str] = []
-    for allow_internal, allow_external in ((False, True), (True, False)):
-        try:
-            base = get_url(
-                hass,
-                allow_internal=allow_internal,
-                allow_external=allow_external,
-                allow_cloud=False,
-            )
-        except NoURLAvailableError:
-            continue
-        if (uri := f"{base}{LOGIN_CALLBACK_PATH}") not in uris:
-            uris.append(uri)
-
-    if not uris:
-        _LOGGER.warning(
-            "No URL is configured to build an OIDC redirect URI from, set an"
-            " internal or external URL before registering the client"
-        )
-    return uris
+def _credential_for_user(
+    credentials: list[Credentials], credential_id: str
+) -> Credentials | None:
+    """Return the caller-owned OIDC credential matching the id."""
+    return next(
+        (
+            credentials
+            for credentials in credentials
+            if credentials.id == credential_id
+            and credentials.auth_provider_type == PROVIDER_TYPE
+            and credentials.auth_provider_id is not None
+        ),
+        None,
+    )
 
 
-@callback
-def _config_to_dict(config: OidcConfig | None) -> dict[str, Any] | None:
-    """Return the configuration without exposing the client secret."""
-    if config is None:
-        return None
-
-    return {
-        "issuer": config.issuer,
-        "client_id": config.client_id,
-        # The secret is write only, the UI only needs to know it is set.
-        "client_secret_set": bool(config.client_secret),
-        "name": config.name,
-        "icon_url": config.icon_url,
-        "scopes": config.scopes,
-        "username_claim": config.username_claim,
-        "display_name_claim": config.display_name_claim,
-        "admin_group": config.admin_group,
-        "allow_auto_create": config.allow_auto_create,
-        "allow_insecure_transport": config.allow_insecure_transport,
-        "revalidate_interval": config.revalidate_interval,
-    }
+def _child_name(hass: HomeAssistant, child: OidcIdentityProvider) -> str:
+    """Return the config entry title or child provider name."""
+    if (entry := hass.config_entries.async_get_entry(cast(str, child.id))) is not None:
+        return entry.title
+    return child.name
 
 
 @websocket_api.websocket_command(
-    {probatio.Required("type"): "config/auth_provider/oidc/get"}
+    {probatio.Required("type"): "config/auth_provider/oidc/list"}
 )
-@websocket_api.require_admin
-@websocket_api.async_response
-async def websocket_get(
+@callback
+def websocket_list(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return the current configuration."""
+    """List identity provider options and the caller's linked credentials."""
     if (provider := _async_provider(hass, connection, msg)) is None:
         return
 
+    active_children = [
+        child
+        for child in provider.child_providers
+        if isinstance(child, OidcIdentityProvider) and child.active
+    ]
+    identity_providers = sorted(
+        (
+            {
+                "id": cast(str, child.id),
+                "name": _child_name(hass, child),
+                "domain": cast(str, child.domain),
+                "accounts": child.record.accounts.value,
+            }
+            for child in active_children
+        ),
+        key=lambda item: item["name"],
+    )
+
+    user = connection.user
+    credentials = []
+    for credential in user.credentials:
+        if (
+            credential.auth_provider_type != PROVIDER_TYPE
+            or credential.auth_provider_id is None
+        ):
+            continue
+        child = provider.async_get_child_provider(credential.auth_provider_id)
+        if not isinstance(child, OidcIdentityProvider):
+            continue
+        credentials.append(
+            {
+                "credential_id": credential.id,
+                "identity_provider_id": credential.auth_provider_id,
+                "name": _child_name(hass, child),
+                "domain": cast(str, child.domain),
+                "account_name": credential.data.get("account_name"),
+                "available": child.active,
+                "can_unlink": child.record.accounts is AccountPolicy.LINK,
+                "has_other_login": hass.auth.async_has_other_login_method(
+                    user, credential
+                ),
+            }
+        )
+
     connection.send_result(
         msg["id"],
-        {
-            "config": _config_to_dict(
-                provider.oidc_config if provider.is_configured else None
-            ),
-            # Tells the UI that settings were lost rather than never made.
-            "config_discarded": provider.data is not None
-            and provider.data.config_discarded,
-            "redirect_uris": _async_redirect_uris(hass),
-        },
+        {"identity_providers": identity_providers, "credentials": credentials},
     )
 
 
 @websocket_api.websocket_command(
     {
-        probatio.Required("type"): "config/auth_provider/oidc/update",
-        **CONFIG_SCHEMA,
+        probatio.Required("type"): "config/auth_provider/oidc/unlink",
+        probatio.Required("credential_id"): str,
     }
-)
-@websocket_api.require_admin
-@websocket_api.async_response
-async def websocket_update(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Store a new configuration."""
-    if (provider := _async_provider(hass, connection, msg)) is None:
-        return
-
-    if _insecure_issuer(connection, msg):
-        return
-
-    current = provider.oidc_config if provider.is_configured else None
-
-    # Leaving these out of the message keeps the stored values, so the UI never
-    # has to read the secret back to save an unrelated change.
-    client_secret = (
-        current.client_secret
-        if current
-        and current.issuer == msg["issuer"]
-        and current.client_id == msg["client_id"]
-        else None
-    )
-    if "client_secret" in msg:
-        client_secret = msg["client_secret"] or None
-
-    revalidate_interval = (
-        current.revalidate_interval if current else DEFAULT_REVALIDATE_INTERVAL
-    )
-    if "revalidate_interval" in msg:
-        revalidate_interval = msg["revalidate_interval"]
-
-    config = OidcConfig(
-        issuer=msg["issuer"],
-        client_id=msg["client_id"],
-        client_secret=client_secret,
-        name=msg["name"],
-        icon_url=msg["icon_url"],
-        scopes=msg["scopes"],
-        username_claim=msg["username_claim"],
-        display_name_claim=msg["display_name_claim"],
-        admin_group=msg["admin_group"],
-        allow_auto_create=msg["allow_auto_create"],
-        allow_insecure_transport=msg["allow_insecure_transport"],
-        revalidate_interval=revalidate_interval,
-    )
-
-    with connection.async_defer_auth_close():
-        await provider.async_set_config(config)
-        connection.send_result(msg["id"], {"config": _config_to_dict(config)})
-
-
-@websocket_api.websocket_command(
-    {probatio.Required("type"): "config/auth_provider/oidc/delete"}
-)
-@websocket_api.require_admin
-@websocket_api.async_response
-async def websocket_delete(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Remove the configuration and every session that depends on it."""
-    if (provider := _async_provider(hass, connection, msg)) is None:
-        return
-
-    with connection.async_defer_auth_close():
-        await provider.async_set_config(None)
-        connection.send_result(msg["id"])
-
-
-@websocket_api.websocket_command(
-    {probatio.Required("type"): "config/auth_provider/oidc/unlink"}
 )
 @websocket_api.async_response
 async def websocket_unlink(
@@ -308,34 +137,35 @@ async def websocket_unlink(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Detach the caller's own identity from their Home Assistant account."""
+    """Detach one of the caller's own identity provider credentials."""
     if (provider := _async_provider(hass, connection, msg)) is None:
         return
 
-    # An unconfigured provider cannot sign anybody in, so nothing could relink.
-    if provider.is_configured and provider.oidc_config.allow_auto_create:
+    user = connection.user
+    credential = _credential_for_user(user.credentials, msg["credential_id"])
+    if credential is None:
         connection.send_error(
             msg["id"],
-            "auto_create_enabled",
-            "Signing in again would link the account straight back",
+            "not_linked",
+            "This account has no matching identity provider login",
         )
         return
 
-    user = connection.user
-    linked = [
-        credentials
-        for credentials in user.credentials
-        if credentials.auth_provider_type == PROVIDER_TYPE
-    ]
-    if not linked:
+    child = provider.async_get_child_provider(cast(str, credential.auth_provider_id))
+    if not isinstance(child, OidcIdentityProvider):
         connection.send_error(
-            msg["id"], "not_linked", "This account has no identity provider login"
+            msg["id"], "not_linked", "The identity provider is not registered"
+        )
+        return
+    if child.record.accounts is AccountPolicy.PROVISION:
+        connection.send_error(
+            msg["id"],
+            "provisioning_provider",
+            "Provisioning identity provider credentials cannot be unlinked",
         )
         return
 
-    # A stored login only counts while its provider is still enabled, so a
-    # disabled one does not count as the remaining way in.
-    if not hass.auth.async_has_other_login_method(user, *linked):
+    if not hass.auth.async_has_other_login_method(user, credential):
         connection.send_error(
             msg["id"],
             "no_other_login",
@@ -344,57 +174,5 @@ async def websocket_unlink(
         return
 
     with connection.async_defer_auth_close():
-        for credentials in linked:
-            await hass.auth.async_remove_credentials(credentials)
-
+        await hass.auth.async_remove_credentials(credential)
         connection.send_result(msg["id"])
-
-
-@websocket_api.websocket_command(
-    {
-        probatio.Required("type"): "config/auth_provider/oidc/test",
-        probatio.Required("issuer"): probatio.All(str, _issuer_url),
-        probatio.Required("client_id"): str,
-        probatio.Optional("client_secret"): probatio.Any(str, None),
-        probatio.Optional("allow_insecure_transport", default=False): bool,
-    }
-)
-@websocket_api.require_admin
-@websocket_api.async_response
-async def websocket_test(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Fetch the discovery document so the UI can report on it."""
-    if _insecure_issuer(connection, msg):
-        return
-
-    client = OidcClient(
-        hass,
-        issuer=msg["issuer"],
-        client_id=msg["client_id"],
-        client_secret=msg.get("client_secret"),
-        allow_insecure_transport=msg["allow_insecure_transport"],
-    )
-
-    try:
-        metadata = await client.async_metadata(force_refresh=True)
-    except OidcError as err:
-        connection.send_error(msg["id"], "discovery_failed", str(err))
-        return
-
-    connection.send_result(
-        msg["id"],
-        {
-            "issuer": metadata.issuer,
-            "authorization_endpoint": metadata.authorization_endpoint,
-            "token_endpoint": metadata.token_endpoint,
-            "userinfo_endpoint": metadata.userinfo_endpoint,
-            "jwks_uri": metadata.jwks_uri,
-            "scopes_supported": list(metadata.scopes_supported),
-            "id_token_signing_alg_values_supported": list(
-                metadata.id_token_signing_alg_values_supported
-            ),
-        },
-    )

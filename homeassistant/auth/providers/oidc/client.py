@@ -6,10 +6,11 @@ since PyJWT's own key client fetches with blocking urllib.
 
 import asyncio
 import base64
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
 import logging
+import re
 import time
 from typing import Any
 
@@ -42,9 +43,12 @@ from .const import (
     DISCOVERY_CACHE_TTL,
     DISCOVERY_PATH,
     HTTP_TIMEOUT,
+    ISSUER_PLACEHOLDER_PATTERN,
+    ISSUER_PLACEHOLDER_VALUE_PATTERN,
     JWKS_CACHE_TTL,
     JWKS_REFETCH_COOLDOWN,
     PKCE_CHALLENGE_METHOD,
+    RESERVED_PROFILE_HEADERS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,6 +69,9 @@ _AT_HASH_ALGORITHMS: dict[str, str] = {
     "PS512": "sha512",
     "ES512": "sha512",
 }
+
+_ISSUER_TEMPLATE_RE = re.compile(ISSUER_PLACEHOLDER_PATTERN)
+_ISSUER_PLACEHOLDER_VALUE_RE = re.compile(ISSUER_PLACEHOLDER_VALUE_PATTERN)
 
 
 def _compute_at_hash(access_token: str, algorithm: str) -> str | None:
@@ -164,6 +171,14 @@ def _https_url(allow_http: bool) -> Callable[[str], str]:
     return validate
 
 
+def _require_https(url: str, field: str, *, allow_http: bool = False) -> str:
+    """Return an unambiguous HTTPS endpoint URL from the configuration."""
+    try:
+        return _https_url(allow_http)(url)
+    except probatio.Invalid as err:
+        raise OidcDiscoveryError(f"{field} {err.msg}") from err
+
+
 _STRINGS = probatio.All([str], probatio.Coerce(tuple))
 
 
@@ -214,6 +229,172 @@ _USERINFO_SCHEMA = probatio.Schema(
 )
 
 
+def _origin(url: str) -> str:
+    """Return the origin of a URL."""
+    parsed = URL(url)
+    origin = f"{parsed.scheme}://{parsed.host}"
+    default_port = 443 if parsed.scheme == "https" else 80
+    if parsed.port is not None and parsed.port != default_port:
+        origin = f"{origin}:{parsed.port}"
+    return origin
+
+
+def _find_issuer_placeholder(issuer: str) -> str | None:
+    """Return the issuer template placeholder, if the issuer has one."""
+    placeholders: list[str] = []
+    for segment in URL(issuer).path.split("/"):
+        if "{" in segment or "}" in segment:
+            if (match := _ISSUER_TEMPLATE_RE.fullmatch(segment)) is None:
+                raise ValueError(
+                    "issuer templates must use exactly one placeholder path segment"
+                )
+            placeholders.append(match.group(1))
+    if len(placeholders) > 1:
+        raise ValueError("issuer templates may only contain one placeholder")
+    return placeholders[0] if placeholders else None
+
+
+def _filled_template_issuer(
+    issuer: str, issuer_claim: str, claims: Mapping[str, Any]
+) -> str:
+    """Return the issuer template filled from claims."""
+    value = claims.get(issuer_claim)
+    if not isinstance(value, str) or not _ISSUER_PLACEHOLDER_VALUE_RE.fullmatch(value):
+        raise OidcIdTokenError("ID token issuer template claim is missing or unsafe")
+    return issuer.replace(f"{{{_find_issuer_placeholder(issuer)}}}", value, 1)
+
+
+def _template_issuer_pattern(issuer: str) -> re.Pattern[str]:
+    """Return a regex matching a filled issuer template."""
+    placeholder = _find_issuer_placeholder(issuer)
+    assert placeholder is not None
+    return re.compile(
+        "^"
+        + re.escape(issuer).replace(
+            re.escape(f"{{{placeholder}}}"),
+            f"({ISSUER_PLACEHOLDER_VALUE_PATTERN})",
+            1,
+        )
+        + "$"
+    )
+
+
+def _parse_provider_metadata(
+    document: Any,
+    *,
+    expected_issuer: str | None,
+    allow_http: bool,
+) -> ProviderMetadata:
+    """Validate and convert a discovery document."""
+    try:
+        parsed = _discovery_schema(allow_http)(document)
+    except probatio.Invalid as err:
+        raise OidcDiscoveryError(f"Discovery document is invalid: {err}") from err
+
+    # Compared exactly, trailing slash included, to keep issuer binding.
+    if expected_issuer is not None and parsed["issuer"] != expected_issuer:
+        raise OidcDiscoveryError(
+            f"Discovery document issuer {parsed['issuer']!r} does not"
+            f" match the configured issuer {expected_issuer!r}"
+        )
+
+    challenge_methods = parsed.pop("code_challenge_methods_supported", ())
+    if challenge_methods and PKCE_CHALLENGE_METHOD not in challenge_methods:
+        raise OidcDiscoveryError(
+            f"The provider does not offer the {PKCE_CHALLENGE_METHOD} PKCE"
+            f" challenge method, it only offers {', '.join(challenge_methods)}"
+        )
+
+    return ProviderMetadata(
+        **{key: value for key, value in parsed.items() if value is not None}
+    )
+
+
+async def _async_fetch_json(hass: HomeAssistant, url: str, what: str) -> Any:
+    """Fetch and decode a JSON document."""
+    session = async_get_clientsession(hass)
+    try:
+        async with asyncio.timeout(HTTP_TIMEOUT):
+            # Following a redirect would defeat the HTTPS check on the URL.
+            response = await session.get(url, allow_redirects=False)
+            if 300 <= response.status < 400:
+                raise OidcDiscoveryError(f"The {what} URL redirects elsewhere")
+            if response.status >= 400:
+                raise OidcDiscoveryError(
+                    f"Got status {response.status} fetching the {what}"
+                )
+            return await response.json(content_type=None)
+    except TimeoutError as err:
+        raise OidcTransientError(f"Timeout fetching the {what}") from err
+    except ClientError as err:
+        raise OidcTransientError(f"Error fetching the {what}: {err}") from err
+    except ValueError as err:
+        raise OidcDiscoveryError(f"The {what} is not valid JSON") from err
+
+
+async def async_discover(
+    hass: HomeAssistant,
+    discovery_url: str,
+    *,
+    allow_insecure_transport: bool = False,
+) -> ProviderMetadata:
+    """Fetch and validate provider metadata without enforcing an issuer."""
+    discovery_url = _require_https(
+        discovery_url, "discovery_url", allow_http=allow_insecure_transport
+    )
+    document = await _async_fetch_json(hass, discovery_url, "discovery document")
+    return _parse_provider_metadata(
+        document, expected_issuer=None, allow_http=allow_insecure_transport
+    )
+
+
+async def _async_token_request(
+    hass: HomeAssistant,
+    token_url: str,
+    data: Mapping[str, Any],
+    *,
+    headers: Mapping[str, str],
+) -> TokenResponse:
+    """Post to a token endpoint and parse the token response."""
+    try:
+        async with asyncio.timeout(HTTP_TIMEOUT):
+            # A 307 or 308 would replay the client secret to the new target.
+            body = await async_token_request(
+                hass,
+                token_url,
+                data,
+                domain=AUTH_DOMAIN,
+                headers={"Accept": "application/json", **headers},
+                allow_redirects=False,
+            )
+    except OAuth2TokenRequestReauthError as err:
+        raise OidcInvalidGrantError("The identity provider rejected the grant") from err
+    except (
+        TimeoutError,
+        OAuth2TokenRequestConnectionError,
+        OAuth2TokenRequestTransientError,
+    ) as err:
+        raise OidcTransientError("Could not reach the token endpoint") from err
+    except OAuth2TokenRequestError as err:
+        raise OidcTokenError(
+            f"Token endpoint returned an unusable response ({err.status})"
+        ) from err
+    except ValueError as err:
+        raise OidcTokenError("Token endpoint returned invalid JSON") from err
+
+    # Also refuses a 200 carrying an error, which is how GitHub reports them.
+    try:
+        body = _TOKEN_RESPONSE_SCHEMA(body)
+    except probatio.Invalid as err:
+        raise OidcTokenError(f"Token endpoint response is invalid: {err}") from err
+
+    return TokenResponse(
+        access_token=body["access_token"],
+        id_token=body.get("id_token"),
+        refresh_token=body.get("refresh_token"),
+    )
+
+
 class OidcClient:
     """Talk to an OpenID Connect provider on behalf of Home Assistant."""
 
@@ -224,14 +405,39 @@ class OidcClient:
         issuer: str,
         client_id: str,
         client_secret: str | None = None,
+        discovery_url: str | None = None,
+        issuer_aliases: Iterable[str] = (),
+        issuer_claim: str | None = None,
         allow_insecure_transport: bool = False,
     ) -> None:
         """Initialize the client."""
+        _require_https(issuer, "issuer", allow_http=allow_insecure_transport)
+        placeholder = _find_issuer_placeholder(issuer)
+        if (placeholder is None) != (issuer_claim is None):
+            raise ValueError(
+                "issuer_claim is required exactly when issuer is a template"
+            )
+        aliases = tuple(issuer_aliases)
+        for alias in aliases:
+            if _find_issuer_placeholder(alias) is not None:
+                raise ValueError("issuer aliases may not contain placeholders")
+
         self.hass = hass
         self.issuer = issuer
         self.client_id = client_id
         self.client_secret = client_secret
+        self.discovery_url = _require_https(
+            discovery_url or f"{issuer.rstrip('/')}{DISCOVERY_PATH}",
+            "discovery_url",
+            allow_http=allow_insecure_transport,
+        )
+        self.issuer_aliases = aliases
+        self.issuer_claim = issuer_claim
         self.allow_insecure_transport = allow_insecure_transport
+        self._issuer_placeholder = placeholder
+        self._issuer_pattern = (
+            _template_issuer_pattern(issuer) if placeholder is not None else None
+        )
 
         self._metadata: ProviderMetadata | None = None
         self._metadata_fetched_at = 0.0
@@ -251,8 +457,8 @@ class OidcClient:
             ):
                 return self._metadata
 
-            document = await self._async_fetch_json(
-                f"{self.issuer.rstrip('/')}{DISCOVERY_PATH}", "discovery document"
+            document = await _async_fetch_json(
+                self.hass, self.discovery_url, "discovery document"
             )
             metadata = self._parse_metadata(document)
             self._metadata = metadata
@@ -261,49 +467,11 @@ class OidcClient:
 
     def _parse_metadata(self, document: Any) -> ProviderMetadata:
         """Validate and convert a discovery document."""
-        try:
-            parsed = _discovery_schema(self.allow_insecure_transport)(document)
-        except probatio.Invalid as err:
-            raise OidcDiscoveryError(f"Discovery document is invalid: {err}") from err
-
-        # Compared exactly, trailing slash included, to keep issuer binding.
-        if parsed["issuer"] != self.issuer:
-            raise OidcDiscoveryError(
-                f"Discovery document issuer {parsed['issuer']!r} does not"
-                f" match the configured issuer {self.issuer!r}"
-            )
-
-        challenge_methods = parsed.pop("code_challenge_methods_supported", ())
-        if challenge_methods and PKCE_CHALLENGE_METHOD not in challenge_methods:
-            raise OidcDiscoveryError(
-                f"The provider does not offer the {PKCE_CHALLENGE_METHOD} PKCE"
-                f" challenge method, it only offers {', '.join(challenge_methods)}"
-            )
-
-        return ProviderMetadata(
-            **{key: value for key, value in parsed.items() if value is not None}
+        return _parse_provider_metadata(
+            document,
+            expected_issuer=self.issuer,
+            allow_http=self.allow_insecure_transport,
         )
-
-    async def _async_fetch_json(self, url: str, what: str) -> Any:
-        """Fetch and decode a JSON document."""
-        session = async_get_clientsession(self.hass)
-        try:
-            async with asyncio.timeout(HTTP_TIMEOUT):
-                # Following a redirect would defeat the HTTPS check on the URL.
-                response = await session.get(url, allow_redirects=False)
-                if 300 <= response.status < 400:
-                    raise OidcDiscoveryError(f"The {what} URL redirects elsewhere")
-                if response.status >= 400:
-                    raise OidcDiscoveryError(
-                        f"Got status {response.status} fetching the {what}"
-                    )
-                return await response.json(content_type=None)
-        except TimeoutError as err:
-            raise OidcTransientError(f"Timeout fetching the {what}") from err
-        except ClientError as err:
-            raise OidcTransientError(f"Error fetching the {what}: {err}") from err
-        except ValueError as err:
-            raise OidcDiscoveryError(f"The {what} is not valid JSON") from err
 
     def async_authorize_url(
         self,
@@ -352,44 +520,8 @@ class OidcClient:
         """Post to the token endpoint and parse the response."""
         metadata = await self.async_metadata()
         payload, headers = self._client_auth(metadata, data)
-
-        try:
-            async with asyncio.timeout(HTTP_TIMEOUT):
-                # A 307 or 308 would replay the client secret to the new target.
-                body = await async_token_request(
-                    self.hass,
-                    metadata.token_endpoint,
-                    payload,
-                    domain=AUTH_DOMAIN,
-                    headers=headers,
-                    allow_redirects=False,
-                )
-        except OAuth2TokenRequestReauthError as err:
-            raise OidcInvalidGrantError(
-                "The identity provider rejected the grant"
-            ) from err
-        except (
-            TimeoutError,
-            OAuth2TokenRequestConnectionError,
-            OAuth2TokenRequestTransientError,
-        ) as err:
-            raise OidcTransientError("Could not reach the token endpoint") from err
-        except OAuth2TokenRequestError as err:
-            raise OidcTokenError(
-                f"Token endpoint returned an unusable response ({err.status})"
-            ) from err
-        except ValueError as err:
-            raise OidcTokenError("Token endpoint returned invalid JSON") from err
-
-        try:
-            body = _TOKEN_RESPONSE_SCHEMA(body)
-        except probatio.Invalid as err:
-            raise OidcTokenError(f"Token endpoint response is invalid: {err}") from err
-
-        return TokenResponse(
-            access_token=body["access_token"],
-            id_token=body.get("id_token"),
-            refresh_token=body.get("refresh_token"),
+        return await _async_token_request(
+            self.hass, metadata.token_endpoint, payload, headers=headers
         )
 
     def _client_auth(
@@ -483,6 +615,31 @@ class OidcClient:
             "The provider offers no ID token signing algorithm we accept"
         )
 
+    def canonical_issuer(self, claims: Mapping[str, Any]) -> str:
+        """Return the issuer used to key credentials for verified claims."""
+        if self.issuer_claim is not None:
+            return _filled_template_issuer(self.issuer, self.issuer_claim, claims)
+        return self.issuer
+
+    def accepts_issuer(self, issuer: str) -> bool:
+        """Return whether a stored credential issuer belongs to this client."""
+        if self._issuer_pattern is not None:
+            return self._issuer_pattern.fullmatch(issuer) is not None
+        return issuer == self.issuer
+
+    def _verify_issuer_claim(self, claims: Mapping[str, Any]) -> None:
+        """Verify the issuer claim follows this client's issuer rules."""
+        issuer = claims.get("iss")
+        if not isinstance(issuer, str):
+            raise OidcIdTokenError("ID token issuer claim is missing or invalid")
+        if self.issuer_claim is not None:
+            expected = self.canonical_issuer(claims)
+            if issuer != expected:
+                raise OidcIdTokenError("ID token issuer does not match its template")
+            return
+        if issuer != self.issuer and issuer not in self.issuer_aliases:
+            raise OidcIdTokenError("ID token issuer does not match this provider")
+
     async def _async_signing_key(self, kid: str | None) -> tuple[JWKDict, jwt.PyJWK]:
         """Return the public key for a key id, refetching the JWKS if needed."""
         entry = await self._async_lookup_key(kid)
@@ -515,7 +672,9 @@ class OidcClient:
                 or time.time() - self._jwks_fetched_at >= JWKS_CACHE_TTL
             ):
                 metadata = await self.async_metadata()
-                document = await self._async_fetch_json(metadata.jwks_uri, "key set")
+                document = await _async_fetch_json(
+                    self.hass, metadata.jwks_uri, "key set"
+                )
                 try:
                     keys = _JWKS_SCHEMA(document)["keys"]
                 except probatio.Invalid as err:
@@ -574,12 +733,16 @@ class OidcClient:
                 key,
                 algorithms=algorithms,
                 audience=self.client_id,
-                issuer=metadata.issuer,
                 leeway=CLOCK_SKEW_LEEWAY,
-                options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+                options={
+                    "require": ["exp", "iat", "iss", "aud", "sub"],
+                    "verify_iss": False,
+                },
             )
         except jwt.InvalidTokenError as err:
             raise OidcIdTokenError(f"ID token rejected: {err}") from err
+
+        self._verify_issuer_claim(claims)
 
         # With several audiences, azp has to name us so another client's token
         # cannot be replayed here. PyJWT already checked that aud includes us.
@@ -620,3 +783,145 @@ class OidcClient:
             raise OidcIdTokenError(
                 "ID token at_hash does not match the access token it came with"
             )
+
+
+class OAuth2ProfileClient:
+    """OAuth2 authorization-code client that identifies users from a profile."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        authorize_url: str,
+        token_url: str,
+        profile_url: str,
+        client_id: str,
+        client_secret: str | None,
+        subject_field: str,
+        account_name_field: str | None = None,
+        scopes: Sequence[str] = (),
+        headers: Mapping[str, str] | None = None,
+        token_auth_method: ClientAuthMethod = "client_secret_basic",  # noqa: S107
+        allow_insecure_transport: bool = False,
+    ) -> None:
+        """Initialize the OAuth2 profile client."""
+        if token_auth_method not in {"client_secret_basic", "client_secret_post"}:
+            raise ValueError("Unsupported token authentication method")
+        configured_headers = dict(headers or {})
+        reserved = RESERVED_PROFILE_HEADERS & {
+            header.lower() for header in configured_headers
+        }
+        if reserved:
+            raise ValueError(f"Reserved profile headers are not allowed: {reserved}")
+
+        self.hass = hass
+        self.authorize_url = _require_https(
+            authorize_url, "authorize_url", allow_http=allow_insecure_transport
+        )
+        self.token_url = _require_https(
+            token_url, "token_url", allow_http=allow_insecure_transport
+        )
+        self.profile_url = _require_https(
+            profile_url, "profile_url", allow_http=allow_insecure_transport
+        )
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.subject_field = subject_field
+        self.account_name_field = account_name_field
+        self.scopes = tuple(scopes)
+        self.headers = configured_headers
+        self.token_auth_method = token_auth_method
+        self.allow_insecure_transport = allow_insecure_transport
+        self.issuer = _origin(self.profile_url)
+
+    def async_authorize_url(
+        self, *, redirect_uri: str, state: str, code_verifier: str
+    ) -> str:
+        """Return the URL to send the user to."""
+        extra = {
+            "code_challenge": compute_code_challenge(code_verifier),
+            "code_challenge_method": PKCE_CHALLENGE_METHOD,
+        }
+        if self.scopes:
+            extra["scope"] = " ".join(self.scopes)
+        return build_authorize_url(
+            self.authorize_url,
+            client_id=self.client_id,
+            redirect_uri=redirect_uri,
+            state=state,
+            extra=extra,
+        )
+
+    async def async_exchange_code(
+        self, *, code: str, redirect_uri: str, code_verifier: str
+    ) -> TokenResponse:
+        """Exchange an authorization code for tokens."""
+        payload: dict[str, str] = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+        }
+        body, headers = client_auth(
+            payload, self.client_id, self.client_secret, self.token_auth_method
+        )
+        return await _async_token_request(
+            self.hass, self.token_url, body, headers=headers
+        )
+
+    async def async_fetch_profile(
+        self, access_token: str
+    ) -> tuple[str, str | None, dict[str, Any]]:
+        """Fetch the user's profile and return the subject and account name."""
+        session = async_get_clientsession(self.hass)
+        headers = {"Accept": "application/json", **self.headers}
+        headers["Authorization"] = "Bearer " + access_token
+        try:
+            async with asyncio.timeout(HTTP_TIMEOUT):
+                response = await session.get(
+                    self.profile_url, headers=headers, allow_redirects=False
+                )
+                status = response.status
+                if 300 <= status < 400:
+                    raise OidcError("The profile endpoint URL redirects elsewhere")
+                body = await response.json(content_type=None)
+        except TimeoutError as err:
+            raise OidcTransientError("Timeout fetching the profile") from err
+        except ClientError as err:
+            raise OidcTransientError(f"Error fetching the profile: {err}") from err
+        except ValueError as err:
+            raise OidcError("Profile endpoint returned invalid JSON") from err
+
+        if status in (401, 403):
+            raise OidcInvalidGrantError("The identity provider rejected the token")
+        if status >= 500:
+            raise OidcTransientError(f"Profile endpoint returned status {status}")
+        if status >= 400:
+            raise OidcError(f"Profile endpoint returned status {status}")
+        if not isinstance(body, dict):
+            raise OidcError("Profile endpoint did not return a JSON object")
+
+        subject_value = body.get(self.subject_field)
+        if isinstance(subject_value, bool):
+            raise OidcError("Profile subject is not a usable string")
+        if isinstance(subject_value, int):
+            subject = str(subject_value)
+        elif isinstance(subject_value, str) and subject_value:
+            subject = subject_value
+        else:
+            raise OidcError("Profile subject is not a usable string")
+
+        account_name = None
+        if self.account_name_field is not None:
+            account_name_value = body.get(self.account_name_field)
+            if isinstance(account_name_value, str) and account_name_value:
+                account_name = account_name_value
+
+        return subject, account_name, body
+
+    def accepts_issuer(self, issuer: str) -> bool:
+        """Return whether a stored credential issuer belongs to this client."""
+        return issuer == self.issuer
+
+    async def async_revoke_token(self, token: str) -> None:
+        """Do nothing; the profile flow does not keep external tokens."""

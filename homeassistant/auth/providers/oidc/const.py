@@ -13,14 +13,32 @@ STORAGE_KEY: Final = "auth_provider.oidc"
 CONF_ISSUER: Final = "issuer"
 CONF_SUBJECT: Final = "subject"
 
-DEFAULT_SCOPES: Final = ["openid", "profile", "email"]
+DEFAULT_SCOPES: Final = ("openid", "profile", "email")
 DEFAULT_USERNAME_CLAIM: Final = "preferred_username"
 DEFAULT_DISPLAY_NAME_CLAIM: Final = "name"
 
 GROUPS_CLAIM: Final = "groups"
-DEFAULT_ADMIN_GROUP: Final = "home_assistant_admin"
 
 DISCOVERY_PATH: Final = "/.well-known/openid-configuration"
+
+# A templated issuer has exactly one path segment that is a placeholder, filled
+# from a verified claim whose value has to match the value pattern.
+ISSUER_PLACEHOLDER_PATTERN: Final = r"\{([A-Za-z_][A-Za-z0-9_]*)\}"
+ISSUER_PLACEHOLDER_VALUE_PATTERN: Final = r"[A-Za-z0-9._-]{1,128}"
+
+# Headers of profile requests that the engine owns.
+RESERVED_PROFILE_HEADERS: Final = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "host",
+        "content-length",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+    }
+)
 
 HTTP_TIMEOUT: Final = 30
 

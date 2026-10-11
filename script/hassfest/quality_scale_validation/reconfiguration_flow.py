@@ -6,6 +6,7 @@ https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/r
 import ast
 
 from script.hassfest import ast_parse_module
+from script.hassfest.identity_provider import has_identity_provider_flow
 from script.hassfest.model import Config, Integration
 
 
@@ -25,7 +26,10 @@ def validate(
     config_flow_file = integration.path / "config_flow.py"
     config_flow = ast_parse_module(config_flow_file)
 
-    if not _has_step_reconfigure_function(config_flow):
+    if not (
+        _has_step_reconfigure_function(config_flow)
+        or has_identity_provider_flow(config_flow)
+    ):
         return [
             "Integration does not support a reconfiguration flow "
             f"(is missing `async_step_reconfigure` in {config_flow_file})"

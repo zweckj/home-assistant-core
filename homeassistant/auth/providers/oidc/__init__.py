@@ -1,14 +1,9 @@
-"""OpenID Connect auth provider.
-
-Signs in through an external identity provider with the authorization code flow
-and PKCE. Sessions are revalidated against the identity provider in the
-background and ended as soon as it says they are gone.
-"""
+"""OpenID Connect identity provider engine."""
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
-from datetime import datetime
+from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager
+from datetime import datetime, timedelta
 import logging
 import secrets
 import time
@@ -40,33 +35,69 @@ from ...models import (
 )
 from .. import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
 from .client import (
+    OAuth2ProfileClient,
     OidcClient,
     OidcError,
     OidcInsecureTransportError,
     OidcInvalidGrantError,
     OidcTransientError,
+    ProviderMetadata,
     TokenResponse,
+    async_discover,
 )
 from .const import (
     CONF_ISSUER,
     CONF_SUBJECT,
+    DEFAULT_REVALIDATE_INTERVAL,
     GROUPS_CLAIM,
     PROVIDER_TYPE,
     REVALIDATE_CHECK_INTERVAL,
     UNCLAIMED_SESSION_TIMEOUT,
 )
-from .store import OidcConfig, OidcSession, OidcStore
+from .spec import (
+    AccountPolicy,
+    ClaimRule,
+    Equals,
+    IdentityProvider,
+    IdentityProviderError,
+    NotEquals,
+    OAuth2Profile,
+    OneOf,
+    OpenIDConnect,
+    trust_key,
+    validate_identity_provider,
+)
+from .store import IdentityProviderRecord, OidcSession, OidcStore
 
 _LOGGER = logging.getLogger(__name__)
 
-__all__ = ["OidcAuthProvider", "OidcConfig", "async_get_provider"]
+CONF_ACCOUNT_NAME = "account_name"
+
+__all__ = [
+    "AccountPolicy",
+    "ClaimRule",
+    "Equals",
+    "IdentityProvider",
+    "IdentityProviderError",
+    "NotEquals",
+    "OAuth2Profile",
+    "OidcAuthProvider",
+    "OidcIdentityProvider",
+    "OneOf",
+    "OpenIDConnect",
+    "ProviderMetadata",
+    "async_discover_identity_provider",
+    "async_get_provider",
+    "async_validate_identity_provider",
+    "trust_key",
+    "validate_identity_provider",
+]
 
 
 def _disallow_id(conf: dict[str, Any]) -> dict[str, Any]:
     """Disallow ID in config."""
     if CONF_ID in conf:
         raise probatio.Invalid("ID is not allowed for the oidc auth provider.")
-
     return conf
 
 
@@ -74,18 +105,155 @@ CONFIG_SCHEMA = probatio.All(AUTH_PROVIDER_SCHEMA, _disallow_id)
 
 
 @callback
-def async_get_provider(hass: HomeAssistant) -> OidcAuthProvider:
-    """Get the provider."""
+def async_get_provider(hass: HomeAssistant) -> OidcAuthProvider | None:
+    """Get the OIDC engine root provider."""
     for prv in hass.auth.auth_providers:
-        if prv.type == PROVIDER_TYPE:
+        if prv.type == PROVIDER_TYPE and prv.id is None:
             return cast(OidcAuthProvider, prv)
+    return None
 
-    raise RuntimeError("Provider not found")
+
+def _claim_as_str(value: Any) -> str | None:
+    """Return a claim that has to be a string."""
+    return value if isinstance(value, str) else None
+
+
+def _claim_as_list(value: Any) -> list[str]:
+    """Return a claim that may be a list or a space separated string."""
+    if isinstance(value, str):
+        return value.split()
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+def _username_from(spec: OpenIDConnect, claims: Mapping[str, Any]) -> str | None:
+    """Return the username a set of claims maps to."""
+    return _claim_as_str(claims.get(spec.username_claim))
+
+
+def _display_name_from(spec: OpenIDConnect, claims: Mapping[str, Any]) -> str | None:
+    """Return the display name a set of claims maps to."""
+    return _claim_as_str(claims.get(spec.display_name_claim))
+
+
+def _grants_admin(spec: OpenIDConnect, claims: Mapping[str, Any]) -> bool:
+    """Return if the group memberships grant administrator access."""
+    return bool(spec.admin_group) and spec.admin_group in _claim_as_list(
+        claims.get(GROUPS_CLAIM)
+    )
+
+
+def _needs_userinfo(spec: OpenIDConnect, claims: Mapping[str, Any]) -> bool:
+    """Return if a claim needed to create an account is missing."""
+    return any(
+        claim not in claims for claim in (spec.username_claim, spec.display_name_claim)
+    )
+
+
+def _claim_matches(rule: Equals | NotEquals | OneOf, value: Any) -> bool:
+    """Return if a claim value satisfies a required claim rule."""
+    if isinstance(rule, Equals):
+        return bool(value == rule.value)
+    if isinstance(rule, NotEquals):
+        return bool(value != rule.value)
+    return isinstance(value, str) and value in rule.values
+
+
+def _required_claims_match(protocol: OpenIDConnect, claims: Mapping[str, Any]) -> bool:
+    """Return if all required claims are satisfied."""
+    return all(
+        claim in claims and _claim_matches(rule, claims[claim])
+        for claim, rule in protocol.required_claims.items()
+    )
+
+
+type ProtocolClient = OidcClient | OAuth2ProfileClient
+
+
+def _build_client(hass: HomeAssistant, spec: IdentityProvider) -> ProtocolClient:
+    """Return the protocol client for a validated spec."""
+    protocol = spec.protocol
+    try:
+        if isinstance(protocol, OpenIDConnect):
+            return OidcClient(
+                hass,
+                issuer=protocol.issuer,
+                client_id=spec.client_id,
+                client_secret=spec.client_secret,
+                discovery_url=protocol.discovery_url,
+                issuer_aliases=protocol.issuer_aliases,
+                issuer_claim=protocol.issuer_claim,
+                allow_insecure_transport=spec.allow_insecure_transport,
+            )
+        return OAuth2ProfileClient(
+            hass,
+            authorize_url=protocol.authorize_url,
+            token_url=protocol.token_url,
+            profile_url=protocol.profile_url,
+            client_id=spec.client_id,
+            client_secret=spec.client_secret,
+            subject_field=protocol.subject_field,
+            account_name_field=protocol.account_name_field,
+            scopes=protocol.scopes,
+            headers=protocol.headers,
+            token_auth_method=protocol.token_auth_method,
+            allow_insecure_transport=spec.allow_insecure_transport,
+        )
+    except (ValueError, OidcError) as err:
+        raise IdentityProviderError("invalid_spec", str(err)) from err
+
+
+def _revoke_refresh_tokens(
+    hass: HomeAssistant, client: ProtocolClient | None, sessions: list[OidcSession]
+) -> None:
+    """Revoke the external refresh tokens of ended sessions in the background."""
+    if client is None:
+        return
+    for session in sessions:
+        if session.refresh_token is not None:
+            hass.async_create_task(
+                client.async_revoke_token(session.refresh_token),
+                "Revoke ended OIDC session",
+            )
+
+
+@contextmanager
+def _discovery_errors() -> Iterator[None]:
+    """Translate discovery failures into stable validation reasons."""
+    try:
+        yield
+    except OidcTransientError as err:
+        raise IdentityProviderError("cannot_connect", str(err)) from err
+    except OidcError as err:
+        raise IdentityProviderError("invalid_discovery", str(err)) from err
+
+
+async def async_discover_identity_provider(
+    hass: HomeAssistant, discovery_url: str, *, allow_insecure_transport: bool = False
+) -> ProviderMetadata:
+    """Fetch and validate an OpenID Connect discovery document."""
+    with _discovery_errors():
+        return await async_discover(
+            hass, discovery_url, allow_insecure_transport=allow_insecure_transport
+        )
+
+
+async def async_validate_identity_provider(
+    hass: HomeAssistant, spec: IdentityProvider
+) -> IdentityProvider:
+    """Validate a spec the way registration does, and reach its discovery document."""
+    validated = validate_identity_provider(spec)
+    client = _build_client(hass, validated)
+    if isinstance(client, OidcClient):
+        with _discovery_errors():
+            await client.async_metadata()
+    return validated
 
 
 @AUTH_PROVIDERS.register(PROVIDER_TYPE)
 class OidcAuthProvider(AuthProvider):
-    """Authenticate against an OpenID Connect identity provider."""
+    """Root provider for the identity provider engine."""
 
     DEFAULT_TITLE = "OpenID Connect"
 
@@ -93,26 +261,45 @@ class OidcAuthProvider(AuthProvider):
         """Initialize the provider."""
         super().__init__(*args, **kwargs)
         self.data: OidcStore | None = None
-        self._client: OidcClient | None = None
         self._init_lock = asyncio.Lock()
         self._config_lock = asyncio.Lock()
         self._revalidate_lock = asyncio.Lock()
-        self._pending_credentials: WeakValueDictionary[tuple[str, str], Credentials] = (
-            WeakValueDictionary()
-        )
-        # New credentials holding a session, with the deadline for claiming them.
-        self._unclaimed: dict[str, tuple[Credentials, float]] = {}
+        self._children: dict[str, OidcIdentityProvider] = {}
         self._unsub_revalidate: CALLBACK_TYPE | None = None
 
     @property
     @override
-    def support_mfa(self) -> bool:
-        """Return that multi-factor auth is owned by the identity provider."""
+    def child_providers(self) -> Iterable[AuthProvider]:
+        """Return child identity providers."""
+        return tuple(self._children.values())
+
+    @callback
+    @override
+    def async_get_child_provider(self, provider_id: str) -> AuthProvider | None:
+        """Return a child identity provider."""
+        return self._children.get(provider_id)
+
+    @property
+    def identity_provider_ids(self) -> frozenset[str]:
+        """Return registered identity provider IDs."""
+        if self.data is None:
+            return frozenset()
+        return frozenset(self.data.records)
+
+    @callback
+    @override
+    def async_can_start_login(self, context: AuthFlowContext) -> bool:
+        """Return that the root is hidden from login."""
         return False
 
     @override
+    async def async_login_flow(self, context: AuthFlowContext | None) -> LoginFlow[Any]:
+        """Return a root flow that aborts."""
+        return OidcRootLoginFlow(self)
+
+    @override
     async def async_initialize(self) -> None:
-        """Load the stored data and start revalidating sessions."""
+        """Load the stored registry and start deadline enforcement."""
         async with self._init_lock:
             if self.data is not None:
                 return
@@ -121,125 +308,369 @@ class OidcAuthProvider(AuthProvider):
             await data.async_load()
             credential_subjects = {
                 credentials.id: credentials.data.get(CONF_SUBJECT)
-                for credentials in await self.async_credentials()
+                for user in await self.store.async_get_users()
+                for credentials in user.credentials
+                if credentials.auth_provider_type == PROVIDER_TYPE
             }
             for credential_id, session in list(data.sessions.items()):
                 if credential_subjects.get(credential_id) != session.subject:
                     data.async_remove_session(credential_id)
             self.data = data
-
-        self._async_schedule_revalidation()
-
-    @callback
-    def _async_schedule_revalidation(self) -> None:
-        """Run the revalidation timer only while the provider is configured."""
-        if self.is_configured:
-            if self._unsub_revalidate is None:
-                self._unsub_revalidate = async_track_time_interval(
-                    self.hass,
-                    self._async_revalidate_sessions,
-                    REVALIDATE_CHECK_INTERVAL,
-                    name="OIDC session revalidation",
-                    cancel_on_shutdown=True,
+            for record in data.records.values():
+                self._children[record.idp_id] = OidcIdentityProvider.dormant(
+                    self, record
                 )
-        elif self._unsub_revalidate is not None:
-            self._unsub_revalidate()
-            self._unsub_revalidate = None
 
-    async def _async_get_data(self) -> OidcStore:
+        self.async_schedule_revalidation()
+
+    @property
+    def config_lock(self) -> asyncio.Lock:
+        """Return the provider configuration lock."""
+        return self._config_lock
+
+    @property
+    def revalidate_lock(self) -> asyncio.Lock:
+        """Return the session revalidation lock."""
+        return self._revalidate_lock
+
+    async def async_get_data(self) -> OidcStore:
         """Return the data store, loading it if needed."""
         if self.data is None:
             await self.async_initialize()
             assert self.data is not None
-
         return self.data
 
+    @callback
+    def async_schedule_revalidation(self) -> None:
+        """Run the revalidation timer only while sessions need deadlines."""
+        should_run = bool(self.data and self.data.sessions)
+        if should_run and self._unsub_revalidate is None:
+            self._unsub_revalidate = async_track_time_interval(
+                self.hass,
+                self._async_revalidate_sessions,
+                REVALIDATE_CHECK_INTERVAL,
+                name="OIDC session revalidation",
+                cancel_on_shutdown=True,
+            )
+        elif not should_run and self._unsub_revalidate is not None:
+            self._unsub_revalidate()
+            self._unsub_revalidate = None
+
+    @callback
+    def _async_child_for_record(
+        self, record: IdentityProviderRecord
+    ) -> OidcIdentityProvider:
+        """Return or create a child for a registry record."""
+        child = self._children.get(record.idp_id)
+        if child is None:
+            child = OidcIdentityProvider.dormant(self, record)
+            self._children[record.idp_id] = child
+        return child
+
+    async def async_register_identity_provider(
+        self, idp_id: str, *, domain: str, title: str, spec: IdentityProvider
+    ) -> None:
+        """Register or activate an identity provider."""
+        if not idp_id or not domain or not title:
+            raise IdentityProviderError("invalid_idp")
+        validated = validate_identity_provider(spec)
+        client = _build_client(self.hass, validated)
+        key = trust_key(validated)
+        data = await self.async_get_data()
+
+        async with self._config_lock:
+            record = data.records.get(idp_id)
+            if record is not None and record.trust_key != key:
+                await self.async_end_identity_provider_sessions(idp_id)
+            record = IdentityProviderRecord(
+                idp_id=idp_id, domain=domain, accounts=validated.accounts, trust_key=key
+            )
+            data.async_set_record(record)
+            child = self._async_child_for_record(record)
+            child.async_activate(
+                title=title, spec=validated, record=record, client=client
+            )
+
+        self.async_schedule_revalidation()
+
+    @callback
+    def async_suspend_identity_provider(self, idp_id: str) -> None:
+        """Suspend an unloaded or failed identity provider entry."""
+        if child := self._children.get(idp_id):
+            child.async_suspend()
+        self.async_schedule_revalidation()
+
+    async def async_end_identity_provider_sessions(self, idp_id: str) -> None:
+        """End Home Assistant sessions derived from an identity provider."""
+        child = self._children.get(idp_id)
+        await self._async_end_identity_provider_sessions(
+            idp_id, child.revocation_client if child else None
+        )
+
+    async def _async_end_identity_provider_sessions(
+        self, idp_id: str, client: ProtocolClient | None
+    ) -> None:
+        """End sessions of an identity provider, revoking with the given client."""
+        data = await self.async_get_data()
+        async with self._revalidate_lock:
+            sessions = [
+                session
+                for session in data.sessions.values()
+                if session.idp_id == idp_id
+            ]
+            await self.async_end_sessions(sessions)
+            if child := self._children.get(idp_id):
+                for credentials in await child.async_credentials():
+                    await self.hass.auth.async_remove_refresh_tokens_for_credentials(
+                        credentials
+                    )
+        _revoke_refresh_tokens(self.hass, client, sessions)
+        self.async_schedule_revalidation()
+
+    async def async_remove_identity_provider(self, idp_id: str) -> list[User]:
+        """Remove an identity provider and its credentials."""
+        data = await self.async_get_data()
+        removed_users: list[User] = []
+        async with self._config_lock:
+            # Suspending first makes logins still in flight abort.
+            child = self._children.get(idp_id)
+            client = child.revocation_client if child else None
+            if child is not None:
+                child.async_suspend()
+        if child is not None:
+            credentials = await child.async_credentials()
+            credentials_by_user: dict[str, list[Credentials]] = {}
+            for user in await self.store.async_get_users():
+                owned = [cred for cred in credentials if cred in user.credentials]
+                if not owned:
+                    continue
+                credentials_by_user[user.id] = owned
+                if not self.hass.auth.async_has_other_login_method(user, *owned):
+                    removed_users.append(user)
+
+            await self._async_end_identity_provider_sessions(idp_id, client)
+            for owned in credentials_by_user.values():
+                for credential in owned:
+                    await self.hass.auth.async_remove_credentials(credential)
+
+        data.async_remove_record(idp_id)
+        self._children.pop(idp_id, None)
+        self.async_schedule_revalidation()
+        return removed_users
+
+    async def _async_revalidate_sessions(self, now: datetime) -> None:
+        """Enforce deadlines and refresh active OIDC sessions."""
+        if self.data is None:
+            return
+        await self._async_expire_sessions()
+        for idp in list(self._children.values()):
+            await idp.async_drop_unclaimed_sessions()
+        if self._revalidate_lock.locked():
+            _LOGGER.debug("Previous revalidation pass is still running")
+            return
+
+        async with self._revalidate_lock:
+            timestamp = now.timestamp()
+            expired: list[OidcSession] = []
+            for session in list(self.data.sessions.values()):
+                if timestamp < session.refresh_after:
+                    continue
+                child = self._children.get(session.idp_id)
+                if (
+                    child is None
+                    or not child.active
+                    or not isinstance(child.protocol, OpenIDConnect)
+                ):
+                    if timestamp >= session.revalidate_after:
+                        expired.append(session)
+                    continue
+                if await child.async_revalidate_session(self.data, session):
+                    expired.append(session)
+
+            if expired:
+                await self.async_end_sessions(expired)
+        self.async_schedule_revalidation()
+
+    async def _async_expire_sessions(self) -> None:
+        """End every session whose deadline has passed, without network I/O."""
+        assert self.data is not None
+        now = time.time()
+        expired = [
+            session
+            for session in self.data.sessions.values()
+            if now >= session.revalidate_after
+        ]
+        if expired:
+            _LOGGER.info(
+                "Ending %s OIDC session(s) that reached their deadline", len(expired)
+            )
+            await self.async_end_sessions(expired)
+
+    async def async_end_sessions(self, sessions: list[OidcSession]) -> None:
+        """Drop sessions and every Home Assistant token that depends on them."""
+        data = await self.async_get_data()
+        credential_ids = {session.credential_id for session in sessions}
+        admin_credential_ids = {
+            session.credential_id for session in sessions if session.is_admin
+        }
+        for credential_id in credential_ids:
+            data.async_remove_session(credential_id)
+
+        for child in self._children.values():
+            for credentials in await child.async_credentials():
+                if credentials.id in credential_ids:
+                    await self.hass.auth.async_remove_refresh_tokens_for_credentials(
+                        credentials
+                    )
+
+        for user in await self.store.async_get_users():
+            user_credential_ids = {credentials.id for credentials in user.credentials}
+            group_ids = {group.id for group in user.groups}
+            if (
+                user.is_owner
+                or GROUP_ID_ADMIN not in group_ids
+                or not user_credential_ids & admin_credential_ids
+                or any(
+                    session.is_admin
+                    for credential_id in user_credential_ids
+                    if (session := data.sessions.get(credential_id)) is not None
+                )
+            ):
+                continue
+
+            group_ids.remove(GROUP_ID_ADMIN)
+            await self.hass.auth.async_update_user(
+                user, group_ids=sorted(group_ids or {GROUP_ID_USER})
+            )
+
+
+class OidcIdentityProvider(AuthProvider):
+    """Child identity provider served by the OIDC engine."""
+
+    DEFAULT_TITLE = "OpenID Connect"
+
+    def __init__(
+        self,
+        root: OidcAuthProvider,
+        record: IdentityProviderRecord,
+        *,
+        title: str | None = None,
+        spec: IdentityProvider | None = None,
+    ) -> None:
+        """Initialize the child provider."""
+        super().__init__(
+            root.hass, root.store, {"type": PROVIDER_TYPE, CONF_ID: record.idp_id}
+        )
+        self.root = root
+        self.record = record
+        self._title = title
+        self._spec = spec
+        self._client: ProtocolClient | None = None
+        self._revocation_client: ProtocolClient | None = None
+        self._generation = 0
+        self._pending_credentials: WeakValueDictionary[tuple[str, str], Credentials] = (
+            WeakValueDictionary()
+        )
+        # New credentials holding a session, with the deadline for claiming them.
+        self._unclaimed: dict[str, tuple[Credentials, float]] = {}
+
+    @classmethod
+    def dormant(
+        cls, root: OidcAuthProvider, record: IdentityProviderRecord
+    ) -> OidcIdentityProvider:
+        """Create a dormant child provider."""
+        return cls(root, record)
+
     @property
-    def is_configured(self) -> bool:
-        """Return if an administrator has configured the provider."""
-        return self.data is not None and self.data.config is not None
+    def data(self) -> OidcStore | None:
+        """Return the root data store."""
+        return self.root.data
+
+    @property
+    def active(self) -> bool:
+        """Return if the child has a runtime spec and can start logins."""
+        return self._spec is not None
+
+    @property
+    def generation(self) -> int:
+        """Return the configuration generation."""
+        return self._generation
+
+    @property
+    def spec(self) -> IdentityProvider:
+        """Return the active runtime spec."""
+        if self._spec is None:
+            raise OidcError("The identity provider is dormant")
+        return self._spec
+
+    @property
+    def protocol(self) -> OpenIDConnect | OAuth2Profile | None:
+        """Return the runtime protocol spec."""
+        return self._spec.protocol if self._spec is not None else None
 
     @property
     @override
     def name(self) -> str:
-        """Return the name the login screen offers this provider under."""
-        if self.is_configured and (name := self.oidc_config.name):
-            return name
-        return super().name
+        """Return the runtime title or a dormant fallback."""
+        return self._title or self.DEFAULT_TITLE
 
     @property
     @override
-    def icon_url(self) -> str | None:
-        """Return the icon the login screen shows next to the name."""
-        return self.oidc_config.icon_url if self.is_configured else None
+    def domain(self) -> str | None:
+        """Return the brand domain for this child."""
+        return self.record.domain
 
     @property
-    def oidc_config(self) -> OidcConfig:
-        """Return the settings, which every login and session implies exist."""
-        if self.data is None or self.data.config is None:
-            raise OidcError("The OIDC auth provider is not configured")
-        return self.data.config
-
-    async def async_set_config(self, config: OidcConfig | None) -> None:
-        """Replace the configuration."""
-        data = await self._async_get_data()
-        old_client: OidcClient | None = None
-        refresh_tokens: list[str] = []
-
-        async with self._config_lock:
-            if data.config == config:
-                return
-
-            # Only a change of who issued the sessions invalidates them.
-            if (
-                config is not None
-                and data.config is not None
-                and config.trust_key == data.config.trust_key
-            ):
-                data.async_set_config(config)
-                self._async_schedule_revalidation()
-                return
-
-            async with self._revalidate_lock:
-                old_client = self.async_client() if data.config is not None else None
-                refresh_tokens = [
-                    session.refresh_token
-                    for session in data.sessions.values()
-                    if session.refresh_token is not None
-                ]
-                await self._async_end_sessions(list(data.sessions.values()))
-                data.async_set_config(config)
-                self._client = None
-                self._pending_credentials.clear()
-                self._unclaimed.clear()
-                self._async_schedule_revalidation()
-
-        if old_client is not None:
-            await asyncio.gather(
-                *(old_client.async_revoke_token(token) for token in refresh_tokens)
-            )
-
-    @asynccontextmanager
-    async def async_config_guard(self, config: OidcConfig) -> AsyncIterator[bool]:
-        """Guard side effects against concurrent provider reconfiguration."""
-        async with self._config_lock:
-            yield self.is_configured and self.oidc_config == config
+    @override
+    def support_mfa(self) -> bool:
+        """Return whether Home Assistant MFA applies."""
+        return self.record.accounts is AccountPolicy.LINK
 
     @callback
-    def async_client(self) -> OidcClient:
-        """Return a client for the configured identity provider."""
-        config = self.oidc_config
+    def async_activate(
+        self,
+        *,
+        title: str,
+        spec: IdentityProvider,
+        record: IdentityProviderRecord,
+        client: ProtocolClient,
+    ) -> None:
+        """Activate the child with a runtime spec."""
+        self.record = record
+        self._title = title
+        self._spec = spec
+        self._client = client
+        self._revocation_client = client
+        self._generation += 1
+        self._pending_credentials.clear()
 
-        if self._client is None:
-            self._client = OidcClient(
-                self.hass,
-                issuer=config.issuer,
-                client_id=config.client_id,
-                client_secret=config.client_secret,
-                allow_insecure_transport=config.allow_insecure_transport,
-            )
+    @callback
+    def async_suspend(self) -> None:
+        """Make the child dormant while keeping its client for token revocation."""
+        self._spec = None
+        self._client = None
+        self._generation += 1
+        self._pending_credentials.clear()
 
-        return self._client
+    @property
+    def revocation_client(self) -> ProtocolClient | None:
+        """Return the last active client, if available, for token revocation."""
+        return self._revocation_client
+
+    @callback
+    @override
+    def async_can_start_login(self, context: AuthFlowContext) -> bool:
+        """Return if this identity provider is active."""
+        return self.active
+
+    @callback
+    @override
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return if these credentials are usable as a fallback login."""
+        if not self.active:
+            return False
+        issuer = credentials.data.get(CONF_ISSUER)
+        return isinstance(issuer, str) and self.async_client().accepts_issuer(issuer)
 
     @callback
     def async_redirect_uri(self) -> str:
@@ -247,7 +678,7 @@ class OidcAuthProvider(AuthProvider):
         url = get_url(self.hass, require_current_request=True)
         if (
             not url.startswith("https://")
-            and not self.oidc_config.allow_insecure_transport
+            and not self.spec.allow_insecure_transport
             and not is_internal_request(self.hass)
         ):
             raise OidcInsecureTransportError(
@@ -255,25 +686,23 @@ class OidcAuthProvider(AuthProvider):
             )
         return f"{url}{LOGIN_CALLBACK_PATH}"
 
+    @callback
+    def async_client(self) -> ProtocolClient:
+        """Return the protocol client of the active identity provider."""
+        if self._client is None:
+            raise OidcError("The identity provider is dormant")
+        return self._client
+
+    @asynccontextmanager
+    async def async_config_guard(self, generation: int) -> AsyncIterator[bool]:
+        """Guard side effects against concurrent provider reconfiguration."""
+        async with self.root.config_lock:
+            yield self.active and self.generation == generation
+
     @override
     async def async_login_flow(self, context: AuthFlowContext | None) -> OidcLoginFlow:
         """Return a flow to login."""
         return OidcLoginFlow(self)
-
-    @callback
-    @override
-    def async_can_start_login(self, context: AuthFlowContext) -> bool:
-        """Return if an administrator has set up an identity provider yet."""
-        return self.is_configured
-
-    @callback
-    @override
-    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
-        """Return if the credentials belong to the currently configured issuer."""
-        return (
-            self.is_configured
-            and credentials.data.get(CONF_ISSUER) == self.oidc_config.issuer
-        )
 
     @override
     async def async_get_or_create_credentials(
@@ -282,6 +711,7 @@ class OidcAuthProvider(AuthProvider):
         """Get credentials based on the flow result."""
         issuer = flow_result[CONF_ISSUER]
         subject = flow_result[CONF_SUBJECT]
+        account_name = flow_result.get(CONF_ACCOUNT_NAME)
         identity = (issuer, subject)
 
         for credentials in await self.async_credentials():
@@ -290,12 +720,21 @@ class OidcAuthProvider(AuthProvider):
                 and credentials.data.get(CONF_SUBJECT) == subject
             ):
                 self._pending_credentials.pop(identity, None)
+                if credentials.data.get(CONF_ACCOUNT_NAME) != account_name:
+                    data = {
+                        CONF_ISSUER: issuer,
+                        CONF_SUBJECT: subject,
+                    }
+                    if account_name is not None:
+                        data[CONF_ACCOUNT_NAME] = account_name
+                    self.hass.auth.async_update_user_credentials_data(credentials, data)
                 return credentials
 
         if (pending := self._pending_credentials.get(identity)) is None:
-            pending = self.async_create_credentials(
-                {CONF_ISSUER: issuer, CONF_SUBJECT: subject}
-            )
+            data = {CONF_ISSUER: issuer, CONF_SUBJECT: subject}
+            if account_name is not None:
+                data[CONF_ACCOUNT_NAME] = account_name
+            pending = self.async_create_credentials(data)
             self._pending_credentials[identity] = pending
         return pending
 
@@ -303,35 +742,37 @@ class OidcAuthProvider(AuthProvider):
     async def async_user_meta_for_credentials(
         self, credentials: Credentials
     ) -> UserMeta:
-        """Return the metadata for a user we are about to create."""
-        data = await self._async_get_data()
+        """Return metadata for a user we are about to create."""
+        if self.record.accounts is AccountPolicy.LINK:
+            raise InvalidAuthError("The identity provider may only link users")
+
+        data = await self.root.async_get_data()
         session = data.sessions.get(credentials.id)
         if session is None:
             raise InvalidAuthError("Sign in with the identity provider again")
 
         name = session.display_name or session.username
-
         return UserMeta(
             name=name or credentials.data.get(CONF_SUBJECT),
             is_active=True,
-            # A UserMeta without a group would make the new user an owner.
             group=GROUP_ID_ADMIN if session.is_admin else GROUP_ID_USER,
             local_only=False,
         )
 
     @override
     async def async_will_remove_credentials(self, credentials: Credentials) -> None:
-        """Drop the identity provider session when the credentials are removed."""
+        """Drop provider state and tokens when credentials are removed."""
         await self._async_remove_credentials_session(credentials)
+        await self.hass.auth.async_remove_refresh_tokens_for_credentials(credentials)
 
     async def _async_remove_credentials_session(self, credentials: Credentials) -> None:
         """Drop and revoke the session for a credential."""
-        async with self._config_lock, self._revalidate_lock:
-            data = await self._async_get_data()
+        async with self.root.config_lock, self.root.revalidate_lock:
+            data = await self.root.async_get_data()
             if (session := data.sessions.get(credentials.id)) is None:
                 return
-            client = self.async_client() if self.is_configured else None
-            await self._async_end_sessions([session])
+            client = self._revocation_client
+            await self.root.async_end_sessions([session])
 
         if session.refresh_token and client is not None:
             self.hass.async_create_task(
@@ -339,64 +780,31 @@ class OidcAuthProvider(AuthProvider):
                 "Revoke removed OIDC session",
             )
 
-    async def _async_user_for_credential(self, credential_id: str) -> User | None:
-        """Return the user a credential belongs to."""
-        for user in await self.store.async_get_users():
-            if any(credentials.id == credential_id for credentials in user.credentials):
-                return user
-        return None
-
-    async def _async_apply_admin_grant(
-        self,
-        credential_id: str,
-        *,
-        granted_by_provider: bool,
-        grants_admin: bool,
-    ) -> None:
-        """Line a user's groups up with what the identity provider grants.
-
-        granted_by_provider is the grant before these claims were applied.
-        """
-        user = await self._async_user_for_credential(credential_id)
-        # Demoting the owner could leave the instance without an administrator.
-        if user is None or user.is_owner:
-            return
-
-        group_ids = {group.id for group in user.groups}
-        is_admin = GROUP_ID_ADMIN in group_ids
-
-        if grants_admin and not is_admin:
-            group_ids.add(GROUP_ID_ADMIN)
-        elif is_admin and not grants_admin and granted_by_provider:
-            group_ids.discard(GROUP_ID_ADMIN)
-            # Every user needs a group, and permissions come from the groups.
-            group_ids = group_ids or {GROUP_ID_USER}
-        else:
-            return
-
-        await self.hass.auth.async_update_user(user, group_ids=sorted(group_ids))
-
     @callback
     @override
     def async_validate_refresh_token(
         self, refresh_token: RefreshToken, remote_ip: str | None = None
     ) -> None:
-        """Reject a refresh token once the identity provider has to be consulted."""
-        if (
-            refresh_token.token_type == TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
-            or (credential := refresh_token.credential) is None
-        ):
+        """Reject a refresh token once the identity provider must be consulted."""
+        if refresh_token.token_type == TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN:
             # Long lived tokens opt out of revalidation and are revoked by hand.
             return
+        # A code minted before suspension must not start a fresh HA session.
+        if refresh_token.last_used_at is None and not self.active:
+            raise InvalidAuthError("Sign in with the identity provider again")
+        if (
+            self.record.accounts is AccountPolicy.LINK
+            or (credential := refresh_token.credential) is None
+        ):
+            return
 
-        data = self.data
+        data = self.root.data
         if (
             data is None
-            or data.config is None
             or (session := data.sessions.get(credential.id)) is None
+            or session.idp_id != self.id
         ):
             raise InvalidAuthError("Sign in with the identity provider again")
-
         if time.time() >= session.revalidate_after:
             raise InvalidAuthError(
                 "The identity provider has to confirm this session again"
@@ -408,11 +816,15 @@ class OidcAuthProvider(AuthProvider):
         credential_id: str,
         claims: Mapping[str, Any],
         tokens: TokenResponse,
+        profile_claims: Mapping[str, Any] | None = None,
     ) -> str | None:
         """Store the identity provider session backing a credential."""
-        async with self._revalidate_lock:
+        async with self.root.revalidate_lock:
             return await self._async_record_session(
-                credential_id=credential_id, claims=claims, tokens=tokens
+                credential_id=credential_id,
+                claims=claims,
+                tokens=tokens,
+                profile_claims=profile_claims,
             )
 
     async def _async_record_session(
@@ -423,27 +835,30 @@ class OidcAuthProvider(AuthProvider):
         tokens: TokenResponse,
         profile_claims: Mapping[str, Any] | None = None,
     ) -> str | None:
-        """Store a session while the caller holds the revalidation lock.
-
-        Returns the refresh token this session replaced, if any.
-        """
-        config = self.oidc_config
-        data = await self._async_get_data()
+        """Store a session while the caller holds the revalidation lock."""
+        spec = self.spec
+        protocol = cast(OpenIDConnect, spec.protocol)
+        data = await self.root.async_get_data()
         if profile_claims is None:
             profile_claims = claims
         previous = data.sessions.get(credential_id)
         replaced = previous.refresh_token if previous is not None else None
+        interval = spec.revalidate_interval or timedelta(
+            seconds=DEFAULT_REVALIDATE_INTERVAL
+        )
 
         session = OidcSession(
             credential_id=credential_id,
+            idp_id=cast(str, self.id),
             subject=str(claims["sub"]),
             refresh_token=tokens.refresh_token,
-            username=config.username_from(profile_claims),
-            display_name=config.display_name_from(profile_claims),
-            is_admin=config.grants_admin(claims),
+            username=_username_from(protocol, profile_claims),
+            display_name=_display_name_from(protocol, profile_claims),
+            is_admin=_grants_admin(protocol, claims),
         )
-        session.mark_validated(config.revalidate_interval)
+        session.mark_validated(interval.total_seconds())
         data.async_set_session(session)
+        self.root.async_schedule_revalidation()
         return replaced if replaced != tokens.refresh_token else None
 
     async def async_complete_login(
@@ -455,18 +870,22 @@ class OidcAuthProvider(AuthProvider):
         profile_claims: Mapping[str, Any] | None = None,
     ) -> str | None:
         """Apply identity claims and commit a session atomically."""
-        async with self._revalidate_lock:
+        async with self.root.revalidate_lock:
             if not credentials.is_new:
                 if (
                     await self.hass.auth.async_get_user_by_credentials(credentials)
                     is None
                 ):
                     raise InvalidAuthError("OIDC credentials were removed")
-                session = (await self._async_get_data()).sessions.get(credentials.id)
+                session = (await self.root.async_get_data()).sessions.get(
+                    credentials.id
+                )
                 await self._async_apply_admin_grant(
                     credentials.id,
                     granted_by_provider=session is not None and session.is_admin,
-                    grants_admin=self.oidc_config.grants_admin(claims),
+                    grants_admin=_grants_admin(
+                        cast(OpenIDConnect, self.spec.protocol), claims
+                    ),
                 )
             replaced = await self._async_record_session(
                 credential_id=credentials.id,
@@ -482,37 +901,7 @@ class OidcAuthProvider(AuthProvider):
             )
         return replaced
 
-    async def _async_revalidate_sessions(self, now: datetime) -> None:
-        """Enforce the deadlines and refresh whatever is due."""
-        if not self.is_configured or self.data is None:
-            return
-
-        # Expired first and outside the lock, so a slow identity provider cannot
-        # postpone a deadline that has already passed.
-        await self._async_drop_unclaimed_sessions()
-        await self._async_expire_sessions()
-
-        # Refreshing a session twice would burn a rotating refresh token.
-        if self._revalidate_lock.locked():
-            _LOGGER.debug("Previous revalidation pass is still running")
-            return
-
-        async with self._revalidate_lock:
-            # One snapshot, so a reconfiguration midway cannot mix settings.
-            data = self.data
-            config = self.oidc_config
-            timestamp = now.timestamp()
-            expired: list[OidcSession] = []
-            for session in list(data.sessions.values()):
-                if timestamp < session.refresh_after:
-                    continue
-                if await self._async_revalidate_session(data, config, session):
-                    expired.append(session)
-
-            if expired:
-                await self._async_end_sessions(expired)
-
-    async def _async_drop_unclaimed_sessions(self) -> None:
+    async def async_drop_unclaimed_sessions(self) -> None:
         """Drop sessions of logins whose authorization code was never used."""
         now = time.time()
         for credential_id, (credentials, deadline) in list(self._unclaimed.items()):
@@ -522,40 +911,58 @@ class OidcAuthProvider(AuthProvider):
             if credentials.is_new:
                 await self._async_remove_credentials_session(credentials)
 
-    async def _async_expire_sessions(self) -> None:
-        """End every session whose deadline has passed, without network I/O."""
-        assert self.data is not None
-        now = time.time()
-        if expired := [
-            session
-            for session in self.data.sessions.values()
-            if now >= session.revalidate_after
-        ]:
-            _LOGGER.info(
-                "Ending %s OIDC session(s) that reached their deadline", len(expired)
-            )
-            await self._async_end_sessions(expired)
+    async def _async_user_for_credential(self, credential_id: str) -> User | None:
+        """Return the user a credential belongs to."""
+        for user in await self.store.async_get_users():
+            if any(credentials.id == credential_id for credentials in user.credentials):
+                return user
+        return None
+
+    async def _async_apply_admin_grant(
+        self,
+        credential_id: str,
+        *,
+        granted_by_provider: bool,
+        grants_admin: bool,
+    ) -> None:
+        """Line a user's groups up with what the identity provider grants."""
+        user = await self._async_user_for_credential(credential_id)
+        if user is None or user.is_owner:
+            return
+
+        group_ids = {group.id for group in user.groups}
+        is_admin = GROUP_ID_ADMIN in group_ids
+        if grants_admin and not is_admin:
+            group_ids.add(GROUP_ID_ADMIN)
+        elif is_admin and not grants_admin and granted_by_provider:
+            group_ids.discard(GROUP_ID_ADMIN)
+            group_ids = group_ids or {GROUP_ID_USER}
+        else:
+            return
+        await self.hass.auth.async_update_user(user, group_ids=sorted(group_ids))
 
     @callback
     def _async_session_is_current(self, data: OidcStore, session: OidcSession) -> bool:
         """Return if the store still holds this exact session object."""
         return data.sessions.get(session.credential_id) is session
 
-    async def _async_revalidate_session(
-        self, data: OidcStore, config: OidcConfig, session: OidcSession
+    async def async_revalidate_session(
+        self, data: OidcStore, session: OidcSession
     ) -> bool:
         """Ask the identity provider about a session; return if it must end."""
         if session.refresh_token is None:
             return time.time() >= session.revalidate_after
 
-        client = self.async_client()
+        # One snapshot, so a reconfiguration midway cannot mix settings.
+        spec = self.spec
+        protocol = cast(OpenIDConnect, spec.protocol)
+        client = cast(OidcClient, self.async_client())
         try:
             tokens = await client.async_refresh_token(session.refresh_token)
         except OidcInvalidGrantError:
             _LOGGER.info("Identity provider revoked an OIDC session, signing it out")
             return True
         except OidcTransientError as err:
-            # Retried only until the deadline, never past it.
             _LOGGER.debug("Could not revalidate OIDC session yet: %s", err)
             return time.time() >= session.revalidate_after
         except OidcError as err:
@@ -579,37 +986,33 @@ class OidcAuthProvider(AuthProvider):
             except OidcError as err:
                 _LOGGER.warning("Refreshed ID token rejected: %s", err)
                 return time.time() >= session.revalidate_after
-            if claims["sub"] != session.subject:
-                _LOGGER.warning(
-                    "Refreshed ID token describes a different subject,"
-                    " signing out the OIDC session"
-                )
+            if claims["sub"] != session.subject or not _required_claims_match(
+                protocol, claims
+            ):
+                _LOGGER.warning("Refreshed ID token no longer matches the OIDC session")
                 return True
-            await self._async_apply_refreshed_groups(data, config, session, claims)
+            await self._async_apply_refreshed_groups(data, protocol, session, claims)
 
         if not self._async_session_is_current(data, session):
             return False
-
-        # The profile is read once at user creation; only the deadlines move.
-        session.mark_validated(config.revalidate_interval)
+        interval = spec.revalidate_interval or timedelta(
+            seconds=DEFAULT_REVALIDATE_INTERVAL
+        )
+        session.mark_validated(interval.total_seconds())
         data.async_set_session(session)
         return False
 
     async def _async_apply_refreshed_groups(
         self,
         data: OidcStore,
-        config: OidcConfig,
+        protocol: OpenIDConnect,
         session: OidcSession,
         claims: Mapping[str, Any],
     ) -> None:
-        """Apply the group memberships a refreshed ID token states.
-
-        A refresh response without the groups claim says nothing about them.
-        """
+        """Apply group memberships a refreshed ID token states."""
         if GROUPS_CLAIM not in claims:
             return
-
-        grants_admin = config.grants_admin(claims)
+        grants_admin = _grants_admin(protocol, claims)
         await self._async_apply_admin_grant(
             session.credential_id,
             granted_by_provider=session.is_admin,
@@ -619,47 +1022,22 @@ class OidcAuthProvider(AuthProvider):
             session.is_admin = grants_admin
             data.async_set_session(session)
 
-    async def _async_end_sessions(self, sessions: list[OidcSession]) -> None:
-        """Drop sessions and every Home Assistant token that depends on them."""
-        data = await self._async_get_data()
-        credential_ids = {session.credential_id for session in sessions}
-        admin_credential_ids = {
-            session.credential_id for session in sessions if session.is_admin
-        }
-        for credential_id in credential_ids:
-            data.async_remove_session(credential_id)
 
-        for credentials in await self.async_credentials():
-            if credentials.id in credential_ids:
-                await self.hass.auth.async_remove_refresh_tokens_for_credentials(
-                    credentials
-                )
+class OidcRootLoginFlow(LoginFlow[OidcAuthProvider]):
+    """Root login flow, never configured for direct login."""
 
-        for user in await self.store.async_get_users():
-            user_credential_ids = {credentials.id for credentials in user.credentials}
-            group_ids = {group.id for group in user.groups}
-            if (
-                user.is_owner
-                or GROUP_ID_ADMIN not in group_ids
-                or not user_credential_ids & admin_credential_ids
-                or any(
-                    session.is_admin
-                    for credential_id in user_credential_ids
-                    if (session := data.sessions.get(credential_id)) is not None
-                )
-            ):
-                continue
-
-            group_ids.remove(GROUP_ID_ADMIN)
-            await self.hass.auth.async_update_user(
-                user, group_ids=sorted(group_ids or {GROUP_ID_USER})
-            )
+    @override
+    async def async_step_init(
+        self, user_input: dict[str, str] | None = None
+    ) -> AuthFlowResult:
+        """Abort root login attempts."""
+        return self.async_abort(reason="not_configured")
 
 
-class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
-    """Handler for the OpenID Connect login flow."""
+class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
+    """Handler for child identity provider login flows."""
 
-    def __init__(self, auth_provider: OidcAuthProvider) -> None:
+    def __init__(self, auth_provider: OidcIdentityProvider) -> None:
         """Initialize the login flow."""
         super().__init__(auth_provider)
         self._code_verifier = generate_code_verifier()
@@ -667,8 +1045,9 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
         self._redirect_uri: str | None = None
         self._code: str | None = None
         self._error: str | None = None
-        self._config: OidcConfig | None = None
-        self._client: OidcClient | None = None
+        self._generation: int | None = None
+        self._client: ProtocolClient | None = None
+        self._protocol: OpenIDConnect | OAuth2Profile | None = None
 
     @override
     async def async_step_init(
@@ -676,10 +1055,8 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
     ) -> AuthFlowResult:
         """Send the user to the identity provider."""
         provider = self._auth_provider
-        if not provider.is_configured:
+        if not provider.active:
             return self.async_abort(reason="not_configured")
-
-        config = provider.oidc_config
 
         try:
             self._redirect_uri = provider.async_redirect_uri()
@@ -689,37 +1066,43 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
             _LOGGER.error("Refusing to start an OIDC login: %s", err)
             return self.async_abort(reason="insecure_transport")
 
-        client = provider.async_client()
+        # Captured together, before any await, so the finish step can tell
+        # whether the identity provider was reconfigured in between.
+        self._generation = provider.generation
+        self._client = client = provider.async_client()
+        self._protocol = protocol = provider.spec.protocol
+        state = self._auth_manager.login_flow.async_encode_external_state(self.flow_id)
+        if isinstance(client, OAuth2ProfileClient):
+            url = client.async_authorize_url(
+                redirect_uri=self._redirect_uri,
+                state=state,
+                code_verifier=self._code_verifier,
+            )
+            return self.async_external_step(step_id="authorize", url=url)
+
+        assert isinstance(protocol, OpenIDConnect)
         try:
             metadata = await client.async_metadata()
         except OidcError as err:
             _LOGGER.error("Could not reach the identity provider: %s", err)
             return self.async_abort(reason="provider_unavailable")
-
-        self._config = config
-        self._client = client
-        return self.async_external_step(
-            step_id="authorize",
-            url=client.async_authorize_url(
-                metadata,
-                redirect_uri=self._redirect_uri,
-                state=self._auth_manager.login_flow.async_encode_external_state(
-                    self.flow_id
-                ),
-                nonce=self._nonce,
-                code_verifier=self._code_verifier,
-                scopes=config.scopes,
-            ),
+        url = client.async_authorize_url(
+            metadata,
+            redirect_uri=self._redirect_uri,
+            state=state,
+            nonce=self._nonce,
+            code_verifier=self._code_verifier,
+            scopes=list(protocol.scopes),
         )
+        return self.async_external_step(step_id="authorize", url=url)
 
     async def async_step_authorize(
         self, user_input: dict[str, str] | None = None
     ) -> AuthFlowResult:
-        """Record the result of the redirect for the finish step to report."""
+        """Record the redirect result for the finish step."""
         if user_input is not None:
             self._code = user_input.get("code")
             self._error = user_input.get("error")
-
         return self.async_external_step_done(next_step_id="finish")
 
     async def async_step_finish(
@@ -729,37 +1112,45 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
         if self._error is not None:
             _LOGGER.debug("Identity provider returned error %s", self._error)
             return self.async_abort(reason="authorize_rejected")
-
         if self._code is None or self._redirect_uri is None:
             return self.async_abort(reason="authorize_failed")
 
         provider = self._auth_provider
-        config = self._config
         client = self._client
+        generation = self._generation
         if (
-            config is None
-            or client is None
-            or not provider.is_configured
-            or provider.oidc_config != config
+            client is None
+            or generation is None
+            or not provider.active
+            or provider.generation != generation
         ):
             return self.async_abort(reason="configuration_changed")
 
+        if isinstance(client, OAuth2ProfileClient):
+            return await self._async_finish_oauth2_profile(client, generation)
+        assert isinstance(self._protocol, OpenIDConnect)
+        return await self._async_finish_oidc(client, self._protocol, generation)
+
+    async def _async_finish_oidc(
+        self, client: OidcClient, protocol: OpenIDConnect, generation: int
+    ) -> AuthFlowResult:
+        """Finish an OpenID Connect flow."""
+        provider = self._auth_provider
         try:
             tokens = await client.async_exchange_code(
-                code=self._code,
-                redirect_uri=self._redirect_uri,
+                code=cast(str, self._code),
+                redirect_uri=cast(str, self._redirect_uri),
                 code_verifier=self._code_verifier,
             )
         except OidcError as err:
             _LOGGER.error("Could not exchange the authorization code: %s", err)
             return self.async_abort(reason="token_request_failed")
 
-        session_committed = False
+        keep_refresh_token = False
         try:
             if tokens.id_token is None:
                 _LOGGER.error("Identity provider did not return an ID token")
                 return self.async_abort(reason="missing_id_token")
-
             try:
                 claims = await client.async_verify_id_token(
                     tokens.id_token,
@@ -769,29 +1160,37 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
             except OidcError as err:
                 _LOGGER.error("Rejected the ID token: %s", err)
                 return self.async_abort(reason="invalid_id_token")
-
             if not (subject := claims.get("sub")):
                 _LOGGER.error("ID token has no subject claim")
                 return self.async_abort(reason="missing_subject")
+            if not _required_claims_match(protocol, claims):
+                return self.async_abort(reason="claim_rejected")
 
-            async with provider.async_config_guard(config) as config_is_current:
+            async with provider.async_config_guard(generation) as config_is_current:
                 if not config_is_current:
                     return self.async_abort(reason="configuration_changed")
-
-                credentials = await provider.async_get_or_create_credentials(
-                    {CONF_ISSUER: str(claims["iss"]), CONF_SUBJECT: str(subject)}
+                issuer = client.canonical_issuer(claims)
+                account_name = (
+                    _claim_as_str(claims.get(protocol.account_name_claim))
+                    if protocol.account_name_claim
+                    else None
                 )
-
-                # /auth/link_user authorizes attaching a new identity.
-                if (
-                    credentials.is_new
-                    and not self.context.get("link_user")
-                    and not config.allow_auto_create
-                ):
-                    return self.async_abort(reason="user_not_allowed")
-
+                credentials = await provider.async_get_or_create_credentials(
+                    {
+                        CONF_ISSUER: issuer,
+                        CONF_SUBJECT: str(subject),
+                    }
+                    | ({CONF_ACCOUNT_NAME: account_name} if account_name else {})
+                )
+                if credentials.is_new and not self.context.get("link_user"):
+                    if provider.record.accounts is AccountPolicy.LINK:
+                        return self.async_abort(reason="user_not_allowed")
                 profile_claims = claims
-                if credentials.is_new and config.needs_userinfo(claims):
+                if (
+                    provider.record.accounts is AccountPolicy.PROVISION
+                    and credentials.is_new
+                    and _needs_userinfo(protocol, claims)
+                ):
                     try:
                         profile_claims = await client.async_merge_userinfo(
                             claims, tokens.access_token
@@ -799,18 +1198,51 @@ class OidcLoginFlow(LoginFlow[OidcAuthProvider]):
                     except OidcError as err:
                         _LOGGER.error("Could not read the userinfo endpoint: %s", err)
                         return self.async_abort(reason="userinfo_failed")
-
-                try:
-                    replaced_refresh_token = await provider.async_complete_login(
-                        credentials, claims, tokens, profile_claims=profile_claims
-                    )
-                except InvalidAuthError:
-                    return self.async_abort(reason="authorize_failed")
-                session_committed = True
+                replaced_refresh_token = None
+                if provider.record.accounts is AccountPolicy.PROVISION:
+                    try:
+                        replaced_refresh_token = await provider.async_complete_login(
+                            credentials,
+                            claims,
+                            tokens,
+                            profile_claims=profile_claims,
+                        )
+                    except InvalidAuthError:
+                        return self.async_abort(reason="authorize_failed")
+                    keep_refresh_token = True
 
             if replaced_refresh_token is not None:
                 await client.async_revoke_token(replaced_refresh_token)
             return await self.async_finish(credentials)
         finally:
-            if not session_committed and tokens.refresh_token is not None:
+            if not keep_refresh_token and tokens.refresh_token is not None:
                 await client.async_revoke_token(tokens.refresh_token)
+
+    async def _async_finish_oauth2_profile(
+        self, client: OAuth2ProfileClient, generation: int
+    ) -> AuthFlowResult:
+        """Finish an OAuth2 profile flow."""
+        provider = self._auth_provider
+        try:
+            tokens = await client.async_exchange_code(
+                code=cast(str, self._code),
+                redirect_uri=cast(str, self._redirect_uri),
+                code_verifier=self._code_verifier,
+            )
+            subject, account_name, _profile = await client.async_fetch_profile(
+                tokens.access_token
+            )
+        except OidcError as err:
+            _LOGGER.error("Could not finish the OAuth2 profile flow: %s", err)
+            return self.async_abort(reason="authorize_failed")
+
+        async with provider.async_config_guard(generation) as config_is_current:
+            if not config_is_current:
+                return self.async_abort(reason="configuration_changed")
+            credentials = await provider.async_get_or_create_credentials(
+                {CONF_ISSUER: client.issuer, CONF_SUBJECT: subject}
+                | ({CONF_ACCOUNT_NAME: account_name} if account_name else {})
+            )
+            if credentials.is_new and not self.context.get("link_user"):
+                return self.async_abort(reason="user_not_allowed")
+        return await self.async_finish(credentials)

@@ -5,6 +5,7 @@ from http import HTTPStatus
 import logging
 from unittest.mock import patch
 
+from aiohttp.test_utils import TestClient
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 
@@ -15,6 +16,7 @@ from homeassistant.auth.models import (
     Credentials,
     RefreshToken,
 )
+from homeassistant.auth.providers import auth_provider_from_config
 from homeassistant.components import auth
 from homeassistant.components.auth import DOMAIN
 from homeassistant.core import HomeAssistant
@@ -37,6 +39,15 @@ def mock_credential():
         data={"username": "test-user"},
         is_new=False,
     )
+
+
+@pytest.fixture
+async def mock_credential_provider(hass: HomeAssistant) -> None:
+    """Register the auth provider of the mock credential."""
+    provider = await auth_provider_from_config(
+        hass, hass.auth._store, {"type": "insecure_example", "users": []}
+    )
+    hass.auth._providers[(provider.type, provider.id)] = provider
 
 
 async def async_setup_user_refresh_token(hass: HomeAssistant) -> RefreshToken:
@@ -265,50 +276,142 @@ async def test_auth_code_rejected_user_does_not_leak_the_reason(
     assert "internal detail" in caplog.text
 
 
+@pytest.mark.usefixtures("mock_credential_provider")
 def test_auth_code_store_expiration(
-    mock_credential, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    mock_credential: Credentials,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """Test that the auth code store will not return expired tokens."""
-    store, retrieve = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store(hass)
     client_id = "bla"
     now = utcnow()
 
     freezer.move_to(now)
-    code = store(client_id, mock_credential, "authorize")
+    code = store(client_id, mock_credential, "authorize", None)
 
     freezer.move_to(now + timedelta(minutes=10))
-    assert retrieve(client_id, code, "authorize") is None
+    assert retrieve(client_id, code, "authorize", None) is None
 
     freezer.move_to(now)
-    code = store(client_id, mock_credential, "authorize")
+    code = store(client_id, mock_credential, "authorize", None)
 
     freezer.move_to(now + timedelta(minutes=9, seconds=59))
-    assert retrieve(client_id, code, "authorize") == mock_credential
+    assert retrieve(client_id, code, "authorize", None) == mock_credential
 
 
-def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
-    """Test a code minted for one purpose cannot be redeemed for the other."""
-    store, retrieve = auth._create_auth_code_store()
+@pytest.mark.usefixtures("mock_credential_provider")
+def test_auth_code_store_rejects_another_purpose(
+    hass: HomeAssistant, mock_credential: Credentials
+) -> None:
+    """Test a code minted for one purpose or user cannot be redeemed otherwise."""
+    store, retrieve, _ = auth._create_auth_code_store(hass)
     client_id = "bla"
 
-    code = store(client_id, mock_credential, "link_user")
-    assert retrieve(client_id, code, "authorize") is None
+    code = store(client_id, mock_credential, "link_user", "user-id")
+    assert retrieve(client_id, code, "authorize", None) is None
+    assert retrieve(client_id, code, "link_user", "other-user-id") is None
     # The mismatch must not consume the code either.
-    assert retrieve(client_id, code, "link_user") == mock_credential
+    assert retrieve(client_id, code, "link_user", "user-id") == mock_credential
 
-    code = store(client_id, mock_credential, "authorize")
-    assert retrieve(client_id, code, "link_user") is None
-    assert retrieve(client_id, code, "authorize") == mock_credential
+    code = store(client_id, mock_credential, "authorize", None)
+    assert retrieve(client_id, code, "link_user", "user-id") is None
+    assert retrieve(client_id, code, "authorize", None) == mock_credential
 
 
-def test_auth_code_store_requires_credentials(mock_credential) -> None:
+def test_auth_code_store_refuses_code_of_removed_provider(
+    hass: HomeAssistant,
+    mock_credential: Credentials,
+) -> None:
+    """Test a code is refused once the provider of its credential is gone."""
+    store, retrieve, _ = auth._create_auth_code_store(hass)
+
+    code = store("bla", mock_credential, "authorize", None)
+
+    assert retrieve("bla", code, "authorize", None) is None
+
+
+@pytest.mark.usefixtures("mock_credential_provider")
+def test_auth_code_store_discards_codes_of_revoked_credentials(
+    hass: HomeAssistant, mock_credential: Credentials
+) -> None:
+    """Test pending codes die with the sessions of their credentials."""
+    store, retrieve, discard = auth._create_auth_code_store(hass)
+    client_id = "bla"
+    other_credential = Credentials(
+        id="other",
+        auth_provider_type="insecure_example",
+        auth_provider_id=None,
+        data={"username": "other-user"},
+        is_new=False,
+    )
+
+    revoked_code = store(client_id, mock_credential, "authorize", None)
+    kept_code = store(client_id, other_credential, "authorize", None)
+
+    discard(mock_credential)
+
+    assert retrieve(client_id, revoked_code, "authorize", None) is None
+    assert retrieve(client_id, kept_code, "authorize", None) == other_credential
+
+
+async def _async_login_for_code(client: TestClient) -> str:
+    """Run the login flow and return the authorization code."""
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    assert resp.status == HTTPStatus.OK
+    step = await resp.json()
+
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    assert resp.status == HTTPStatus.OK
+    return (await resp.json())["result"]
+
+
+async def test_auth_code_is_refused_after_the_credentials_are_revoked(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a login code cannot buy a session once the login was revoked."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    credentials = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(credentials)
+    code = await _async_login_for_code(client)
+
+    await hass.auth.async_remove_refresh_tokens_for_credentials(credentials)
+
+    resp = await client.post(
+        "/auth/token",
+        data={"client_id": CLIENT_ID, "grant_type": "authorization_code", "code": code},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert (await resp.json())["error"] == "invalid_request"
+
+
+def test_auth_code_store_requires_credentials(
+    hass: HomeAssistant, mock_credential: Credentials
+) -> None:
     """Test we require credentials."""
-    store, _retrieve = auth._create_auth_code_store()
+    store, _retrieve, _ = auth._create_auth_code_store(hass)
 
     with pytest.raises(TypeError):
-        store(None, MockUser(), "authorize")
+        store(None, MockUser(), "authorize", None)
 
-    store(None, mock_credential, "authorize")
+    store(None, mock_credential, "authorize", None)
 
 
 async def test_ws_current_user(

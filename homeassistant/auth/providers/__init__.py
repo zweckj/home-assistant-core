@@ -1,6 +1,6 @@
 """Auth providers for Home Assistant."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import logging
 import types
 from typing import Any
@@ -81,8 +81,18 @@ class AuthProvider:
         return self.config.get(CONF_NAME, self.DEFAULT_TITLE)  # type: ignore[no-any-return]
 
     @property
-    def icon_url(self) -> str | None:
-        """Return the icon the login screen shows next to the name."""
+    def child_providers(self) -> Iterable[AuthProvider]:
+        """Return dynamically configured providers hosted under this provider."""
+        return ()
+
+    @callback
+    def async_get_child_provider(self, provider_id: str) -> AuthProvider | None:
+        """Return a child resolved by (type, id) like any other provider."""
+        return None
+
+    @property
+    def domain(self) -> str | None:
+        """Return the integration whose brand the login screen shows."""
         return None
 
     @property

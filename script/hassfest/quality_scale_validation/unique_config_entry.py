@@ -6,6 +6,7 @@ https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/u
 import ast
 
 from script.hassfest import ast_parse_module
+from script.hassfest.identity_provider import has_identity_provider_flow
 from script.hassfest.model import Config, Integration
 
 
@@ -44,6 +45,7 @@ def validate(
     if not (
         _has_abort_entries_match(config_flow)
         or _has_abort_unique_id_configured(config_flow)
+        or has_identity_provider_flow(config_flow)
     ):
         return [
             "Integration doesn't prevent the same device or service from being "
