@@ -29,12 +29,13 @@ class AuthFlowContext(FlowContext, total=False):
     ip_address: IPv4Address | IPv6Address
     client_id: str
     redirect_uri: str
+    code_challenge: str
+    code_challenge_method: str
     # Attaching credentials to the signed in user via /auth/link_user.
     link_user: bool
-    # User who started a /auth/link_user flow.
-    user_id: str
     # Binds an external step to the browser that started it.
     browser_token: str
+    link_user_id: str
 
 
 class AuthFlowResult(FlowResult[AuthFlowContext, tuple[str, str]], total=False):

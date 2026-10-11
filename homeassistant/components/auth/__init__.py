@@ -14,7 +14,8 @@ Exchange the authorization code retrieved from the login flow for tokens.
 {
     "client_id": "https://hassbian.local:8123/",
     "grant_type": "authorization_code",
-    "code": "411ee2f916e648d691e937ae9344681e"
+    "code": "411ee2f916e648d691e937ae9344681e",
+    "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 }
 
 Return value will be the access and refresh tokens. The access token will have
@@ -124,11 +125,16 @@ as part of a config flow.
 """
 
 import asyncio
+import base64
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+import hashlib
+import hmac
 from http import HTTPStatus
 from logging import getLogger
-from typing import Any, Literal, cast
+import re
+from typing import Any, Literal, Protocol, cast
 import uuid
 
 from aiohttp import web
@@ -210,10 +216,36 @@ _LOGGER = getLogger(__name__)
 DOMAIN = "auth"
 
 type AuthCodePurpose = Literal["authorize", "link_user"]
-type StoreResultType = Callable[[str, Credentials, AuthCodePurpose, str | None], str]
-type RetrieveResultType = Callable[
-    [str, str, AuthCodePurpose, str | None], Credentials | None
-]
+
+
+@dataclass(slots=True)
+class AuthCodeEntry:
+    """Entry stored in the auth code store."""
+
+    created: datetime
+    credentials: Credentials
+    purpose: AuthCodePurpose
+    code_challenge: str | None = None
+    code_challenge_method: str | None = None
+    link_user_id: str | None = None
+
+
+class StoreResultType(Protocol):
+    """Protocol for storing auth flow results."""
+
+    def __call__(
+        self,
+        client_id: str,
+        result: Credentials,
+        purpose: AuthCodePurpose,
+        code_challenge: str | None = None,
+        code_challenge_method: str | None = None,
+        link_user_id: str | None = None,
+    ) -> str:
+        """Store flow result and return a code to retrieve it."""
+
+
+type RetrieveResultType = Callable[[str, str, AuthCodePurpose], AuthCodeEntry | None]
 DATA_STORE: HassKey[StoreResultType] = HassKey(DOMAIN)
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
@@ -224,7 +256,7 @@ def create_auth_code(
     hass: HomeAssistant, client_id: str, credential: Credentials
 ) -> str:
     """Create an authorization code to fetch tokens."""
-    return hass.data[DATA_STORE](client_id, credential, "authorize", None)
+    return hass.data[DATA_STORE](client_id, credential, "authorize")
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -283,6 +315,19 @@ class RevokeTokenView(HomeAssistantView):
         return web.Response(status=HTTPStatus.OK)
 
 
+# RFC 7636 4.1: code_verifier is 43-128 unreserved characters.
+_CODE_VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}\Z")
+
+
+def _verify_code_verifier(code_verifier: str, code_challenge: str) -> bool:
+    """Verify code_verifier against code_challenge per RFC 7636 (S256)."""
+    if not _CODE_VERIFIER_RE.match(code_verifier):
+        return False
+    hashed = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    computed_challenge = base64.urlsafe_b64encode(hashed).decode("ascii").rstrip("=")
+    return hmac.compare_digest(computed_challenge, code_challenge)
+
+
 class TokenView(HomeAssistantView):
     """View to issue tokens."""
 
@@ -300,6 +345,14 @@ class TokenView(HomeAssistantView):
         """Grant a token."""
         hass = request.app[KEY_HASS]
         data = cast(MultiDictProxy[str], await request.post())
+
+        # RFC 6749 3.2: parameters must not be included more than once.
+        if len(data) != len(set(data)) or any(
+            not isinstance(value, str) for value in data.values()
+        ):
+            return self.json(
+                {"error": "invalid_request"}, status_code=HTTPStatus.BAD_REQUEST
+            )
 
         grant_type = data.get("grant_type")
 
@@ -342,14 +395,43 @@ class TokenView(HomeAssistantView):
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 
-        credential = self._retrieve_auth(client_id, code, "authorize", None)
+        entry = self._retrieve_auth(client_id, code, "authorize")
 
-        if credential is None or not isinstance(credential, Credentials):
+        if entry is None:
             return self.json(
                 {"error": "invalid_request", "error_description": "Invalid code"},
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 
+        if entry.code_challenge is not None:
+            if not (code_verifier := data.get("code_verifier")):
+                return self.json(
+                    {
+                        "error": "invalid_request",
+                        "error_description": "Code verifier required",
+                    },
+                    status_code=HTTPStatus.BAD_REQUEST,
+                )
+            if not _verify_code_verifier(code_verifier, entry.code_challenge):
+                return self.json(
+                    {
+                        "error": "invalid_grant",
+                        "error_description": "Invalid code verifier",
+                    },
+                    status_code=HTTPStatus.BAD_REQUEST,
+                )
+        elif "code_verifier" in data:
+            return self.json(
+                {
+                    "error": "invalid_request",
+                    "error_description": (
+                        "Code verifier provided but no code challenge was present"
+                    ),
+                },
+                status_code=HTTPStatus.BAD_REQUEST,
+            )
+
+        credential = entry.credentials
         try:
             user = await hass.auth.async_get_or_create_user(credential)
         except InvalidAuthError as exc:
@@ -482,14 +564,18 @@ class LinkUserView(HomeAssistantView):
         hass = request.app[KEY_HASS]
         user: User = request["hass_user"]
 
-        credentials = self._retrieve_credentials(
-            data["client_id"], data["code"], "link_user", user.id
-        )
+        entry = self._retrieve_credentials(data["client_id"], data["code"], "link_user")
 
-        if credentials is None:
+        # The code only attaches an identity to the account that started the
+        # link flow, so a delivered code cannot plant one on another user.
+        if (
+            entry is None
+            or entry.code_challenge is not None
+            or entry.link_user_id != user.id
+        ):
             return self.json_message("Invalid code", status_code=HTTPStatus.BAD_REQUEST)
 
-        linked_user = await hass.auth.async_get_user_by_credentials(credentials)
+        linked_user = await hass.auth.async_get_user_by_credentials(entry.credentials)
         if linked_user != user and linked_user is not None:
             return self.json_message(
                 "Credential already linked", status_code=HTTPStatus.BAD_REQUEST
@@ -497,7 +583,7 @@ class LinkUserView(HomeAssistantView):
 
         # No-op if credential is already linked to the user it will be linked to
         if linked_user != user:
-            await hass.auth.async_link_user(user, credentials)
+            await hass.auth.async_link_user(user, entry.credentials)
         return self.json_message("User linked")
 
 
@@ -506,44 +592,45 @@ def _create_auth_code_store(
     hass: HomeAssistant,
 ) -> tuple[StoreResultType, RetrieveResultType, Callable[[Credentials], None]]:
     """Create an in memory store."""
-    temp_results: dict[
-        tuple[str, str], tuple[datetime, Credentials, AuthCodePurpose, str | None]
-    ] = {}
+    temp_results: dict[tuple[str, str], AuthCodeEntry] = {}
 
     @callback
     def store_result(
         client_id: str,
         result: Credentials,
         purpose: AuthCodePurpose,
-        user_id: str | None,
+        code_challenge: str | None = None,
+        code_challenge_method: str | None = None,
+        link_user_id: str | None = None,
     ) -> str:
         """Store flow result and return a code to retrieve it."""
         if not isinstance(result, Credentials):
             raise TypeError("result has to be a Credentials instance")
 
         code = uuid.uuid4().hex
-        temp_results[(client_id, code)] = (
-            dt_util.utcnow(),
-            result,
-            purpose,
-            user_id,
+        temp_results[(client_id, code)] = AuthCodeEntry(
+            created=dt_util.utcnow(),
+            credentials=result,
+            purpose=purpose,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
+            link_user_id=link_user_id,
         )
         return code
 
     @callback
     def retrieve_result(
-        client_id: str, code: str, purpose: AuthCodePurpose, user_id: str | None
-    ) -> Credentials | None:
+        client_id: str, code: str, purpose: AuthCodePurpose
+    ) -> AuthCodeEntry | None:
         """Retrieve flow result."""
         key = (client_id, code)
 
-        if (stored := temp_results.get(key)) is None:
+        if (entry := temp_results.get(key)) is None:
             return None
 
-        created, result, stored_purpose, stored_user_id = stored
         # A code minted to attach an identity must not buy tokens, and a login
         # code must not silently attach an identity to whoever is signed in.
-        if stored_purpose != purpose or stored_user_id != user_id:
+        if entry.purpose != purpose:
             return None
 
         del temp_results[key]
@@ -552,19 +639,20 @@ def _create_auth_code_store(
         # The authorization code MUST expire shortly after it is issued to
         # mitigate the risk of leaks.  A maximum authorization code lifetime of
         # 10 minutes is RECOMMENDED.
-        if dt_util.utcnow() - created >= timedelta(minutes=10):
+        if dt_util.utcnow() - entry.created >= timedelta(minutes=10):
             return None
 
         # Providers can be removed at runtime; a code outliving its provider
         # would otherwise attach an orphaned credential.
         if (
             hass.auth.get_auth_provider(
-                result.auth_provider_type, result.auth_provider_id
+                entry.credentials.auth_provider_type,
+                entry.credentials.auth_provider_id,
             )
             is None
         ):
             return None
-        return result
+        return entry
 
     @callback
     def discard_results(credentials: Credentials) -> None:
@@ -572,8 +660,8 @@ def _create_auth_code_store(
 
         A code is as good as a session, so it must not outlive a revocation.
         """
-        for key, stored in list(temp_results.items()):
-            if stored[1].id == credentials.id:
+        for key, entry in list(temp_results.items()):
+            if entry.credentials.id == credentials.id:
                 del temp_results[key]
 
     return store_result, retrieve_result, discard_results

@@ -566,7 +566,7 @@ def test_invalid_config_flow_async_get_options_flow(
 ) -> None:
     """Ensure invalid hints are rejected for ConfigFlow async_get_options_flow."""
     # AxisOptionsFlow doesn't inherit OptionsFlow, and therefore should fail
-    class_node, func_node, arg_node = astroid.extract_node(
+    class_node, func_node = astroid.extract_node(
         """
     class FlowHandler():
         pass
@@ -584,12 +584,13 @@ def test_invalid_config_flow_async_get_options_flow(
         ConfigFlow, domain=AXIS_DOMAIN
     ):
         def async_get_options_flow( #@
-            config_entry #@
+            config_entry
         ) -> AxisOptionsFlow:
             return AxisOptionsFlow(config_entry)
     """,
         "homeassistant.components.pylint_test.config_flow",
     )
+    arg_node = func_node.args.args[0]
     type_hint_checker.visit_module(class_node.parent)
 
     with assert_adds_messages(
@@ -1332,20 +1333,19 @@ def test_pytest_invalid_function(
     linter: UnittestLinter, type_hint_checker: BaseChecker
 ) -> None:
     """Ensure invalid hints are rejected for a test function."""
-    func_node, hass_node, caplog_node, first_none_node, second_none_node = (
-        astroid.extract_node(
-            """
+    func_node, caplog_node, first_none_node, second_none_node = astroid.extract_node(
+        """
     async def test_sample( #@
-        hass: Something, #@
+        hass: Something,
         caplog: SomethingElse, #@
         current_request_with_host, #@
         enable_custom_integrations: None, #@
     ) -> Anything:
         pass
     """,
-            "tests.components.pylint_test.notify",
-        )
+        "tests.components.pylint_test.notify",
     )
+    hass_node = func_node.args.args[0]
     type_hint_checker.visit_module(func_node.parent)
 
     with assert_adds_messages(
@@ -1440,13 +1440,13 @@ def test_pytest_invalid_fixture(
     linter: UnittestLinter, type_hint_checker: BaseChecker, decorator: str
 ) -> None:
     """Ensure invalid hints are rejected for a test fixture."""
-    func_node, hass_node, caplog_node, none_node = astroid.extract_node(
+    func_node, caplog_node, none_node = astroid.extract_node(
         f"""
     import pytest
 
     {decorator}
     def sample_fixture( #@
-        hass: Something, #@
+        hass: Something,
         caplog: SomethingElse, #@
         current_request_with_host, #@
     ) -> Any:
@@ -1454,6 +1454,7 @@ def test_pytest_invalid_fixture(
     """,
         "tests.components.pylint_test.notify",
     )
+    hass_node = func_node.args.args[0]
     type_hint_checker.visit_module(func_node.parent)
 
     with assert_adds_messages(
