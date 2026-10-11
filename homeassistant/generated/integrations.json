@@ -2563,9 +2563,20 @@
     },
     "github": {
       "name": "GitHub",
-      "integration_type": "service",
-      "config_flow": true,
-      "iot_class": "cloud_polling"
+      "integrations": {
+        "github": {
+          "name": "GitHub",
+          "integration_type": "service",
+          "config_flow": true,
+          "iot_class": "cloud_polling"
+        },
+        "github_sign_in": {
+          "integration_type": "service",
+          "config_flow": true,
+          "iot_class": "cloud_polling",
+          "name": "GitHub Sign-In"
+        }
+      }
     },
     "gitlab_ci": {
       "name": "GitLab-CI",
@@ -2681,6 +2692,12 @@
           "config_flow": false,
           "iot_class": "cloud_push",
           "name": "Google Pub/Sub"
+        },
+        "google_sign_in": {
+          "integration_type": "service",
+          "config_flow": true,
+          "iot_class": "cloud_polling",
+          "name": "Google Sign-In"
         },
         "google_sheets": {
           "integration_type": "service",
@@ -4468,6 +4485,12 @@
           "config_flow": false,
           "iot_class": "cloud_push",
           "name": "Microsoft Text-to-Speech (TTS)"
+        },
+        "microsoft_sign_in": {
+          "integration_type": "service",
+          "config_flow": true,
+          "iot_class": "cloud_polling",
+          "name": "Microsoft Sign-In"
         },
         "onedrive": {
           "integration_type": "service",

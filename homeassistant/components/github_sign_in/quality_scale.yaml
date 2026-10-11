@@ -1,0 +1,118 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: There are no custom actions.
+  appropriate-polling:
+    status: exempt
+    comment: This integration does not poll.
+  brands: done
+  common-modules: done
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency: done
+  docs-actions: done
+  docs-conditions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-triggers: done
+  entity-event-setup:
+    status: exempt
+    comment: This integration has no entities.
+  entity-unique-id:
+    status: exempt
+    comment: This integration has no entities.
+  has-entity-name:
+    status: exempt
+    comment: This integration has no entities.
+  runtime-data:
+    status: exempt
+    comment: This integration has no runtime data.
+  test-before-configure: done
+  test-before-setup:
+    status: exempt
+    comment: The auth engine verifies the identity provider when a sign-in starts.
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions:
+    status: exempt
+    comment: There are no custom actions.
+  config-entry-unloading: done
+  docs-configuration-parameters: todo
+  docs-installation-parameters: todo
+  entity-unavailable:
+    status: exempt
+    comment: This integration has no entities.
+  integration-owner: done
+  log-when-unavailable:
+    status: exempt
+    comment: This integration does not poll.
+  parallel-updates:
+    status: exempt
+    comment: This integration has no entities.
+  reauthentication-flow:
+    status: exempt
+    comment: Sign-in failures are handled by the auth engine and credentials can be updated with reconfiguration.
+  test-coverage: done
+
+  # Gold
+  devices:
+    status: exempt
+    comment: This integration has no devices.
+  diagnostics:
+    status: exempt
+    comment: This integration has no runtime data to include in diagnostics.
+  discovery-update-info:
+    status: exempt
+    comment: This integration has no discovery.
+  discovery:
+    status: exempt
+    comment: This integration has no discovery.
+  docs-data-update:
+    status: exempt
+    comment: This integration does not poll or update data.
+  docs-examples: todo
+  docs-known-limitations: todo
+  docs-supported-devices:
+    status: exempt
+    comment: This integration has no devices.
+  docs-supported-functions: todo
+  docs-troubleshooting: todo
+  docs-use-cases: todo
+  dynamic-devices:
+    status: exempt
+    comment: This integration has no devices.
+  entity-category:
+    status: exempt
+    comment: This integration has no entities.
+  entity-device-class:
+    status: exempt
+    comment: This integration has no entities.
+  entity-disabled-by-default:
+    status: exempt
+    comment: This integration has no entities.
+  entity-translations:
+    status: exempt
+    comment: This integration has no entities.
+  exception-translations: todo
+  icon-translations:
+    status: exempt
+    comment: This integration has no entities.
+  reconfiguration-flow: done
+  repair-issues:
+    status: exempt
+    comment: There are no repairable issues.
+  stale-devices:
+    status: exempt
+    comment: This integration has no devices.
+
+  # Platinum
+  async-dependency:
+    status: exempt
+    comment: This integration has no dependency.
+  inject-websession:
+    status: exempt
+    comment: This integration has no websession.
+  strict-typing: done

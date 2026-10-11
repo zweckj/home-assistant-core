@@ -1,0 +1,70 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]",
+      "identity_providers_disabled": "Signing in with identity providers is turned off. Add `type: oidc` to `auth_providers` in your configuration to use it.",
+      "no_url_available": "Home Assistant has no URL that the identity provider could redirect back to. Set up an internal or external URL in the network settings first."
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_config": "The identity provider configuration is not valid.",
+      "invalid_discovery": "The identity provider returned an invalid OpenID Connect configuration.",
+      "invalid_tenant": "The tenant must be `common`, `organizations`, `consumers`, a tenant ID, or a verified domain.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "reconfigure": {
+        "data": {
+          "client_secret": "Client secret"
+        },
+        "data_description": {
+          "client_secret": "Enter a new client secret from the existing app registration."
+        },
+        "description": "Update the client secret for tenant `{tenant}` and application `{client_id}`. The application cannot be changed without re-linking accounts because Microsoft account IDs are pairwise per application."
+      },
+      "user": {
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret",
+          "tenant": "Tenant"
+        },
+        "data_description": {
+          "client_id": "The application (client) ID from a Web platform app registration in the Microsoft Entra admin center at {portal_url}.",
+          "client_secret": "The client secret from the app registration.",
+          "tenant": "Use `common` for work, school and personal accounts; `organizations` for work or school accounts from any organization; `consumers` for personal Microsoft accounts only; or a tenant ID or verified domain for only that organization."
+        },
+        "description": "Register these redirect URIs in the Web platform app registration:\n\n{redirect_uris}"
+      }
+    }
+  },
+  "options": {
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_config": "The identity provider configuration is not valid.",
+      "invalid_discovery": "The identity provider returned an invalid OpenID Connect configuration.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "init": {
+        "data": {
+          "accounts": "Account handling",
+          "admin_group": "Administrator group object ID",
+          "revalidate_interval": "Revalidation interval"
+        },
+        "data_description": {
+          "accounts": "Choose whether Microsoft accounts only link to existing Home Assistant users, or whether Home Assistant users are created for everyone in this tenant. Provisioned users are never owners, and administrators are granted only through the admin group.",
+          "admin_group": "Optional Entra group object ID from the `groups` claim. Provisioned users in this group become Home Assistant administrators.",
+          "revalidate_interval": "How often to revalidate provisioned users, in minutes."
+        }
+      }
+    }
+  },
+  "selector": {
+    "accounts": {
+      "options": {
+        "link": "Link Microsoft accounts to existing Home Assistant users",
+        "provision": "Create Home Assistant users for Microsoft accounts in this tenant"
+      }
+    }
+  }
+}

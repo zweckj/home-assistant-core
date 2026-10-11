@@ -8,6 +8,7 @@
     "azure_service_bus",
     "azure_storage",
     "microsoft",
+    "microsoft_sign_in",
     "onedrive",
     "onedrive_for_business",
     "xbox"

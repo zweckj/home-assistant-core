@@ -245,6 +245,7 @@ homeassistant.components.geocaching.*
 homeassistant.components.ghost.*
 homeassistant.components.gios.*
 homeassistant.components.github.*
+homeassistant.components.github_sign_in.*
 homeassistant.components.glances.*
 homeassistant.components.go2rtc.*
 homeassistant.components.goalzero.*
@@ -255,6 +256,7 @@ homeassistant.components.google_drive.*
 homeassistant.components.google_health.*
 homeassistant.components.google_photos.*
 homeassistant.components.google_sheets.*
+homeassistant.components.google_sign_in.*
 homeassistant.components.google_weather.*
 homeassistant.components.govee_ble.*
 homeassistant.components.gpsd.*
@@ -397,6 +399,7 @@ homeassistant.components.media_player.*
 homeassistant.components.media_source.*
 homeassistant.components.met_eireann.*
 homeassistant.components.metoffice.*
+homeassistant.components.microsoft_sign_in.*
 homeassistant.components.midea.*
 homeassistant.components.miele.*
 homeassistant.components.mikrotik.*
