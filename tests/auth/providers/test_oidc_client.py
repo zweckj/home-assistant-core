@@ -463,7 +463,7 @@ async def test_oauth2_profile_fetch_profile(
 
     result = await client.async_fetch_profile("token")
 
-    assert result == (subject, account_name, profile)
+    assert result == (subject, account_name)
     assert aioclient_mock.mock_calls[-1][3]["Authorization"] == "Bearer " + "token"
     assert aioclient_mock.mock_calls[-1][3]["Accept"] == "application/json"
 

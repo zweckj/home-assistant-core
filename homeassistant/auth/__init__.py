@@ -265,11 +265,15 @@ class AuthManager:
             for provider_or_child in (provider, *provider.child_providers)
         ]
 
-    @callback
-    def _async_get_provider_by_key(
+    @property
+    def auth_mfa_modules(self) -> list[MultiFactorAuthModule]:
+        """Return a list of available auth modules."""
+        return list(self._mfa_modules.values())
+
+    def get_auth_provider(
         self, provider_type: str, provider_id: str | None
     ) -> AuthProvider | None:
-        """Return a provider or child provider by type and id."""
+        """Return an auth provider or child provider, None if not found."""
         if (provider := self._providers.get((provider_type, provider_id))) is not None:
             return provider
 
@@ -280,17 +284,6 @@ class AuthManager:
             return root.async_get_child_provider(provider_id)
 
         return None
-
-    @property
-    def auth_mfa_modules(self) -> list[MultiFactorAuthModule]:
-        """Return a list of available auth modules."""
-        return list(self._mfa_modules.values())
-
-    def get_auth_provider(
-        self, provider_type: str, provider_id: str | None
-    ) -> AuthProvider | None:
-        """Return an auth provider, None if not found."""
-        return self._async_get_provider_by_key(provider_type, provider_id)
 
     def get_auth_providers(self, provider_type: str) -> list[AuthProvider]:
         """Return a List of auth provider of one type, Empty if not found."""
@@ -825,7 +818,7 @@ class AuthManager:
             credentials.auth_provider_type,
             credentials.auth_provider_id,
         )
-        return self._async_get_provider_by_key(*auth_provider_key)
+        return self.get_auth_provider(*auth_provider_key)
 
     async def _user_should_be_owner(self) -> bool:
         """Determine if user should be owner.

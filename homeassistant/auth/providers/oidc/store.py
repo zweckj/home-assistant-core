@@ -100,7 +100,6 @@ class OidcStore:
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the store."""
-        self.hass = hass
         self._store = Store[dict[str, Any]](
             hass, STORAGE_VERSION, STORAGE_KEY, private=True, atomic_writes=True
         )

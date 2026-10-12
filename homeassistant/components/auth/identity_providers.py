@@ -132,9 +132,9 @@ class _IdentityProviderBridge:
         self, change_type: ConfigEntryChange, entry: ConfigEntry
     ) -> None:
         """Handle a config entry change."""
-        provider = async_get_provider(self.hass)
         if entry.domain not in self._platforms and (
-            provider is None or entry.entry_id not in provider.identity_provider_ids
+            (provider := async_get_provider(self.hass)) is None
+            or entry.entry_id not in provider.identity_provider_ids
         ):
             return
         self.hass.async_create_task(
@@ -185,8 +185,7 @@ class _IdentityProviderBridge:
 
         if entry.disabled_by:
             if has_record:
-                provider.async_suspend_identity_provider(entry_id)
-                self._clear_cache(entry_id)
+                self._async_suspend(provider, entry_id)
                 if entry_id not in self._disabled_sessions_ended:
                     await provider.async_end_identity_provider_sessions(entry_id)
                     self._disabled_sessions_ended.add(entry_id)
@@ -195,16 +194,14 @@ class _IdentityProviderBridge:
         self._disabled_sessions_ended.discard(entry_id)
 
         if entry.state is not ConfigEntryState.LOADED or platform is None:
-            provider.async_suspend_identity_provider(entry_id)
-            self._clear_cache(entry_id)
+            self._async_suspend(provider, entry_id)
             return
 
         try:
             spec = platform.get_identity_provider(entry)
         except Exception:
             _LOGGER.exception("Error getting identity provider from %s", entry.domain)
-            provider.async_suspend_identity_provider(entry_id)
-            self._clear_cache(entry_id)
+            self._async_suspend(provider, entry_id)
             self._async_create_invalid_issue(entry.title, entry.domain, entry_id)
             return
 
@@ -227,8 +224,7 @@ class _IdentityProviderBridge:
                 entry.domain,
                 err.reason,
             )
-            provider.async_suspend_identity_provider(entry_id)
-            self._clear_cache(entry_id)
+            self._async_suspend(provider, entry_id)
             self._async_create_invalid_issue(entry.title, entry.domain, entry_id)
             return
 
@@ -238,8 +234,9 @@ class _IdentityProviderBridge:
         )
 
     @callback
-    def _clear_cache(self, entry_id: str) -> None:
-        """Clear bridge state for an identity provider."""
+    def _async_suspend(self, provider: OidcAuthProvider, entry_id: str) -> None:
+        """Suspend an identity provider and forget its registered spec."""
+        provider.async_suspend_identity_provider(entry_id)
         self._registered.pop(entry_id, None)
 
     async def _async_remove_identity_provider(

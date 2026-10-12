@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 from types import MappingProxyType
-from typing import Any, Literal, cast
+from typing import Any, Literal, NoReturn, cast
 from urllib.parse import urlsplit
 
 from homeassistant.exceptions import HomeAssistantError
@@ -110,7 +110,7 @@ class IdentityProviderError(HomeAssistantError):
         self.reason = reason
 
 
-def _raise(reason: str, message: str | None = None) -> None:
+def _raise(reason: str, message: str | None = None) -> NoReturn:
     """Raise an identity provider validation error."""
     raise IdentityProviderError(reason, message)
 
@@ -119,7 +119,7 @@ def _validate_str(value: object, reason: str, *, non_empty: bool = False) -> str
     """Validate an exact string."""
     if type(value) is not str or (non_empty and not value):
         _raise(reason)
-    return cast(str, value)
+    return value
 
 
 def _validate_optional_str(value: object, reason: str) -> str | None:
@@ -191,10 +191,7 @@ def _validate_issuer_template(protocol: OpenIDConnect) -> None:
 
 def _validate_claim_rule(value: object) -> ClaimRule:
     """Validate a claim rule."""
-    if type(value) is Equals:
-        _validate_str(value.value, "invalid_claim_rule")
-        return value
-    if type(value) is NotEquals:
+    if type(value) is Equals or type(value) is NotEquals:
         _validate_str(value.value, "invalid_claim_rule")
         return value
     if type(value) is OneOf:
@@ -206,7 +203,6 @@ def _validate_claim_rule(value: object) -> ClaimRule:
             _raise("invalid_claim_rule")
         return value
     _raise("invalid_claim_rule")
-    raise AssertionError
 
 
 def _validate_required_claims(value: object) -> Mapping[str, ClaimRule]:
@@ -243,14 +239,14 @@ def _validate_bool(value: object, reason: str) -> bool:
     """Validate an exact bool."""
     if type(value) is not bool:
         _raise(reason)
-    return cast(bool, value)
+    return value
 
 
 def _validate_account_policy(value: object) -> AccountPolicy:
     """Validate an exact account policy."""
     if type(value) is not AccountPolicy:
         _raise("invalid_account_policy")
-    return cast(AccountPolicy, value)
+    return value
 
 
 def _validate_oidc(
@@ -348,7 +344,6 @@ def validate_identity_provider(spec: object) -> IdentityProvider:
     """Validate and return an immutable identity provider specification."""
     if type(spec) is not IdentityProvider:
         _raise("invalid_spec")
-    spec = cast(IdentityProvider, spec)
     client_id = _validate_str(spec.client_id, "invalid_client_id", non_empty=True)
     client_secret = _validate_optional_str(spec.client_secret, "invalid_client_secret")
     allow_insecure_transport = _validate_bool(

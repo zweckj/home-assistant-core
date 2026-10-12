@@ -434,7 +434,6 @@ class OidcClient:
         self.issuer_aliases = aliases
         self.issuer_claim = issuer_claim
         self.allow_insecure_transport = allow_insecure_transport
-        self._issuer_placeholder = placeholder
         self._issuer_pattern = (
             _template_issuer_pattern(issuer) if placeholder is not None else None
         )
@@ -447,12 +446,11 @@ class OidcClient:
         self._jwks_fetched_at = 0.0
         self._jwks_lock = asyncio.Lock()
 
-    async def async_metadata(self, *, force_refresh: bool = False) -> ProviderMetadata:
+    async def async_metadata(self) -> ProviderMetadata:
         """Return the provider metadata, fetching it when the cache is cold."""
         async with self._metadata_lock:
             if (
-                not force_refresh
-                and self._metadata is not None
+                self._metadata is not None
                 and time.time() - self._metadata_fetched_at < DISCOVERY_CACHE_TTL
             ):
                 return self._metadata
@@ -460,18 +458,14 @@ class OidcClient:
             document = await _async_fetch_json(
                 self.hass, self.discovery_url, "discovery document"
             )
-            metadata = self._parse_metadata(document)
+            metadata = _parse_provider_metadata(
+                document,
+                expected_issuer=self.issuer,
+                allow_http=self.allow_insecure_transport,
+            )
             self._metadata = metadata
             self._metadata_fetched_at = time.time()
             return metadata
-
-    def _parse_metadata(self, document: Any) -> ProviderMetadata:
-        """Validate and convert a discovery document."""
-        return _parse_provider_metadata(
-            document,
-            expected_issuer=self.issuer,
-            allow_http=self.allow_insecure_transport,
-        )
 
     def async_authorize_url(
         self,
@@ -831,7 +825,6 @@ class OAuth2ProfileClient:
         self.scopes = tuple(scopes)
         self.headers = configured_headers
         self.token_auth_method = token_auth_method
-        self.allow_insecure_transport = allow_insecure_transport
         self.issuer = _origin(self.profile_url)
 
     def async_authorize_url(
@@ -869,9 +862,7 @@ class OAuth2ProfileClient:
             self.hass, self.token_url, body, headers=headers
         )
 
-    async def async_fetch_profile(
-        self, access_token: str
-    ) -> tuple[str, str | None, dict[str, Any]]:
+    async def async_fetch_profile(self, access_token: str) -> tuple[str, str | None]:
         """Fetch the user's profile and return the subject and account name."""
         session = async_get_clientsession(self.hass)
         headers = {"Accept": "application/json", **self.headers}
@@ -917,7 +908,7 @@ class OAuth2ProfileClient:
             if isinstance(account_name_value, str) and account_name_value:
                 account_name = account_name_value
 
-        return subject, account_name, body
+        return subject, account_name
 
     def accepts_issuer(self, issuer: str) -> bool:
         """Return whether a stored credential issuer belongs to this client."""
