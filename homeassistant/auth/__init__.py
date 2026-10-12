@@ -147,7 +147,7 @@ class AuthManagerFlowManager(
         except jwt.InvalidTokenError:
             return None
 
-        flow_id = claims.get("flow_id")
+        flow_id = claims["flow_id"]
         return flow_id if isinstance(flow_id, str) else None
 
     @callback
