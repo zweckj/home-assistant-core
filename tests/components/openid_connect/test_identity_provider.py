@@ -104,7 +104,7 @@ def test_get_identity_provider(
     """Test building identity provider specs."""
     entry = MockConfigEntry(data=data, options=options)
 
-    spec = get_identity_provider(entry)
+    spec = get_identity_provider(entry.data, entry.options)
 
     assert validate_identity_provider(spec) == spec
     assert spec == snapshot

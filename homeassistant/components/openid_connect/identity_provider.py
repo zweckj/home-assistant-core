@@ -5,7 +5,6 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.auth import AccountPolicy, IdentityProvider, OpenIDConnect
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 
 from .const import (
@@ -27,10 +26,10 @@ from .const import (
 )
 
 
-def _identity_provider(
+def get_identity_provider(
     data: Mapping[str, Any], options: Mapping[str, Any]
 ) -> IdentityProvider:
-    """Build an identity provider spec from config entry data and options."""
+    """Return the identity provider spec for config entry data and options."""
     accounts = AccountPolicy(options.get(CONF_ACCOUNTS, DEFAULT_ACCOUNTS))
     scopes = options.get(CONF_SCOPES, DEFAULT_SCOPES)
     return IdentityProvider(
@@ -56,8 +55,3 @@ def _identity_provider(
         else None,
         allow_insecure_transport=data[CONF_ALLOW_INSECURE_TRANSPORT],
     )
-
-
-def get_identity_provider(entry: ConfigEntry) -> IdentityProvider:
-    """Return the identity provider spec for a config entry."""
-    return _identity_provider(entry.data, entry.options)

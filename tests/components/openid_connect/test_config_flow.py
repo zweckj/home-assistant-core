@@ -17,7 +17,9 @@ from homeassistant.components.openid_connect.const import (
     CONF_SCOPES,
     DOMAIN,
 )
-from homeassistant.components.openid_connect.identity_provider import _identity_provider
+from homeassistant.components.openid_connect.identity_provider import (
+    get_identity_provider,
+)
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
     SOURCE_USER,
@@ -166,7 +168,7 @@ async def test_user_flow_success(
     mock_discover.assert_awaited_once_with(
         hass, discovery_url, allow_insecure_transport=False
     )
-    mock_validate.assert_awaited_once_with(hass, _identity_provider(data, {}))
+    mock_validate.assert_awaited_once_with(hass, get_identity_provider(data, {}))
 
 
 @pytest.mark.usefixtures("oidc_auth", "mock_setup_entry")
@@ -186,7 +188,7 @@ async def test_user_flow_public_client(
     }
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == data
-    mock_validate.assert_awaited_once_with(hass, _identity_provider(data, {}))
+    mock_validate.assert_awaited_once_with(hass, get_identity_provider(data, {}))
 
 
 @pytest.mark.usefixtures("oidc_auth", "mock_setup_entry")
@@ -214,7 +216,7 @@ async def test_user_flow_advanced_insecure_transport(
     data = ADVANCED_INPUT.copy()
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == data
-    mock_validate.assert_awaited_once_with(hass, _identity_provider(data, {}))
+    mock_validate.assert_awaited_once_with(hass, get_identity_provider(data, {}))
 
 
 @pytest.mark.usefixtures("oidc_auth", "mock_setup_entry")
@@ -406,7 +408,7 @@ async def test_reconfigure_success(
     assert result["reason"] == "reconfigure_successful"
     assert mock_config_entry.data == UPDATED_DATA
     mock_validate.assert_awaited_once_with(
-        hass, _identity_provider(UPDATED_DATA, mock_config_entry.options)
+        hass, get_identity_provider(UPDATED_DATA, mock_config_entry.options)
     )
 
 
@@ -478,7 +480,7 @@ async def test_options_success(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == OPTIONS_INPUT
     mock_validate.assert_awaited_once_with(
-        hass, _identity_provider(mock_config_entry.data, OPTIONS_INPUT)
+        hass, get_identity_provider(mock_config_entry.data, OPTIONS_INPUT)
     )
 
 
@@ -517,7 +519,7 @@ async def test_options_provision_stores_interval(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == PROVISION_OPTIONS
     mock_validate.assert_awaited_once_with(
-        hass, _identity_provider(mock_config_entry.data, PROVISION_OPTIONS)
+        hass, get_identity_provider(mock_config_entry.data, PROVISION_OPTIONS)
     )
 
 
@@ -552,7 +554,7 @@ async def test_reconfigure_advanced_public_client(
     assert result["reason"] == "reconfigure_successful"
     assert dict(mock_config_entry.data) == data
     mock_validate.assert_awaited_once_with(
-        hass, _identity_provider(data, mock_config_entry.options)
+        hass, get_identity_provider(data, mock_config_entry.options)
     )
 
 

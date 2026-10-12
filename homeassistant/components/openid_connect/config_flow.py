@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import probatio
 
 from homeassistant.components.auth import (
+    AccountPolicy,
     IdentityProviderConfigFlow,
     IdentityProviderFlowError,
     IdentityProviderSetup,
@@ -44,7 +45,7 @@ from .const import (
     DEFAULT_USERNAME_CLAIM,
     DOMAIN,
 )
-from .identity_provider import _identity_provider
+from .identity_provider import get_identity_provider
 
 _CLIENT_SECRET_SELECTOR = TextSelector(
     TextSelectorConfig(type=TextSelectorType.PASSWORD)
@@ -54,7 +55,7 @@ OPTIONS_SCHEMA = probatio.Schema(
     {
         probatio.Required(CONF_ACCOUNTS, default=DEFAULT_ACCOUNTS): SelectSelector(
             SelectSelectorConfig(
-                options=["link", "provision"],
+                options=[policy.value for policy in AccountPolicy],
                 mode=SelectSelectorMode.DROPDOWN,
                 translation_key="accounts",
             )
@@ -98,26 +99,15 @@ def _host_title(issuer: str) -> str:
     return hostname or issuer
 
 
-def _data_schema(*, advanced: bool) -> probatio.Schema:
-    """Return the user step data schema."""
-    schema: dict[Any, Any] = {
-        probatio.Required(CONF_ISSUER): TextSelector(
+def _data_schema(*, issuer: bool, advanced: bool) -> probatio.Schema:
+    """Return the user or reconfigure step form."""
+    schema: dict[Any, Any] = {}
+    if issuer:
+        schema[probatio.Required(CONF_ISSUER)] = TextSelector(
             TextSelectorConfig(type=TextSelectorType.URL)
-        ),
-        probatio.Required(CONF_CLIENT_ID): str,
-        probatio.Optional(CONF_CLIENT_SECRET): _CLIENT_SECRET_SELECTOR,
-    }
-    if advanced:
-        schema[probatio.Optional(CONF_ALLOW_INSECURE_TRANSPORT, default=False)] = bool
-    return probatio.Schema(schema)
-
-
-def _reconfigure_schema(*, advanced: bool) -> probatio.Schema:
-    """Return the reconfigure data schema."""
-    schema: dict[Any, Any] = {
-        probatio.Required(CONF_CLIENT_ID): str,
-        probatio.Optional(CONF_CLIENT_SECRET): _CLIENT_SECRET_SELECTOR,
-    }
+        )
+    schema[probatio.Required(CONF_CLIENT_ID)] = str
+    schema[probatio.Optional(CONF_CLIENT_SECRET)] = _CLIENT_SECRET_SELECTOR
     if advanced:
         schema[probatio.Optional(CONF_ALLOW_INSECURE_TRANSPORT, default=False)] = bool
     return probatio.Schema(schema)
@@ -126,23 +116,22 @@ def _reconfigure_schema(*, advanced: bool) -> probatio.Schema:
 class OpenIDConnectConfigFlow(IdentityProviderConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenID Connect."""
 
-    DATA_SCHEMA = _data_schema(advanced=False)
     OPTIONS_SCHEMA = OPTIONS_SCHEMA
     RECONFIGURE_PLACEHOLDERS = (CONF_ISSUER,)
     TRANSLATED_ERRORS = frozenset({"invalid_scopes"})
-    identity_provider = staticmethod(_identity_provider)
+    identity_provider = staticmethod(get_identity_provider)
 
     @callback
     @override
     def user_schema(self) -> probatio.Schema:
         """Return the user step form."""
-        return _data_schema(advanced=self.show_advanced_options)
+        return _data_schema(issuer=True, advanced=self.show_advanced_options)
 
     @callback
     @override
     def reconfigure_schema(self) -> probatio.Schema:
         """Return the reconfigure step form."""
-        return _reconfigure_schema(advanced=self.show_advanced_options)
+        return _data_schema(issuer=False, advanced=self.show_advanced_options)
 
     @override
     async def async_resolve_setup(
