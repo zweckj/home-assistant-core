@@ -8,7 +8,6 @@ import asyncio
 import base64
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-import hashlib
 import logging
 import re
 import time
@@ -30,6 +29,7 @@ from homeassistant.exceptions import (
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.oauth2 import (
     ClientAuthMethod,
+    async_oauth2_request,
     async_token_request,
     build_authorize_url,
     client_auth,
@@ -56,29 +56,19 @@ _LOGGER = logging.getLogger(__name__)
 # Names the token request errors; OIDC runs under the auth component.
 AUTH_DOMAIN = "auth"
 
-# The at_hash digest follows the signing algorithm. OpenID Connect pins none for
-# EdDSA, so it is left out and its at_hash goes unchecked.
-_AT_HASH_ALGORITHMS: dict[str, str] = {
-    "RS256": "sha256",
-    "PS256": "sha256",
-    "ES256": "sha256",
-    "RS384": "sha384",
-    "PS384": "sha384",
-    "ES384": "sha384",
-    "RS512": "sha512",
-    "PS512": "sha512",
-    "ES512": "sha512",
-}
-
 _ISSUER_TEMPLATE_RE = re.compile(ISSUER_PLACEHOLDER_PATTERN)
 _ISSUER_PLACEHOLDER_VALUE_RE = re.compile(ISSUER_PLACEHOLDER_VALUE_PATTERN)
 
 
 def _compute_at_hash(access_token: str, algorithm: str) -> str | None:
     """Return the at_hash an access token should have for a signing algorithm."""
-    if (hash_name := _AT_HASH_ALGORITHMS.get(algorithm)) is None:
+    # The digest follows the signing algorithm; EdDSA has none, so it is unchecked.
+    try:
+        digest = jwt.get_algorithm_by_name(algorithm).compute_hash_digest(
+            access_token.encode()
+        )
+    except NotImplementedError:
         return None
-    digest = hashlib.new(hash_name, access_token.encode()).digest()
     # OpenID Connect hashes the token and keeps the left-most half.
     half = digest[: len(digest) // 2]
     return base64.urlsafe_b64encode(half).decode("ascii").rstrip("=")
@@ -395,6 +385,47 @@ async def _async_token_request(
     )
 
 
+async def _async_bearer_get(
+    hass: HomeAssistant,
+    url: str,
+    access_token: str,
+    *,
+    endpoint: str,
+    fetching: str,
+    headers: Mapping[str, str] | None = None,
+) -> Any:
+    """Fetch a JSON document with a bearer token, refusing redirects."""
+    label = endpoint.capitalize()
+    try:
+        async with asyncio.timeout(HTTP_TIMEOUT):
+            response = await async_oauth2_request(
+                hass,
+                {"access_token": access_token},
+                "GET",
+                url,
+                headers=headers or {},
+                allow_redirects=False,
+            )
+            status = response.status
+            if 300 <= status < 400:
+                raise OidcError(f"The {endpoint} endpoint URL redirects elsewhere")
+            body = await response.json(content_type=None)
+    except TimeoutError as err:
+        raise OidcTransientError(f"Timeout fetching {fetching}") from err
+    except ClientError as err:
+        raise OidcTransientError(f"Error fetching {fetching}: {err}") from err
+    except ValueError as err:
+        raise OidcError(f"{label} endpoint returned invalid JSON") from err
+
+    if status in (401, 403):
+        raise OidcInvalidGrantError("The identity provider rejected the token")
+    if status >= 500:
+        raise OidcTransientError(f"{label} endpoint returned status {status}")
+    if status >= 400:
+        raise OidcError(f"{label} endpoint returned status {status}")
+    return body
+
+
 class OidcClient:
     """Talk to an OpenID Connect provider on behalf of Home Assistant."""
 
@@ -542,32 +573,13 @@ class OidcClient:
         if not metadata.userinfo_endpoint:
             return claims
 
-        session = async_get_clientsession(self.hass)
-        try:
-            async with asyncio.timeout(HTTP_TIMEOUT):
-                response = await session.get(
-                    metadata.userinfo_endpoint,
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    allow_redirects=False,
-                )
-                status = response.status
-                if 300 <= status < 400:
-                    raise OidcError("The userinfo endpoint URL redirects elsewhere")
-                body = await response.json(content_type=None)
-        except TimeoutError as err:
-            raise OidcTransientError("Timeout fetching userinfo") from err
-        except ClientError as err:
-            raise OidcTransientError(f"Error fetching userinfo: {err}") from err
-        except ValueError as err:
-            raise OidcError("Userinfo endpoint returned invalid JSON") from err
-
-        if status in (401, 403):
-            raise OidcInvalidGrantError("The identity provider rejected the token")
-        if status >= 500:
-            raise OidcTransientError(f"Userinfo endpoint returned status {status}")
-        if status >= 400:
-            raise OidcError(f"Userinfo endpoint returned status {status}")
-
+        body = await _async_bearer_get(
+            self.hass,
+            metadata.userinfo_endpoint,
+            access_token,
+            endpoint="userinfo",
+            fetching="userinfo",
+        )
         try:
             info: dict[str, Any] = _USERINFO_SCHEMA(body)
         except probatio.Invalid as err:
@@ -864,31 +876,14 @@ class OAuth2ProfileClient:
 
     async def async_fetch_profile(self, access_token: str) -> tuple[str, str | None]:
         """Fetch the user's profile and return the subject and account name."""
-        session = async_get_clientsession(self.hass)
-        headers = {"Accept": "application/json", **self.headers}
-        headers["Authorization"] = "Bearer " + access_token
-        try:
-            async with asyncio.timeout(HTTP_TIMEOUT):
-                response = await session.get(
-                    self.profile_url, headers=headers, allow_redirects=False
-                )
-                status = response.status
-                if 300 <= status < 400:
-                    raise OidcError("The profile endpoint URL redirects elsewhere")
-                body = await response.json(content_type=None)
-        except TimeoutError as err:
-            raise OidcTransientError("Timeout fetching the profile") from err
-        except ClientError as err:
-            raise OidcTransientError(f"Error fetching the profile: {err}") from err
-        except ValueError as err:
-            raise OidcError("Profile endpoint returned invalid JSON") from err
-
-        if status in (401, 403):
-            raise OidcInvalidGrantError("The identity provider rejected the token")
-        if status >= 500:
-            raise OidcTransientError(f"Profile endpoint returned status {status}")
-        if status >= 400:
-            raise OidcError(f"Profile endpoint returned status {status}")
+        body = await _async_bearer_get(
+            self.hass,
+            self.profile_url,
+            access_token,
+            endpoint="profile",
+            fetching="the profile",
+            headers={"Accept": "application/json", **self.headers},
+        )
         if not isinstance(body, dict):
             raise OidcError("Profile endpoint did not return a JSON object")
 
