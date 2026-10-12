@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.components.auth import AccountPolicy, IdentityProvider, OAuth2Profile
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 
 _HEADERS = {
@@ -13,12 +12,7 @@ _HEADERS = {
 }
 
 
-def get_identity_provider(entry: ConfigEntry) -> IdentityProvider:
-    """Return the identity provider specification for this config entry."""
-    return _identity_provider(entry.data, entry.options)
-
-
-def _identity_provider(
+def get_identity_provider(
     data: Mapping[str, Any], options: Mapping[str, Any]
 ) -> IdentityProvider:
     """Return the GitHub identity provider specification."""

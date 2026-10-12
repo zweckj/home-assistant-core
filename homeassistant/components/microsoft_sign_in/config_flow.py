@@ -31,19 +31,19 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    BASE_URL,
     CONF_ACCOUNTS,
     CONF_ADMIN_GROUP,
     CONF_REVALIDATE_INTERVAL,
     CONF_TENANT,
+    DEFAULT_REVALIDATE_INTERVAL,
     DOMAIN,
+    TENANT_KEYWORDS,
 )
-from .identity_provider import _identity_provider, _is_guid
+from .identity_provider import _is_guid, get_identity_provider
 
-_BASE = "https://login.microsoftonline.com"
 _DEFAULT_TENANT = "common"
-_DEFAULT_REVALIDATE_INTERVAL = 1440
 _PORTAL_URL = "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
-_TENANT_KEYWORDS = {"common", "organizations", "consumers"}
 _DOMAIN_RE = re.compile(
     r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z"
 )
@@ -53,7 +53,7 @@ _TEXT_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT))
 _PASSWORD_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 _ACCOUNTS_SELECTOR = SelectSelector(
     SelectSelectorConfig(
-        options=[AccountPolicy.LINK.value, AccountPolicy.PROVISION.value],
+        options=[policy.value for policy in AccountPolicy],
         translation_key=CONF_ACCOUNTS,
         mode=SelectSelectorMode.DROPDOWN,
     )
@@ -80,7 +80,7 @@ OPTIONS_SCHEMA = probatio.Schema(
         ): _ACCOUNTS_SELECTOR,
         probatio.Optional(CONF_ADMIN_GROUP, default=""): _TEXT_SELECTOR,
         probatio.Required(
-            CONF_REVALIDATE_INTERVAL, default=_DEFAULT_REVALIDATE_INTERVAL
+            CONF_REVALIDATE_INTERVAL, default=DEFAULT_REVALIDATE_INTERVAL
         ): _REVALIDATE_SELECTOR,
     }
 )
@@ -101,7 +101,7 @@ def _invalid_tenant() -> IdentityProviderFlowError:
 
 async def _async_resolve_tenant(hass: HomeAssistant, tenant: str) -> str:
     """Resolve a tenant input to a Microsoft tenant keyword or GUID."""
-    if tenant in _TENANT_KEYWORDS:
+    if tenant in TENANT_KEYWORDS:
         return tenant
     if guid := _normalize_guid(tenant):
         return guid
@@ -109,7 +109,7 @@ async def _async_resolve_tenant(hass: HomeAssistant, tenant: str) -> str:
         raise _invalid_tenant()
     try:
         metadata = await async_discover_identity_provider(
-            hass, f"{_BASE}/{tenant}/v2.0/.well-known/openid-configuration"
+            hass, f"{BASE_URL}/{tenant}/v2.0/.well-known/openid-configuration"
         )
     except IdentityProviderError as err:
         if err.reason == "invalid_discovery":
@@ -120,9 +120,9 @@ async def _async_resolve_tenant(hass: HomeAssistant, tenant: str) -> str:
     return match.group(1)
 
 
-def _title(tenant_input: str, resolved_tenant: str) -> str:
+def _title(tenant_input: str) -> str:
     """Return the config entry title."""
-    if resolved_tenant in _TENANT_KEYWORDS:
+    if tenant_input in TENANT_KEYWORDS:
         return "Microsoft"
     return f"Microsoft ({tenant_input})"
 
@@ -135,7 +135,7 @@ class MicrosoftSignInConfigFlow(IdentityProviderConfigFlow, domain=DOMAIN):
     OPTIONS_SCHEMA = OPTIONS_SCHEMA
     USER_PLACEHOLDERS = {"portal_url": _PORTAL_URL}
     RECONFIGURE_PLACEHOLDERS = (CONF_CLIENT_ID, CONF_TENANT)
-    identity_provider = staticmethod(_identity_provider)
+    identity_provider = staticmethod(get_identity_provider)
 
     @classmethod
     @callback
@@ -152,7 +152,7 @@ class MicrosoftSignInConfigFlow(IdentityProviderConfigFlow, domain=DOMAIN):
         tenant_input = user_input[CONF_TENANT].strip().lower()
         tenant = await _async_resolve_tenant(self.hass, tenant_input)
         return IdentityProviderSetup(
-            title=_title(tenant_input, tenant),
+            title=_title(tenant_input),
             unique_id=tenant,
             data={
                 CONF_TENANT: tenant,

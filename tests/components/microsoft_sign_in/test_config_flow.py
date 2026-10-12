@@ -14,10 +14,8 @@ from homeassistant.components.microsoft_sign_in.const import (
     CONF_ADMIN_GROUP,
     CONF_REVALIDATE_INTERVAL,
     CONF_TENANT,
-    DOMAIN,
-)
-from homeassistant.components.microsoft_sign_in.identity_provider import (
     CONSUMERS_TENANT_ID,
+    DOMAIN,
 )
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,

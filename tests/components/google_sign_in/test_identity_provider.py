@@ -31,7 +31,7 @@ def test_get_identity_provider(snapshot: SnapshotAssertion) -> None:
         data={CONF_CLIENT_ID: IDP_CLIENT_ID, CONF_CLIENT_SECRET: CLIENT_SECRET},
     )
 
-    spec = get_identity_provider(entry)
+    spec = get_identity_provider(entry.data, entry.options)
 
     assert spec == snapshot
     assert validate_identity_provider(spec) == spec

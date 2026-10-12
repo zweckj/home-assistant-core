@@ -12,29 +12,24 @@ from homeassistant.components.auth import (
     NotEquals,
     OpenIDConnect,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 
 from .const import (
+    BASE_URL,
     CONF_ACCOUNTS,
     CONF_ADMIN_GROUP,
     CONF_REVALIDATE_INTERVAL,
     CONF_TENANT,
+    CONSUMERS_TENANT_ID,
+    DEFAULT_REVALIDATE_INTERVAL,
+    MULTI_TENANT_KEYWORDS,
+    TENANT_KEYWORDS,
 )
 
-_BASE = "https://login.microsoftonline.com"
-CONSUMERS_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad"
-_DEFAULT_REVALIDATE_INTERVAL = 1440
-_KEYWORDS = {"common", "organizations", "consumers"}
 _SCOPES = ("openid", "profile")
 
 
-def get_identity_provider(entry: ConfigEntry) -> IdentityProvider:
-    """Return the Microsoft identity provider specification."""
-    return _identity_provider(entry.data, entry.options)
-
-
-def _identity_provider(
+def get_identity_provider(
     data: Mapping[str, Any], options: Mapping[str, Any]
 ) -> IdentityProvider:
     """Return the Microsoft identity provider specification."""
@@ -46,12 +41,10 @@ def _identity_provider(
 
     admin_group: str | None = None
     revalidate_interval: timedelta | None = None
-    username_claim = "preferred_username"
-    display_name_claim = "name"
     if accounts is AccountPolicy.PROVISION:
         admin_group = options.get(CONF_ADMIN_GROUP) or None
         revalidate_interval = timedelta(
-            minutes=options.get(CONF_REVALIDATE_INTERVAL, _DEFAULT_REVALIDATE_INTERVAL)
+            minutes=options.get(CONF_REVALIDATE_INTERVAL, DEFAULT_REVALIDATE_INTERVAL)
         )
 
     return IdentityProvider(
@@ -60,12 +53,12 @@ def _identity_provider(
         protocol=OpenIDConnect(
             issuer=_issuer(tenant),
             discovery_url=_discovery_url(tenant),
-            issuer_claim="tid" if tenant in ("common", "organizations") else None,
+            issuer_claim="tid" if tenant in MULTI_TENANT_KEYWORDS else None,
             required_claims=_required_claims(tenant),
             scopes=_SCOPES,
             account_name_claim="preferred_username",
-            username_claim=username_claim,
-            display_name_claim=display_name_claim,
+            username_claim="preferred_username",
+            display_name_claim="name",
             admin_group=admin_group,
         ),
         accounts=accounts,
@@ -84,16 +77,16 @@ def _is_guid(tenant: str) -> bool:
 def _issuer(tenant: str) -> str:
     """Return the issuer for the tenant."""
     if tenant == "consumers":
-        return f"{_BASE}/{CONSUMERS_TENANT_ID}/v2.0"
-    if tenant in ("common", "organizations"):
-        return f"{_BASE}/{{tenantid}}/v2.0"
-    return f"{_BASE}/{tenant}/v2.0"
+        return f"{BASE_URL}/{CONSUMERS_TENANT_ID}/v2.0"
+    if tenant in MULTI_TENANT_KEYWORDS:
+        return f"{BASE_URL}/{{tenantid}}/v2.0"
+    return f"{BASE_URL}/{tenant}/v2.0"
 
 
 def _discovery_url(tenant: str) -> str | None:
     """Return the discovery URL for the tenant."""
-    if tenant in _KEYWORDS:
-        return f"{_BASE}/{tenant}/v2.0/.well-known/openid-configuration"
+    if tenant in TENANT_KEYWORDS:
+        return f"{BASE_URL}/{tenant}/v2.0/.well-known/openid-configuration"
     return None
 
 

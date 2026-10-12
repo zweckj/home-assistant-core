@@ -11,7 +11,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import DOMAIN
-from .identity_provider import _identity_provider
+from .identity_provider import get_identity_provider
 
 CONSOLE_URL = "https://console.cloud.google.com/apis/credentials"
 
@@ -29,4 +29,4 @@ class GoogleSignInConfigFlow(IdentityProviderConfigFlow, domain=DOMAIN):
         }
     )
     USER_PLACEHOLDERS = {"console_url": CONSOLE_URL}
-    identity_provider = staticmethod(_identity_provider)
+    identity_provider = staticmethod(get_identity_provider)

@@ -11,7 +11,9 @@ from homeassistant.auth.providers.oidc.spec import (
     OpenIDConnect,
 )
 from homeassistant.components.google_sign_in.const import DOMAIN
-from homeassistant.components.google_sign_in.identity_provider import _identity_provider
+from homeassistant.components.google_sign_in.identity_provider import (
+    get_identity_provider,
+)
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
     SOURCE_USER,
@@ -67,7 +69,7 @@ async def test_user_flow_success(hass: HomeAssistant, mock_validate: AsyncMock) 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Google"
     assert result["data"] == USER_INPUT
-    mock_validate.assert_awaited_once_with(hass, _identity_provider(USER_INPUT, {}))
+    mock_validate.assert_awaited_once_with(hass, get_identity_provider(USER_INPUT, {}))
 
 
 @pytest.mark.parametrize(
@@ -90,7 +92,7 @@ async def test_user_flow_identity_provider_errors_recover(
 
     mock_validate.side_effect = [
         IdentityProviderError(reason),
-        _identity_provider(USER_INPUT, {}),
+        get_identity_provider(USER_INPUT, {}),
     ]
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], USER_INPUT
@@ -115,7 +117,10 @@ async def test_user_flow_unknown_error_recovers(
     """Test unexpected validation errors and recovery."""
     result = await _start_user_flow(hass)
 
-    mock_validate.side_effect = [Exception("Boom"), _identity_provider(USER_INPUT, {})]
+    mock_validate.side_effect = [
+        Exception("Boom"),
+        get_identity_provider(USER_INPUT, {}),
+    ]
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], USER_INPUT
     )
@@ -191,7 +196,9 @@ async def test_reconfigure_success(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.data == UPDATED_INPUT
-    mock_validate.assert_awaited_once_with(hass, _identity_provider(UPDATED_INPUT, {}))
+    mock_validate.assert_awaited_once_with(
+        hass, get_identity_provider(UPDATED_INPUT, {})
+    )
 
 
 @pytest.mark.parametrize(
@@ -231,7 +238,7 @@ async def test_reconfigure_error_recovers(
         context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
     )
 
-    mock_validate.side_effect = [side_effect, _identity_provider(UPDATED_INPUT, {})]
+    mock_validate.side_effect = [side_effect, get_identity_provider(UPDATED_INPUT, {})]
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], UPDATED_INPUT
     )
@@ -250,7 +257,7 @@ async def test_reconfigure_error_recovers(
 
 def test_identity_provider_uses_link_only() -> None:
     """Test Google Sign-In uses link-only OpenID Connect settings."""
-    spec = _identity_provider(USER_INPUT, {})
+    spec = get_identity_provider(USER_INPUT, {})
 
     assert spec.accounts is AccountPolicy.LINK
     assert isinstance(spec.protocol, OpenIDConnect)

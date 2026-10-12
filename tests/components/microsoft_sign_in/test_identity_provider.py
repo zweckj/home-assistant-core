@@ -11,10 +11,10 @@ from homeassistant.components.microsoft_sign_in.const import (
     CONF_ADMIN_GROUP,
     CONF_REVALIDATE_INTERVAL,
     CONF_TENANT,
+    CONSUMERS_TENANT_ID,
     DOMAIN,
 )
 from homeassistant.components.microsoft_sign_in.identity_provider import (
-    CONSUMERS_TENANT_ID,
     get_identity_provider,
 )
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
@@ -66,7 +66,7 @@ def test_get_identity_provider(
         options=options,
     )
 
-    spec = get_identity_provider(entry)
+    spec = get_identity_provider(entry.data, entry.options)
 
     assert spec == snapshot
     validate_identity_provider(spec)

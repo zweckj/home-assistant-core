@@ -11,7 +11,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import DOMAIN
-from .identity_provider import _identity_provider
+from .identity_provider import get_identity_provider
 
 DEVELOPER_SETTINGS_URL = "https://github.com/settings/developers"
 
@@ -31,4 +31,4 @@ class GitHubSignInConfigFlow(IdentityProviderConfigFlow, domain=DOMAIN):
         }
     )
     USER_PLACEHOLDERS = {"developer_settings_url": DEVELOPER_SETTINGS_URL}
-    identity_provider = staticmethod(_identity_provider)
+    identity_provider = staticmethod(get_identity_provider)
