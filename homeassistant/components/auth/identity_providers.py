@@ -1,8 +1,9 @@
 """Connect identity provider integrations to the OpenID Connect auth engine."""
 
 import asyncio
+from collections.abc import Mapping
 import logging
-from typing import Protocol
+from typing import Any, Protocol
 
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH
 from homeassistant.auth.models import User
@@ -37,8 +38,10 @@ _LOGGER = logging.getLogger(__name__)
 class IdentityProviderPlatform(Protocol):
     """Protocol for identity provider platforms."""
 
-    def get_identity_provider(self, entry: ConfigEntry) -> IdentityProvider:
-        """Return the identity provider spec for a config entry."""
+    def get_identity_provider(
+        self, data: Mapping[str, Any], options: Mapping[str, Any]
+    ) -> IdentityProvider:
+        """Return the identity provider spec for config entry data and options."""
 
 
 @callback
@@ -198,7 +201,7 @@ class _IdentityProviderBridge:
             return
 
         try:
-            spec = platform.get_identity_provider(entry)
+            spec = platform.get_identity_provider(entry.data, entry.options)
         except Exception:
             _LOGGER.exception("Error getting identity provider from %s", entry.domain)
             self._async_suspend(provider, entry_id)

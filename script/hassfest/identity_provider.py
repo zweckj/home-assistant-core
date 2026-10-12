@@ -157,7 +157,7 @@ def _validate_get_identity_provider(
     args = node.args
     positional_args = [*args.posonlyargs, *args.args]
     if (
-        len(positional_args) != 1
+        len(positional_args) != 2
         or args.vararg
         or args.kwonlyargs
         or args.kwarg
@@ -165,8 +165,8 @@ def _validate_get_identity_provider(
     ):
         integration.add_error(
             PLUGIN,
-            "identity_provider.py: `get_identity_provider` must have exactly one "
-            "positional parameter",
+            "identity_provider.py: `get_identity_provider` must have exactly two "
+            "positional parameters",
         )
 
 
