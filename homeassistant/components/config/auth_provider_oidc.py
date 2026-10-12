@@ -39,17 +39,24 @@ def _async_provider(
     return None
 
 
+def _is_identity_provider_credential(credential: Credentials) -> bool:
+    """Return if a credential belongs to an identity provider of the engine."""
+    return (
+        credential.auth_provider_type == PROVIDER_TYPE
+        and credential.auth_provider_id is not None
+    )
+
+
 def _credential_for_user(
     credentials: list[Credentials], credential_id: str
 ) -> Credentials | None:
     """Return the caller-owned OIDC credential matching the id."""
     return next(
         (
-            credentials
-            for credentials in credentials
-            if credentials.id == credential_id
-            and credentials.auth_provider_type == PROVIDER_TYPE
-            and credentials.auth_provider_id is not None
+            credential
+            for credential in credentials
+            if credential.id == credential_id
+            and _is_identity_provider_credential(credential)
         ),
         None,
     )
@@ -96,12 +103,11 @@ def websocket_list(
     user = connection.user
     credentials = []
     for credential in user.credentials:
-        if (
-            credential.auth_provider_type != PROVIDER_TYPE
-            or credential.auth_provider_id is None
-        ):
+        if not _is_identity_provider_credential(credential):
             continue
-        child = provider.async_get_child_provider(credential.auth_provider_id)
+        child = provider.async_get_child_provider(
+            cast(str, credential.auth_provider_id)
+        )
         if not isinstance(child, OidcIdentityProvider):
             continue
         credentials.append(

@@ -107,10 +107,8 @@ CONFIG_SCHEMA = probatio.All(AUTH_PROVIDER_SCHEMA, _disallow_id)
 @callback
 def async_get_provider(hass: HomeAssistant) -> OidcAuthProvider | None:
     """Get the OIDC engine root provider."""
-    for prv in hass.auth.auth_providers:
-        if prv.type == PROVIDER_TYPE and prv.id is None:
-            return cast(OidcAuthProvider, prv)
-    return None
+    provider = hass.auth.get_auth_provider(PROVIDER_TYPE, None)
+    return provider if isinstance(provider, OidcAuthProvider) else None
 
 
 def _claim_as_str(value: Any) -> str | None:
@@ -317,9 +315,7 @@ class OidcAuthProvider(AuthProvider):
                     data.async_remove_session(credential_id)
             self.data = data
             for record in data.records.values():
-                self._children[record.idp_id] = OidcIdentityProvider.dormant(
-                    self, record
-                )
+                self._async_child_for_record(record)
 
         self.async_schedule_revalidation()
 
@@ -363,7 +359,7 @@ class OidcAuthProvider(AuthProvider):
         """Return or create a child for a registry record."""
         child = self._children.get(record.idp_id)
         if child is None:
-            child = OidcIdentityProvider.dormant(self, record)
+            child = OidcIdentityProvider(self, record)
             self._children[record.idp_id] = child
         return child
 
@@ -549,22 +545,15 @@ class OidcIdentityProvider(AuthProvider):
 
     DEFAULT_TITLE = "OpenID Connect"
 
-    def __init__(
-        self,
-        root: OidcAuthProvider,
-        record: IdentityProviderRecord,
-        *,
-        title: str | None = None,
-        spec: IdentityProvider | None = None,
-    ) -> None:
+    def __init__(self, root: OidcAuthProvider, record: IdentityProviderRecord) -> None:
         """Initialize the child provider."""
         super().__init__(
             root.hass, root.store, {"type": PROVIDER_TYPE, CONF_ID: record.idp_id}
         )
         self.root = root
         self.record = record
-        self._title = title
-        self._spec = spec
+        self._title: str | None = None
+        self._spec: IdentityProvider | None = None
         self._client: ProtocolClient | None = None
         self._revocation_client: ProtocolClient | None = None
         self._generation = 0
@@ -573,18 +562,6 @@ class OidcIdentityProvider(AuthProvider):
         )
         # New credentials holding a session, with the deadline for claiming them.
         self._unclaimed: dict[str, tuple[Credentials, float]] = {}
-
-    @classmethod
-    def dormant(
-        cls, root: OidcAuthProvider, record: IdentityProviderRecord
-    ) -> OidcIdentityProvider:
-        """Create a dormant child provider."""
-        return cls(root, record)
-
-    @property
-    def data(self) -> OidcStore | None:
-        """Return the root data store."""
-        return self.root.data
 
     @property
     def active(self) -> bool:
@@ -713,6 +690,9 @@ class OidcIdentityProvider(AuthProvider):
         subject = flow_result[CONF_SUBJECT]
         account_name = flow_result.get(CONF_ACCOUNT_NAME)
         identity = (issuer, subject)
+        data = {CONF_ISSUER: issuer, CONF_SUBJECT: subject}
+        if account_name is not None:
+            data[CONF_ACCOUNT_NAME] = account_name
 
         for credentials in await self.async_credentials():
             if (
@@ -721,19 +701,10 @@ class OidcIdentityProvider(AuthProvider):
             ):
                 self._pending_credentials.pop(identity, None)
                 if credentials.data.get(CONF_ACCOUNT_NAME) != account_name:
-                    data = {
-                        CONF_ISSUER: issuer,
-                        CONF_SUBJECT: subject,
-                    }
-                    if account_name is not None:
-                        data[CONF_ACCOUNT_NAME] = account_name
                     self.hass.auth.async_update_user_credentials_data(credentials, data)
                 return credentials
 
         if (pending := self._pending_credentials.get(identity)) is None:
-            data = {CONF_ISSUER: issuer, CONF_SUBJECT: subject}
-            if account_name is not None:
-                data[CONF_ACCOUNT_NAME] = account_name
             pending = self.async_create_credentials(data)
             self._pending_credentials[identity] = pending
         return pending
@@ -872,16 +843,14 @@ class OidcIdentityProvider(AuthProvider):
         """Apply identity claims and commit a session atomically."""
         async with self.root.revalidate_lock:
             if not credentials.is_new:
-                if (
-                    await self.hass.auth.async_get_user_by_credentials(credentials)
-                    is None
-                ):
+                user = await self.hass.auth.async_get_user_by_credentials(credentials)
+                if user is None:
                     raise InvalidAuthError("OIDC credentials were removed")
                 session = (await self.root.async_get_data()).sessions.get(
                     credentials.id
                 )
                 await self._async_apply_admin_grant(
-                    credentials.id,
+                    user,
                     granted_by_provider=session is not None and session.is_admin,
                     grants_admin=_grants_admin(
                         cast(OpenIDConnect, self.spec.protocol), claims
@@ -920,13 +889,12 @@ class OidcIdentityProvider(AuthProvider):
 
     async def _async_apply_admin_grant(
         self,
-        credential_id: str,
+        user: User | None,
         *,
         granted_by_provider: bool,
         grants_admin: bool,
     ) -> None:
         """Line a user's groups up with what the identity provider grants."""
-        user = await self._async_user_for_credential(credential_id)
         if user is None or user.is_owner:
             return
 
@@ -1014,7 +982,7 @@ class OidcIdentityProvider(AuthProvider):
             return
         grants_admin = _grants_admin(protocol, claims)
         await self._async_apply_admin_grant(
-            session.credential_id,
+            await self._async_user_for_credential(session.credential_id),
             granted_by_provider=session.is_admin,
             grants_admin=grants_admin,
         )
@@ -1182,9 +1150,12 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
                     }
                     | ({CONF_ACCOUNT_NAME: account_name} if account_name else {})
                 )
-                if credentials.is_new and not self.context.get("link_user"):
-                    if provider.record.accounts is AccountPolicy.LINK:
-                        return self.async_abort(reason="user_not_allowed")
+                if (
+                    credentials.is_new
+                    and not self.context.get("link_user")
+                    and provider.record.accounts is AccountPolicy.LINK
+                ):
+                    return self.async_abort(reason="user_not_allowed")
                 profile_claims = claims
                 if (
                     provider.record.accounts is AccountPolicy.PROVISION
@@ -1229,7 +1200,7 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
                 redirect_uri=cast(str, self._redirect_uri),
                 code_verifier=self._code_verifier,
             )
-            subject, account_name, _profile = await client.async_fetch_profile(
+            subject, account_name = await client.async_fetch_profile(
                 tokens.access_token
             )
         except OidcError as err:

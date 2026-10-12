@@ -259,7 +259,8 @@ def test_valid_identity_provider_platform(
     func_node = astroid.extract_node(
         """
     def get_identity_provider( #@
-        entry: ConfigEntry,
+        data: Mapping[str, Any],
+        options: Mapping[str, Any],
     ) -> IdentityProvider:
         pass
     """,
@@ -278,7 +279,8 @@ def test_invalid_identity_provider_platform_return(
     func_node = astroid.extract_node(
         """
     def get_identity_provider( #@
-        entry: ConfigEntry,
+        data: Mapping[str, Any],
+        options: Mapping[str, Any],
     ) -> str:
         pass
     """,

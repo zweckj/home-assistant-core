@@ -115,13 +115,11 @@ BROWSER_TOKEN_COOKIE_PREFIX = "hass_login_browser_"
 AUTH_COOKIE_PATH = "/auth"
 
 
-@callback
 def _browser_token_cookie(flow_id: str) -> str:
     """Return the browser-token cookie name for a login flow."""
     return f"{BROWSER_TOKEN_COOKIE_PREFIX}{flow_id}"
 
 
-@callback
 def _set_browser_token(
     request: web.Request, response: web.StreamResponse, flow_id: str, token: str
 ) -> None:
@@ -138,7 +136,6 @@ def _set_browser_token(
     )
 
 
-@callback
 def _has_browser_token(request: web.Request, flow: AuthFlowResult) -> bool:
     """Return if the request comes from the browser that started the flow."""
     expected = flow["context"].get("browser_token")

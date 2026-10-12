@@ -10,7 +10,7 @@ flow. Brand specific behaviour is limited to resolving the user step input.
 """
 
 from abc import ABCMeta, abstractmethod
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from logging import getLogger
 from typing import Any, override
@@ -41,10 +41,6 @@ _LOGGER = getLogger(__name__)
 
 # Validation reasons every flow translates; any other reason is invalid_config.
 _COMMON_ERRORS = frozenset({"cannot_connect", "invalid_discovery"})
-
-type IdentityProviderFactory = Callable[
-    [Mapping[str, Any], Mapping[str, Any]], IdentityProvider
-]
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -96,24 +92,6 @@ def _errors_from_reason(
     return {"base": "invalid_config"}
 
 
-async def _async_validate(
-    hass: HomeAssistant,
-    identity_provider: IdentityProviderFactory,
-    data: Mapping[str, Any],
-    options: Mapping[str, Any],
-    translated: frozenset[str],
-) -> dict[str, str]:
-    """Build and validate a spec and return the form errors."""
-    try:
-        await async_validate_identity_provider(hass, identity_provider(data, options))
-    except IdentityProviderError as err:
-        return _errors_from_reason(err, translated)
-    except Exception:
-        _LOGGER.exception("Unexpected exception validating identity provider")
-        return {"base": "unknown"}
-    return {}
-
-
 class IdentityProviderConfigFlow(ConfigFlow, metaclass=ABCMeta):
     """Config flow for an identity provider integration.
 
@@ -122,8 +100,6 @@ class IdentityProviderConfigFlow(ConfigFlow, metaclass=ABCMeta):
     `async_resolve_setup` when the entry title, unique ID or data have to be
     derived from the input, for example through discovery.
     """
-
-    VERSION = 1
 
     # Title of entries created by the default `async_resolve_setup`.
     TITLE: str
@@ -181,17 +157,26 @@ class IdentityProviderConfigFlow(ConfigFlow, metaclass=ABCMeta):
         """Return the options flow."""
         if cls.OPTIONS_SCHEMA is None:
             raise data_entry_flow.UnknownHandler
-        return IdentityProviderOptionsFlow(
-            cls.OPTIONS_SCHEMA, cls.identity_provider, cls.TRANSLATED_ERRORS
-        )
+        return IdentityProviderOptionsFlow(cls.OPTIONS_SCHEMA, cls)
 
-    async def _async_validate(
-        self, data: Mapping[str, Any], options: Mapping[str, Any]
+    @classmethod
+    async def async_validate(
+        cls,
+        hass: HomeAssistant,
+        data: Mapping[str, Any],
+        options: Mapping[str, Any],
     ) -> dict[str, str]:
-        """Validate the spec for data and options and return the form errors."""
-        return await _async_validate(
-            self.hass, self.identity_provider, data, options, self.TRANSLATED_ERRORS
-        )
+        """Build and validate the spec and return the form errors."""
+        try:
+            await async_validate_identity_provider(
+                hass, cls.identity_provider(data, options)
+            )
+        except IdentityProviderError as err:
+            return _errors_from_reason(err, cls.TRANSLATED_ERRORS)
+        except Exception:
+            _LOGGER.exception("Unexpected exception validating identity provider")
+            return {"base": "unknown"}
+        return {}
 
     @override
     async def async_step_user(
@@ -224,7 +209,7 @@ class IdentityProviderConfigFlow(ConfigFlow, metaclass=ABCMeta):
                     await self.async_set_unique_id(setup.unique_id)
                     self._abort_if_unique_id_configured()
                 data = _entry_data(setup.data)
-                errors = await self._async_validate(data, {})
+                errors = await self.async_validate(self.hass, data, {})
                 if not errors:
                     return self.async_create_entry(title=setup.title, data=data)
 
@@ -248,15 +233,12 @@ class IdentityProviderConfigFlow(ConfigFlow, metaclass=ABCMeta):
         errors: dict[str, str] = {}
         if user_input is not None:
             data = _entry_data({**kept, **user_input})
-            errors = await self._async_validate(data, entry.options)
+            errors = await self.async_validate(self.hass, data, entry.options)
             if not errors:
                 return self.async_update_reload_and_abort(entry, data=data)
 
-        suggested_values = {
-            key: value
-            for key, value in {**kept, **(user_input or {})}.items()
-            if key != CONF_CLIENT_SECRET
-        }
+        suggested_values = {**kept, **(user_input or {})}
+        suggested_values.pop(CONF_CLIENT_SECRET, None)
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(
@@ -273,15 +255,11 @@ class IdentityProviderOptionsFlow(OptionsFlow):
     """Options flow validating the spec built from the new options."""
 
     def __init__(
-        self,
-        schema: probatio.Schema,
-        identity_provider: IdentityProviderFactory,
-        translated_errors: frozenset[str],
+        self, schema: probatio.Schema, flow: type[IdentityProviderConfigFlow]
     ) -> None:
         """Initialize the options flow."""
         self._schema = schema
-        self._identity_provider = identity_provider
-        self._translated_errors = translated_errors
+        self._flow = flow
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -289,12 +267,8 @@ class IdentityProviderOptionsFlow(OptionsFlow):
         """Handle the options step."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            errors = await _async_validate(
-                self.hass,
-                self._identity_provider,
-                self.config_entry.data,
-                user_input,
-                self._translated_errors,
+            errors = await self._flow.async_validate(
+                self.hass, self.config_entry.data, user_input
             )
             if not errors:
                 return self.async_create_entry(title="", data=user_input)

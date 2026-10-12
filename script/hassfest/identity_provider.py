@@ -8,6 +8,7 @@ from .model import Config, Integration
 from .serializer import format_python_namespace
 
 PLUGIN = "identity_provider"
+GENERATED_PATH = Path("homeassistant/generated/identity_providers.py")
 
 _ALLOWED_EXACT_IMPORTS = {
     "__future__",
@@ -48,14 +49,9 @@ _FORBIDDEN_CALLS = {
 }
 
 
-def _is_allowed_import(module: str) -> bool:
-    """Return if the module is allowed."""
-    return module in _ALLOWED_EXACT_IMPORTS
-
-
 def _validate_import(module: str, integration: Integration, file_path: Path) -> None:
     """Validate an imported module."""
-    if _is_allowed_import(module):
+    if module in _ALLOWED_EXACT_IMPORTS:
         return
 
     integration.add_error(
@@ -77,7 +73,7 @@ def _validate_import_from(
                 "outside the integration is not allowed for identity providers",
             )
         return
-    if node.module is None or _is_allowed_import(node.module):
+    if node.module is None or node.module in _ALLOWED_EXACT_IMPORTS:
         return
 
     for alias in node.names:
@@ -161,7 +157,7 @@ def _validate_get_identity_provider(
     args = node.args
     positional_args = [*args.posonlyargs, *args.args]
     if (
-        len(positional_args) != 1
+        len(positional_args) != 2
         or args.vararg
         or args.kwonlyargs
         or args.kwarg
@@ -169,8 +165,8 @@ def _validate_get_identity_provider(
     ):
         integration.add_error(
             PLUGIN,
-            "identity_provider.py: `get_identity_provider` must have exactly one "
-            "positional parameter",
+            "identity_provider.py: `get_identity_provider` must have exactly two "
+            "positional parameters",
         )
 
 
@@ -254,9 +250,10 @@ def _validate_config_flow_shape(integration: Integration) -> None:
                 f"config_flow.py: `{node.name}` must subclass "
                 "`IdentityProviderConfigFlow` instead of a generic flow",
             )
-        elif any(keyword.arg == "domain" for keyword in node.keywords) and not bases & {
-            "IdentityProviderConfigFlow"
-        }:
+        elif (
+            any(keyword.arg == "domain" for keyword in node.keywords)
+            and "IdentityProviderConfigFlow" not in bases
+        ):
             integration.add_error(
                 PLUGIN,
                 f"config_flow.py: `{node.name}` must subclass "
@@ -289,9 +286,7 @@ def generate_and_validate(integrations: dict[str, Integration], config: Config) 
 
 def validate(integrations: dict[str, Integration], config: Config) -> None:
     """Validate identity provider integrations."""
-    identity_provider_path = (
-        config.root / "homeassistant/generated/identity_providers.py"
-    )
+    identity_provider_path = config.root / GENERATED_PATH
     config.cache["identity_providers"] = content = generate_and_validate(
         integrations, config
     )
@@ -310,9 +305,7 @@ def validate(integrations: dict[str, Integration], config: Config) -> None:
 
 def generate(integrations: dict[str, Integration], config: Config) -> None:
     """Generate identity provider data."""
-    identity_provider_path = (
-        config.root / "homeassistant/generated/identity_providers.py"
-    )
+    identity_provider_path = config.root / GENERATED_PATH
     identity_provider_path.write_text(
         f"{config.cache['identity_providers']}", encoding="utf-8"
     )
