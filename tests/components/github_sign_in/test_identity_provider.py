@@ -35,7 +35,9 @@ def test_get_identity_provider(
     github_sign_in_entry: MockConfigEntry, snapshot: SnapshotAssertion
 ) -> None:
     """Test the identity provider specification."""
-    spec = get_identity_provider(github_sign_in_entry)
+    spec = get_identity_provider(
+        github_sign_in_entry.data, github_sign_in_entry.options
+    )
 
     assert spec == snapshot
     assert validate_identity_provider(spec) == spec

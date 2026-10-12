@@ -6,7 +6,9 @@ import pytest
 
 from homeassistant.components.auth import IdentityProviderError
 from homeassistant.components.github_sign_in.const import DOMAIN
-from homeassistant.components.github_sign_in.identity_provider import _identity_provider
+from homeassistant.components.github_sign_in.identity_provider import (
+    get_identity_provider,
+)
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
@@ -45,7 +47,7 @@ async def test_user_flow_success(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == TITLE
     assert result["data"] == USER_INPUT
-    assert mock_validate.await_args.args[1] == _identity_provider(USER_INPUT, {})
+    assert mock_validate.await_args.args[1] == get_identity_provider(USER_INPUT, {})
     assert len(mock_setup_entry.mock_calls) == 1
 
 
@@ -171,7 +173,7 @@ async def test_reconfigure_success(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert github_sign_in_entry.data == NEW_USER_INPUT
-    assert mock_validate.await_args.args[1] == _identity_provider(NEW_USER_INPUT, {})
+    assert mock_validate.await_args.args[1] == get_identity_provider(NEW_USER_INPUT, {})
 
 
 @pytest.mark.usefixtures("oidc_auth")
