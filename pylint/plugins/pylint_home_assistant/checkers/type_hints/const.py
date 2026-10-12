@@ -205,7 +205,8 @@ _FUNCTION_MATCH: dict[str, list[TypeHintMatch]] = {
         TypeHintMatch(
             function_name="get_identity_provider",
             arg_types={
-                0: "ConfigEntry",
+                0: "Mapping[str, Any]",
+                1: "Mapping[str, Any]",
             },
             return_type="IdentityProvider",
             mandatory=True,

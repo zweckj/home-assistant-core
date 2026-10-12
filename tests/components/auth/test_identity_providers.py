@@ -165,7 +165,7 @@ async def test_registers_entry_loaded_before_platform_processed(
     child = _root(hass).async_get_child_provider(entry.entry_id)
     assert child is not None
     assert child.active
-    platform.get_identity_provider.assert_called_once_with(entry)
+    platform.get_identity_provider.assert_called_once_with(entry.data, entry.options)
 
 
 async def test_registers_entry_loaded_after_bridge_setup(
@@ -256,8 +256,8 @@ async def test_reregisters_on_title_and_data_change_and_skips_unchanged(
     )
     entry.add_to_hass(hass)
     platform = _mock_platform(hass)
-    platform.get_identity_provider.side_effect = lambda entry: _oidc_spec(
-        client_id=entry.data["client_id"]
+    platform.get_identity_provider.side_effect = lambda data, options: _oidc_spec(
+        client_id=data["client_id"]
     )
     root = _root(hass)
 

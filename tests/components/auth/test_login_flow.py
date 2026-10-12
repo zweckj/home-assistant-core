@@ -1052,7 +1052,7 @@ async def test_oidc_withdrawing_admin_reaches_an_open_connection(
     provider = root.async_get_child_provider(_OIDC_IDP_ID)
     assert provider is not None
     oidc_client = provider.async_client()
-    session = next(iter(provider.data.sessions.values()))
+    session = next(iter(root.data.sessions.values()))
     session.refresh_after = time.time() - 1
 
     with (
@@ -1090,8 +1090,8 @@ async def test_oidc_deadline_disconnects_an_open_connection(
     assert isinstance(root, OidcAuthProvider)
     provider = root.async_get_child_provider(_OIDC_IDP_ID)
     assert provider is not None
-    assert provider.data is not None
-    session = next(iter(provider.data.sessions.values()))
+    assert root.data is not None
+    session = next(iter(root.data.sessions.values()))
     session.refresh_after = time.time() - 1
     session.revalidate_after = time.time() - 1
 
@@ -1103,7 +1103,7 @@ async def test_oidc_deadline_disconnects_an_open_connection(
         async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=6))
         await hass.async_block_till_done()
 
-    assert not provider.data.sessions
+    assert not root.data.sessions
     assert hass.auth.async_validate_access_token(access_token) is None
     assert (await websocket.receive()).type is WSMsgType.CLOSE
 

@@ -8,11 +8,15 @@ from script.hassfest import identity_provider
 from script.hassfest.model import Config, Integration
 
 VALID_IDENTITY_PROVIDER = """
+from collections.abc import Mapping
+from typing import Any
+
 from homeassistant.components.auth import IdentityProvider
-from homeassistant.config_entries import ConfigEntry
 
 
-def get_identity_provider(entry: ConfigEntry) -> IdentityProvider:
+def get_identity_provider(
+    data: Mapping[str, Any], options: Mapping[str, Any]
+) -> IdentityProvider:
     return IdentityProvider()
 """
 
@@ -142,7 +146,7 @@ def test_import_violations(tmp_path: Path, source: str) -> None:
 {source}
 
 
-def get_identity_provider(entry):
+def get_identity_provider(data, options):
     return None
 """,
         config=config,
@@ -166,7 +170,7 @@ from homeassistant.helpers import selector
 from urllib import parse
 
 
-def get_identity_provider(entry):
+def get_identity_provider(data, options):
     return None
 """,
         config=config,
@@ -211,7 +215,7 @@ def test_relative_imports(tmp_path: Path, path: str, source: str, errors: int) -
     file_path = integration.path / path
     file_path.parent.mkdir(exist_ok=True)
     file_path.write_text(
-        f"{source}\n\n\ndef get_identity_provider(entry):\n    return None\n",
+        f"{source}\n\n\ndef get_identity_provider(data, options):\n    return None\n",
         encoding="utf-8",
     )
 
@@ -247,7 +251,7 @@ def test_forbidden_call_violations(tmp_path: Path, forbidden_call: str) -> None:
         tmp_path,
         f"forbidden_{forbidden_call.strip('_')}",
         identity_provider_content=f"""
-def get_identity_provider(entry):
+def get_identity_provider(data, options):
     {forbidden_call}()
     return None
 """,
@@ -265,7 +269,7 @@ def get_identity_provider(entry):
     [
         pytest.param(
             """
-async def get_identity_provider(entry):
+async def get_identity_provider(data, options):
     return None
 """,
             "must not be async",
@@ -273,15 +277,23 @@ async def get_identity_provider(entry):
         ),
         pytest.param(
             """
-def get_identity_provider(entry, other):
+def get_identity_provider(data, options, other):
     return None
 """,
-            "must have exactly one positional parameter",
+            "must have exactly two positional parameters",
             id="too-many-parameters",
         ),
         pytest.param(
             """
 def get_identity_provider(entry):
+    return None
+""",
+            "must have exactly two positional parameters",
+            id="too-few-parameters",
+        ),
+        pytest.param(
+            """
+def get_identity_provider(data, options):
     return None
 
 def public_helper():
@@ -295,7 +307,7 @@ def public_helper():
 async def _helper():
     return None
 
-def get_identity_provider(entry):
+def get_identity_provider(data, options):
     return None
 """,
             "unexpected function `_helper`",
@@ -306,7 +318,7 @@ def get_identity_provider(entry):
 class Helper:
     pass
 
-def get_identity_provider(entry):
+def get_identity_provider(data, options):
     return None
 """,
             "unexpected top-level ClassDef",
@@ -316,7 +328,7 @@ def get_identity_provider(entry):
             """
 print("bad")
 
-def get_identity_provider(entry):
+def get_identity_provider(data, options):
     return None
 """,
             "unexpected top-level Expr",

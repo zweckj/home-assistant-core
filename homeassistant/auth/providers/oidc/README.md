@@ -19,7 +19,7 @@ Decisions come first: each one has a reason, and reversing it needs a better rea
 ### The spec is data, and integration code never runs in the auth path
 
 - `IdentityProvider`, `OpenIDConnect`, `OAuth2Profile`, `AccountPolicy` and the claim rules are frozen, slotted dataclasses and enums without callables, imported from `homeassistant.components.auth`.
-- `get_identity_provider(entry)` is synchronous and receives the config entry only, never `hass`, which makes I/O an obvious violation. The bridge calls it when an entry loads or changes, never while signing in, linking, validating tokens or revalidating sessions.
+- `get_identity_provider(data, options)` is synchronous and receives the config entry data and options only, never `hass`, which makes I/O an obvious violation. The bridge calls it when an entry loads or changes, never while signing in, linking, validating tokens or revalidating sessions.
 - `validate_identity_provider` checks exact types, so a `str` subclass or an `int` passed as a `bool` is refused, and returns a copy with read-only mappings. It enforces:
   - HTTPS URLs with a host and without credentials or a fragment, for the issuer and every configured endpoint;
   - an issuer template with exactly one placeholder that is a whole path segment, plus an `issuer_claim` to fill it; aliases cannot be templates;

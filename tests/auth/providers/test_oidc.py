@@ -3248,8 +3248,8 @@ async def test_oauth2_profile_linked_sign_in(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].id == credentials.id
-    assert child.data is not None
-    assert child.data.sessions == {}
+    assert child.root.data is not None
+    assert child.root.data.sessions == {}
 
 
 async def test_oauth2_profile_link_flow_and_headers(
@@ -3989,12 +3989,8 @@ async def test_async_get_provider_and_root_helpers(
     result = await root_flow.async_step_init()
     assert result["reason"] == "not_configured"
 
-    original_auth = hass.auth
-    hass.auth = type("EmptyAuth", (), {"auth_providers": []})()
-    try:
+    with patch.object(hass.auth, "get_auth_provider", return_value=None):
         assert oidc_auth.async_get_provider(hass) is None
-    finally:
-        hass.auth = original_auth
 
 
 async def test_async_get_data_initializes_unloaded_root(hass: HomeAssistant) -> None:
@@ -4026,7 +4022,7 @@ async def test_child_basic_properties_and_dormant_errors(
         accounts=AccountPolicy.LINK,
         trust_key="key",
     )
-    dormant = oidc_auth.OidcIdentityProvider.dormant(provider.root, record)
+    dormant = oidc_auth.OidcIdentityProvider(provider.root, record)
     assert dormant.name == oidc_auth.OidcIdentityProvider.DEFAULT_TITLE
     assert dormant.domain == "example"
     assert dormant.support_mfa
@@ -4064,11 +4060,12 @@ async def test_revalidate_missing_user_for_admin_grant(
     provider: OidcProvider,
 ) -> None:
     """Test admin grant updates ignore missing users."""
-    await provider.child._async_apply_admin_grant(
-        "missing-credential", granted_by_provider=False, grants_admin=True
-    )
+    user = await provider.child._async_user_for_credential("missing-credential")
+    assert user is None
 
-    assert await provider.child._async_user_for_credential("missing-credential") is None
+    await provider.child._async_apply_admin_grant(
+        user, granted_by_provider=False, grants_admin=True
+    )
 
 
 async def test_register_wraps_runtime_client_error(manager: auth.AuthManager) -> None:
@@ -4210,7 +4207,7 @@ async def test_finish_oauth2_profile_abort_branches(
     client = AsyncMock()
     client.issuer = PROFILE_ISSUER
     client.async_exchange_code.return_value = oidc_auth.TokenResponse(access_token="at")
-    client.async_fetch_profile.return_value = (SUBJECT, None, {})
+    client.async_fetch_profile.return_value = (SUBJECT, None)
 
     result = await flow._async_finish_oauth2_profile(client, child.generation)
     assert result["reason"] == "user_not_allowed"
