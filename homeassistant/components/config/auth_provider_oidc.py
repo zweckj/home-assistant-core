@@ -137,6 +137,7 @@ def websocket_list(
         probatio.Required("credential_id"): str,
     }
 )
+@websocket_api.require_step_up
 @websocket_api.async_response
 async def websocket_unlink(
     hass: HomeAssistant,
