@@ -1,6 +1,8 @@
 """Test the OpenID Connect auth provider configuration API."""
 
+from collections.abc import Generator
 from datetime import timedelta
+from unittest.mock import patch
 
 from aiohttp import WSMsgType
 import pytest
@@ -8,6 +10,7 @@ import pytest
 from homeassistant.auth import models as auth_models
 from homeassistant.auth.models import Credentials
 from homeassistant.auth.providers import insecure_example
+from homeassistant.auth.providers.homeassistant import HassAuthProvider
 from homeassistant.auth.providers.oidc import OidcAuthProvider
 from homeassistant.auth.providers.oidc.const import PROVIDER_TYPE
 from homeassistant.auth.providers.oidc.spec import (
@@ -107,6 +110,29 @@ async def _give_password(hass: HomeAssistant, user: auth_models.User) -> None:
             data={"username": "hello"},
             is_new=False,
         ),
+    )
+
+
+@pytest.fixture
+def stepped_up() -> Generator[None]:
+    """Treat every session as having just proved its user again."""
+    with patch(
+        "homeassistant.auth.AuthManager.async_consume_step_up", return_value=True
+    ):
+        yield
+
+
+async def _step_up(
+    hass: HomeAssistant,
+    local_auth: HassAuthProvider,
+    refresh_token: auth_models.RefreshToken,
+) -> None:
+    """Prove the session's user again, as the frontend does before unlinking."""
+    username = local_auth.async_get_username(refresh_token.user)
+    assert username is not None
+    await hass.async_add_executor_job(local_auth.data.add_auth, username, "test-pass")
+    await hass.auth.async_step_up(
+        refresh_token.id, local_auth, {"password": "test-pass"}, None
     )
 
 
@@ -273,6 +299,7 @@ async def test_list_when_engine_disabled(
     assert result["error"]["code"] == "not_enabled"
 
 
+@pytest.mark.usefixtures("stepped_up")
 async def test_unlink_when_engine_disabled(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
@@ -296,12 +323,17 @@ async def test_unlink(
     hass_ws_client: WebSocketGenerator,
     oidc_provider: OidcAuthProvider,
     hass_admin_user: MockUser,
+    hass_access_token: str,
+    local_auth: HassAuthProvider,
 ) -> None:
     """Test a user can detach one of their identity provider logins."""
     credentials = await _link(hass, oidc_provider, hass_admin_user)
     await _give_password(hass, hass_admin_user)
+    await _step_up(
+        hass, local_auth, hass.auth.async_validate_access_token(hass_access_token)
+    )
 
-    client = await hass_ws_client(hass)
+    client = await hass_ws_client(hass, hass_access_token)
     await client.send_json_auto_id(
         {"type": "config/auth_provider/oidc/unlink", "credential_id": credentials.id}
     )
@@ -313,11 +345,34 @@ async def test_unlink(
     assert await hass.auth.async_get_user_by_credentials(credentials) is None
 
 
+async def test_unlink_requires_a_step_up(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    oidc_provider: OidcAuthProvider,
+    hass_admin_user: MockUser,
+) -> None:
+    """Test a session that did not prove the user again cannot unlink."""
+    credentials = await _link(hass, oidc_provider, hass_admin_user)
+    await _give_password(hass, hass_admin_user)
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "config/auth_provider/oidc/unlink", "credential_id": credentials.id}
+    )
+
+    result = await client.receive_json()
+
+    assert not result["success"]
+    assert result["error"]["code"] == "step_up_required"
+    assert credentials in hass_admin_user.credentials
+
+
 async def test_unlink_returns_result_before_disconnect(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
     oidc_provider: OidcAuthProvider,
     hass_admin_user: MockUser,
+    local_auth: HassAuthProvider,
 ) -> None:
     """Test unlink is acknowledged before its session closes."""
     credentials = await _link(hass, oidc_provider, hass_admin_user)
@@ -325,6 +380,7 @@ async def test_unlink_returns_result_before_disconnect(
     refresh_token = await hass.auth.async_create_refresh_token(
         hass_admin_user, TEST_CLIENT_ID, credential=credentials
     )
+    await _step_up(hass, local_auth, refresh_token)
     access_token = hass.auth.async_create_access_token(refresh_token)
     client = await hass_ws_client(hass, access_token)
     peer = await hass_ws_client(hass, access_token)
@@ -401,6 +457,7 @@ async def test_unlink_counts_any_other_configured_login(
     assert credentials not in user.credentials
 
 
+@pytest.mark.usefixtures("stepped_up")
 async def test_unlink_refuses_provisioning_provider(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
@@ -439,6 +496,7 @@ async def test_unlink_refuses_provisioning_provider(
     assert credentials in hass_admin_user.credentials
 
 
+@pytest.mark.usefixtures("stepped_up")
 async def test_unlink_without_a_matching_linked_account(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
@@ -458,6 +516,7 @@ async def test_unlink_without_a_matching_linked_account(
     assert result["error"]["code"] == "not_linked"
 
 
+@pytest.mark.usefixtures("stepped_up")
 async def test_unlink_without_registered_identity_provider(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
@@ -490,9 +549,15 @@ async def test_unlink_is_allowed_for_non_admins(
     oidc_provider: OidcAuthProvider,
     hass_read_only_user: MockUser,
     hass_read_only_access_token: str,
+    local_auth: HassAuthProvider,
 ) -> None:
     """Test detaching your own login does not need administrator rights."""
     credentials = await _link(hass, oidc_provider, hass_read_only_user)
+    await _step_up(
+        hass,
+        local_auth,
+        hass.auth.async_validate_access_token(hass_read_only_access_token),
+    )
 
     client = await hass_ws_client(hass, hass_read_only_access_token)
     await client.send_json_auto_id(
