@@ -1,10 +1,11 @@
 """Test the WebAuthn auth provider configuration API."""
 
+from collections.abc import Generator
 from dataclasses import replace
 from datetime import timedelta
 import json
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from aiohttp import ClientWebSocketResponse, WSMsgType
 from freezegun.api import FrozenDateTimeFactory
@@ -22,7 +23,7 @@ from webauthn.helpers.structs import (
 from webauthn.registration.verify_registration_response import VerifiedRegistration
 
 from homeassistant.auth import auth_manager_from_config
-from homeassistant.auth.models import User
+from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN, User
 from homeassistant.auth.providers.webauthn import (
     STORAGE_KEY,
     WebAuthnCredential,
@@ -57,6 +58,15 @@ async def webauthn_account(hass: HomeAssistant) -> tuple[WebAuthnProvider, User]
 
 
 @pytest.fixture
+def stepped_up() -> Generator[MagicMock]:
+    """Treat every session as having just proved its user again."""
+    with patch(
+        "homeassistant.auth.AuthManager.async_consume_step_up", return_value=True
+    ) as consume_step_up:
+        yield consume_step_up
+
+
+@pytest.fixture
 def registration_result() -> VerifiedRegistration:
     """Return the external library's result for a verified registration."""
     return VerifiedRegistration(
@@ -80,10 +90,11 @@ async def _connect_user(
     headers: dict[str, str],
     *,
     client_id: str | None = CLIENT_ID,
+    **token_kwargs: Any,
 ) -> ClientWebSocketResponse:
     """Open an authenticated connection with the browser's origin."""
     assert await async_setup_component(hass, "websocket_api", {})
-    token = await hass.auth.async_create_refresh_token(user, client_id)
+    token = await hass.auth.async_create_refresh_token(user, client_id, **token_kwargs)
     client = await aiohttp_client(hass.http.app)
     websocket = await client.ws_connect("/api/websocket", headers=headers)
     assert (await websocket.receive_json())["type"] == "auth_required"
@@ -120,6 +131,7 @@ async def _register_passkey(
         assert (await client.receive_json())["success"]
 
 
+@pytest.mark.usefixtures("stepped_up")
 @pytest.mark.parametrize(
     ("name_input", "expected_name"),
     [
@@ -201,6 +213,7 @@ async def test_register_and_list(
     assert len(await provider.async_credentials()) == 1
 
 
+@pytest.mark.usefixtures("stepped_up")
 async def test_registered_passkeys_survive_reload(
     hass: HomeAssistant,
     hass_storage: dict[str, Any],
@@ -339,6 +352,7 @@ async def test_malformed_registration_response(
 
 
 @pytest.mark.usefixtures("webauthn_account")
+@pytest.mark.usefixtures("stepped_up")
 async def test_system_user_cannot_register(
     hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
 ) -> None:
@@ -388,6 +402,7 @@ async def test_registration_challenge_expires(
     assert await provider.async_list_credentials_meta(user) == []
 
 
+@pytest.mark.usefixtures("stepped_up")
 async def test_cannot_delete_last_login_method(
     hass: HomeAssistant,
     aiohttp_client: ClientSessionGenerator,
@@ -558,6 +573,7 @@ async def test_registration_cannot_be_verified_twice(
     assert len(await provider.async_list_credentials_meta(user)) == 1
 
 
+@pytest.mark.usefixtures("stepped_up")
 async def test_duplicate_registration_does_not_replace_passkey(
     hass: HomeAssistant,
     aiohttp_client: ClientSessionGenerator,
@@ -647,6 +663,7 @@ async def test_list_and_modify_only_own_passkeys(
     assert other_user.credentials == []
 
 
+@pytest.mark.usefixtures("stepped_up")
 @pytest.mark.parametrize(
     ("credential_ids", "remaining_ids"),
     [
@@ -722,3 +739,88 @@ async def test_delete_from_own_session_returns_result_before_disconnect(
     ] == remaining_ids
     assert (await peer.receive()).type is WSMsgType.CLOSE
     assert (await client.receive()).type is WSMsgType.CLOSE
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param({"type": "config/auth_provider/webauthn/register"}, id="register"),
+        pytest.param(
+            {
+                "type": "config/auth_provider/webauthn/delete",
+                "credential_id": CREDENTIAL_ID,
+            },
+            id="delete",
+        ),
+    ],
+)
+async def test_adding_or_removing_a_passkey_requires_a_step_up(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    webauthn_account: tuple[WebAuthnProvider, User],
+    registration_result: VerifiedRegistration,
+    stepped_up: MagicMock,
+    command: dict[str, Any],
+) -> None:
+    """Test a session that did not prove its user again cannot change passkeys."""
+    provider, user = webauthn_account
+    setup_client = await _connect_user(hass, aiohttp_client, user, {"Origin": ORIGIN})
+    await _register_passkey(setup_client, registration_result, 1)
+    stepped_up.return_value = False
+    client = await _connect_user(hass, aiohttp_client, user, {"Origin": ORIGIN})
+
+    await client.send_json({"id": 1, **command})
+
+    result = await client.receive_json()
+    assert not result["success"]
+    assert result["error"]["code"] == "step_up_required"
+    assert len(await provider.async_list_credentials_meta(user)) == 1
+
+
+@pytest.mark.parametrize(
+    ("command", "error_code"),
+    [
+        pytest.param(
+            {"type": "config/auth_provider/webauthn/register"},
+            "step_up_required",
+            id="register",
+        ),
+        pytest.param(
+            {"type": "config/auth_provider/webauthn/register_verify", "credential": {}},
+            "unauthorized",
+            id="verify",
+        ),
+        pytest.param(
+            {
+                "type": "config/auth_provider/webauthn/delete",
+                "credential_id": CREDENTIAL_ID,
+            },
+            "step_up_required",
+            id="delete",
+        ),
+    ],
+)
+async def test_long_lived_access_token_cannot_change_passkeys(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    webauthn_account: tuple[WebAuthnProvider, User],
+    command: dict[str, Any],
+    error_code: str,
+) -> None:
+    """Test a long-lived access token never counts as a person signing in."""
+    _, user = webauthn_account
+    client = await _connect_user(
+        hass,
+        aiohttp_client,
+        user,
+        {"Origin": ORIGIN},
+        client_id=None,
+        client_name="Script",
+        token_type=TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+    )
+
+    await client.send_json({"id": 1, **command})
+
+    result = await client.receive_json()
+    assert not result["success"]
+    assert result["error"]["code"] == error_code

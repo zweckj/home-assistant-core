@@ -74,6 +74,7 @@ async def websocket_list(
         probatio.Required("type"): "config/auth_provider/webauthn/register",
     }
 )
+@websocket_api.require_step_up
 @websocket_api.async_response
 async def websocket_register(
     hass: HomeAssistant,
@@ -126,6 +127,16 @@ async def websocket_register_verify(
     if provider is None:
         return
 
+    # Finishing a registration needs a person, like starting one does.
+    if (
+        hass.auth.async_get_interactive_refresh_token(connection.refresh_token_id)
+        is None
+    ):
+        connection.send_error(
+            msg["id"], websocket_api.ERR_UNAUTHORIZED, "Interactive session required"
+        )
+        return
+
     if (origin := connection.origin) is None:
         connection.send_error(msg["id"], "invalid_origin", "Connection has no origin")
         return
@@ -149,6 +160,7 @@ async def websocket_register_verify(
         probatio.Required("credential_id"): str,
     },
 )
+@websocket_api.require_step_up
 @websocket_api.async_response
 async def websocket_delete(
     hass: HomeAssistant,
