@@ -4,6 +4,11 @@ from http import HTTPStatus
 from typing import Any
 from unittest.mock import patch
 
+from freezegun.api import FrozenDateTimeFactory
+import pytest
+
+from homeassistant.auth import STEP_UP_VALIDITY
+from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
 from homeassistant.core import HomeAssistant
 
 from . import async_setup_auth
@@ -117,6 +122,49 @@ async def test_link_user_flow_requires_a_signed_in_user(
     )
 
     assert resp.status == HTTPStatus.UNAUTHORIZED
+
+
+@pytest.mark.parametrize(
+    "token_kwargs",
+    [
+        pytest.param({"client_id": CLIENT_ID}, id="session"),
+        pytest.param(
+            {
+                "client_name": "Script",
+                "token_type": TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+            },
+            id="long-lived-access-token",
+        ),
+    ],
+)
+async def test_link_user_flow_requires_a_step_up(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    freezer: FrozenDateTimeFactory,
+    token_kwargs: dict[str, Any],
+) -> None:
+    """Test a session that did not prove the user recently cannot link."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_user(name="Hello")
+    refresh_token = await hass.auth.async_create_refresh_token(user, **token_kwargs)
+    freezer.tick(STEP_UP_VALIDITY)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+        headers={
+            "authorization": (
+                f"Bearer {hass.auth.async_create_access_token(refresh_token)}"
+            )
+        },
+    )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
 
 
 async def test_link_user_code_is_bound_to_the_user_who_started_the_flow(
