@@ -96,7 +96,7 @@ The bridge follows config entries of every domain with an `identity_provider` pl
 - A signed state only proves a flow existed, so the flow is also bound to its browser by a cookie named per flow ID, required by both the callback and the final post. Without it, a delivered callback URL could sign a victim into an account they never authenticated as.
 - Per-flow cookie names keep simultaneous logins independent, and keeping the cookie through the final post stops another browser on the same IP finishing the flow.
 - That cookie is `HttpOnly`, scoped to `/auth`, and `SameSite=Lax`; `Strict` would strip it from the identity provider's cross-site top-level navigation.
-- Home Assistant authorization codes are bound to their purpose: a `/auth/link_user` code cannot be exchanged at `/auth/token`, and a wrong-endpoint attempt does not consume it. Starting a link flow needs the user's bearer token, and its code only links to that user. Unused codes expire after ten minutes, and revoking every session of a credential, which unlinking and ending identity provider sessions do, drops its unredeemed codes with them. The worker pass after that drops the session and external refresh token of a login whose code was never exchanged, including for a suspended child.
+- Home Assistant authorization codes are bound to their purpose: a `/auth/link_user` code cannot be exchanged at `/auth/token`, and a wrong-endpoint attempt does not consume it. Starting a link flow needs the user's bearer token from an interactive session that just stepped up (or, for a user with nothing to step up with, signed in within five minutes), and its code only links to that user. Unlinking needs the same. A long-lived access token can do neither. Unused codes expire after ten minutes, and revoking every session of a credential, which unlinking and ending identity provider sessions do, drops its unredeemed codes with them. The worker pass after that drops the session and external refresh token of a login whose code was never exchanged, including for a suspended child.
 
 ### Administrator rights
 
@@ -133,7 +133,7 @@ Ending the sessions of an identity provider removes every Home Assistant refresh
 - Disabling somebody at the identity provider does not deactivate their Home Assistant user. A local password or a passkey remains a login method of its own, long-lived access tokens are exempt by design, and tokens carrying no credential are never selected because nothing ties them to this provider. Offboarding that has to close every door means removing the user, not the link.
 - How quickly a revocation upstream is noticed follows from the interval: at a 24 hour interval the first refresh attempt lands after twelve hours. Shorten it where a tighter bound matters. A refresh that succeeds proves the grant still works, not that the account is still entitled to anything.
 - One session is stored per Home Assistant credential rather than per browser or device, and a new login replaces the token that credential shares. Signing out therefore cannot be aimed at a single device.
-- Permission to link a credential is not assurance at sign-in. Neither is a successful revalidation. Step-up authentication is a separate concern and must not be folded into this lifecycle.
+- Permission to link a credential is not assurance at sign-in. Neither is a successful revalidation. The step-up that linking and unlinking require is a separate check, made through `auth/step_up` before the change, and is not folded into this lifecycle.
 
 ### Transport, tokens and storage
 

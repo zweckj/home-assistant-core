@@ -89,7 +89,12 @@ from homeassistant.auth import AuthManagerFlowManager
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH, LOGIN_STATE_EXPIRATION
 from homeassistant.auth.models import AuthFlowContext, AuthFlowResult, User
 from homeassistant.components import onboarding
-from homeassistant.components.http import KEY_AUTHENTICATED, KEY_HASS, KEY_HASS_USER
+from homeassistant.components.http import (
+    KEY_AUTHENTICATED,
+    KEY_HASS,
+    KEY_HASS_REFRESH_TOKEN_ID,
+    KEY_HASS_USER,
+)
 from homeassistant.components.http.auth import async_user_not_allowed_do_auth
 from homeassistant.components.http.ban import (
     log_invalid_auth,
@@ -457,6 +462,11 @@ class LoginFlowIndexView(LoginFlowBaseView):
                 return self.json_message(
                     "System users cannot link credentials", HTTPStatus.FORBIDDEN
                 )
+            # A new identity is a lasting way in, so a bare session is not enough.
+            if not request.app[KEY_HASS].auth.async_consume_step_up(
+                request.get(KEY_HASS_REFRESH_TOKEN_ID)
+            ):
+                return self.json_message("Step up required", HTTPStatus.FORBIDDEN)
             flow_context["link_user_id"] = user.id
         if code_challenge and code_challenge_method:
             flow_context["code_challenge"] = code_challenge
