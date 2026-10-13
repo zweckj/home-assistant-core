@@ -32,13 +32,20 @@ from .const import (
 )
 from .mfa_modules import MultiFactorAuthModule, auth_mfa_module_from_config
 from .models import AuthFlowContext, AuthFlowResult
-from .providers import AuthProvider, LoginFlow, auth_provider_from_config
+from .providers import (
+    AuthProvider,
+    InvalidStepUpError,
+    LoginFlow,
+    auth_provider_from_config,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 EVENT_USER_ADDED = "user_added"
 EVENT_USER_UPDATED = "user_updated"
 EVENT_USER_REMOVED = "user_removed"
+
+STEP_UP_VALIDITY = timedelta(minutes=5)
 
 type _MfaModuleDict = dict[str, MultiFactorAuthModule]
 type _ProviderKey = tuple[str, str | None]
@@ -238,6 +245,8 @@ class AuthManager:
         # Stops two logins racing on one new credential from creating two users.
         self._credential_lock = asyncio.Lock()
         self._revoke_callbacks: dict[str, set[CALLBACK_TYPE]] = {}
+        # Refresh token id to when its step up proof stops counting.
+        self._step_ups: dict[str, datetime] = {}
         self._credentials_revoked_listeners: set[
             Callable[[models.Credentials], None]
         ] = set()
@@ -365,6 +374,54 @@ class AuthManager:
             if (provider := self._async_get_auth_provider(credential)) is not None
             and provider.support_step_up
         ]
+
+    @callback
+    def async_get_interactive_refresh_token(
+        self, refresh_token_id: str | None
+    ) -> models.RefreshToken | None:
+        """Return the refresh token of a session a person signed in to."""
+        if refresh_token_id is None or (
+            (refresh_token := self.async_get_refresh_token(refresh_token_id)) is None
+        ):
+            return None
+        # A long-lived access token never signed in, so it cannot prove anything.
+        if refresh_token.token_type != models.TOKEN_TYPE_NORMAL:
+            return None
+        return refresh_token
+
+    async def async_step_up(
+        self,
+        refresh_token_id: str | None,
+        provider: AuthProvider,
+        data: Mapping[str, Any],
+        context: AuthFlowContext | None,
+    ) -> None:
+        """Verify a step up proof and remember it for the session."""
+        if (
+            refresh_token := self.async_get_interactive_refresh_token(refresh_token_id)
+        ) is None:
+            raise InvalidStepUpError("Step up needs an interactive session.")
+
+        await provider.async_verify_step_up(refresh_token.user, data, context)
+        self._step_ups[refresh_token.id] = dt_util.utcnow() + STEP_UP_VALIDITY
+
+    @callback
+    def async_consume_step_up(self, refresh_token_id: str | None) -> bool:
+        """Return if the session recently proved its user, using up the proof."""
+        if (
+            refresh_token := self.async_get_interactive_refresh_token(refresh_token_id)
+        ) is None:
+            return False
+
+        now = dt_util.utcnow()
+        if (expires := self._step_ups.pop(refresh_token.id, None)) is not None:
+            return now < expires
+
+        # A user nothing can re-verify, such as one created by an identity
+        # provider, has to rely on having signed in moments ago.
+        return now < refresh_token.created_at + STEP_UP_VALIDITY and not (
+            self.async_get_step_up_providers(refresh_token.user)
+        )
 
     async def async_get_or_create_user(
         self, credentials: models.Credentials
@@ -646,6 +703,7 @@ class AuthManager:
     def async_remove_refresh_token(self, refresh_token: models.RefreshToken) -> None:
         """Delete a refresh token."""
         self._store.async_remove_refresh_token(refresh_token)
+        self._step_ups.pop(refresh_token.id, None)
 
         callbacks = self._revoke_callbacks.pop(refresh_token.id, ())
         for revoke_callback in callbacks:

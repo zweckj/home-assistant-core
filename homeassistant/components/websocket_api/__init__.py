@@ -15,6 +15,7 @@ from .const import (  # noqa: F401
     ERR_NOT_FOUND,
     ERR_NOT_SUPPORTED,
     ERR_SERVICE_VALIDATION_ERROR,
+    ERR_STEP_UP_REQUIRED,
     ERR_TEMPLATE_ERROR,
     ERR_TIMEOUT,
     ERR_UNAUTHORIZED,
@@ -27,6 +28,7 @@ from .const import (  # noqa: F401
 from .decorators import (  # noqa: F401
     async_response,
     require_admin,
+    require_step_up,
     websocket_command,
     ws_require_user,
 )
