@@ -16,7 +16,6 @@ from homeassistant.auth.providers.oidc.spec import (
     IdentityProvider,
     IdentityProviderError,
     NotEquals,
-    OneOf,
     OpenIDConnect,
     ProtocolSpec,
     trust_key,
@@ -123,14 +122,8 @@ def test_validate_identity_provider_url_rules(
             OpenIDConnect(issuer=ISSUER, required_claims={"hd": object()}),
             "invalid_claim_rule",
         ),
-        (
-            OpenIDConnect(
-                issuer=ISSUER, required_claims={"hd": OneOf(values=frozenset())}
-            ),
-            "invalid_claim_rule",
-        ),
     ],
-    ids=["missing-openid", "bad-rule", "empty-one-of"],
+    ids=["missing-openid", "bad-rule"],
 )
 def test_validate_identity_provider_claim_rules(
     protocol: OpenIDConnect, reason: str
@@ -250,15 +243,6 @@ def test_validate_identity_provider_rejects_non_mapping_required_claims() -> Non
             oidc_spec(protocol=OpenIDConnect(issuer="https://[::1")),
             "invalid_issuer",
             id="bad-url",
-        ),
-        pytest.param(
-            oidc_spec(
-                protocol=OpenIDConnect(
-                    issuer=ISSUER, discovery_url="http://idp.example.com/discovery"
-                )
-            ),
-            "invalid_discovery_url",
-            id="discovery-url",
         ),
         pytest.param(
             oidc_spec(protocol=OpenIDConnect(issuer=ISSUER, scopes=["openid"])),  # type: ignore[arg-type]

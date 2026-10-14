@@ -45,14 +45,7 @@ class NotEquals:
     value: str
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class OneOf:
-    """Require a claim to be one of multiple values."""
-
-    values: frozenset[str]
-
-
-type ClaimRule = Equals | NotEquals | OneOf
+type ClaimRule = Equals | NotEquals
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -85,7 +78,6 @@ class OpenIDConnect(ProtocolSpec):
     client_class: ClassVar[type[OidcClient]] = OidcClient
 
     issuer: str
-    discovery_url: str | None = None
     required_claims: Mapping[str, ClaimRule] = field(default_factory=dict)
     scopes: tuple[str, ...] = DEFAULT_SCOPES
     account_name_claim: str | None = None
@@ -116,7 +108,6 @@ class OpenIDConnect(ProtocolSpec):
             issuer=self.issuer,
             client_id=spec.client_id,
             client_secret=spec.client_secret,
-            discovery_url=self.discovery_url,
             allow_insecure_transport=spec.allow_insecure_transport,
         )
 
@@ -197,14 +188,6 @@ def _validate_claim_rule(value: object) -> ClaimRule:
     if type(value) is Equals or type(value) is NotEquals:
         _validate_str(value.value, "invalid_claim_rule")
         return value
-    if type(value) is OneOf:
-        if (
-            type(value.values) is not frozenset
-            or not value.values
-            or any(type(item) is not str for item in value.values)
-        ):
-            _raise("invalid_claim_rule")
-        return value
     _raise("invalid_claim_rule")
 
 
@@ -246,13 +229,6 @@ def _validate_oidc[T: OpenIDConnect](
         "invalid_issuer",
         allow_insecure_transport=allow_insecure_transport,
     )
-    discovery_url = None
-    if protocol.discovery_url is not None:
-        discovery_url = _validate_url(
-            protocol.discovery_url,
-            "invalid_discovery_url",
-            allow_insecure_transport=allow_insecure_transport,
-        )
     scopes = _validate_tuple(protocol.scopes, "invalid_scopes", required="openid")
     required_claims = _validate_required_claims(protocol.required_claims)
     account_name_claim = _validate_optional_str(
@@ -268,7 +244,6 @@ def _validate_oidc[T: OpenIDConnect](
     return replace(
         protocol,
         issuer=issuer,
-        discovery_url=discovery_url,
         required_claims=required_claims,
         scopes=scopes,
         account_name_claim=account_name_claim,

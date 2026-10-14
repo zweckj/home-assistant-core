@@ -272,3 +272,23 @@ async def test_bearer_get_refuses_redirects(
         await async_bearer_get(
             hass, PROFILE_URL, "token", endpoint="profile", fetching="the profile"
         )
+
+
+def test_oidc_client_uses_a_given_discovery_url(hass: HomeAssistant) -> None:
+    """Test a client may fetch discovery from elsewhere than its issuer."""
+    client = OidcClient(
+        hass,
+        issuer=ISSUER,
+        client_id=CLIENT_ID,
+        discovery_url="https://discovery.example.com/openid-configuration",
+    )
+
+    assert client.discovery_url == "https://discovery.example.com/openid-configuration"
+
+    with pytest.raises(OidcDiscoveryError, match="must be an https URL"):
+        OidcClient(
+            hass,
+            issuer=ISSUER,
+            client_id=CLIENT_ID,
+            discovery_url="http://discovery.example.com/openid-configuration",
+        )
