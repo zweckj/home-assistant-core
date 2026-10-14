@@ -1,0 +1,15 @@
+# serializer version: 1
+# name: test_get_identity_provider
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': False,
+    'client_id': 'github-client-id',
+    'client_secret': 'github-client-secret',
+    'protocol': dict({
+    }),
+    'revalidate_interval': None,
+  })
+# ---
+# name: test_get_identity_provider[protocol]
+  'GitHubOAuth2'
+# ---

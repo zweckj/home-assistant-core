@@ -1,0 +1,12 @@
+{
+  "domain": "github_sign_in",
+  "name": "GitHub Sign-In",
+  "codeowners": ["@zweckj"],
+  "config_flow": true,
+  "dependencies": ["auth"],
+  "documentation": "https://www.home-assistant.io/integrations/github_sign_in",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "quality_scale": "bronze",
+  "single_config_entry": true
+}

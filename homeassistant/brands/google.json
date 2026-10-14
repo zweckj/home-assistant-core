@@ -13,6 +13,7 @@
     "google_maps",
     "google_photos",
     "google_pubsub",
+    "google_sign_in",
     "google_sheets",
     "google_tasks",
     "google_translate",

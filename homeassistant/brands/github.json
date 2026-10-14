@@ -1,0 +1,5 @@
+{
+  "domain": "github",
+  "name": "GitHub",
+  "integrations": ["github", "github_sign_in"]
+}

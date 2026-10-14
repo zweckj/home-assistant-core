@@ -1,0 +1,38 @@
+{
+  "config": {
+    "abort": {
+      "identity_providers_disabled": "Signing in with identity providers is turned off. Add `type: oidc` to `auth_providers` in your configuration to use it.",
+      "no_url_available": "Home Assistant has no URL that the identity provider could redirect back to. Set up an internal or external URL in the network settings first.",
+      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]"
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_config": "The identity provider configuration is not valid.",
+      "invalid_discovery": "The identity provider returned an invalid OpenID Connect configuration.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "reconfigure": {
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret"
+        },
+        "data_description": {
+          "client_id": "Client ID from your Google Cloud Web application OAuth client.",
+          "client_secret": "Client secret from your Google Cloud Web application OAuth client."
+        }
+      },
+      "user": {
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret"
+        },
+        "data_description": {
+          "client_id": "Client ID from your Google Cloud Web application OAuth client.",
+          "client_secret": "Client secret from your Google Cloud Web application OAuth client."
+        },
+        "description": "Create a Web application OAuth client in the Google Cloud console: {console_url}. Add these URLs as Authorized redirect URIs:\n\n{redirect_uris}"
+      }
+    }
+  }
+}
