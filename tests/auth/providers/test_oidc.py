@@ -3391,7 +3391,6 @@ async def test_required_claims_at_sign_in_and_revalidation(
                 required_claims={
                     "hd": oidc_auth.Equals(value="example.com"),
                     "blocked": oidc_auth.NotEquals(value="true"),
-                    "tier": oidc_auth.OneOf(values=frozenset({"gold", "silver"})),
                 },
                 admin_group="home_assistant_admin",
             ),
@@ -3403,7 +3402,7 @@ async def test_required_claims_at_sign_in_and_revalidation(
     assert isinstance(child, oidc_auth.OidcIdentityProvider)
     provider.child = child
     result = await _complete_login(
-        manager, mock_idp, signing_key, jwks, hd="evil.example", tier="gold"
+        manager, mock_idp, signing_key, jwks, hd="evil.example"
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "claim_rejected"
@@ -3415,7 +3414,6 @@ async def test_required_claims_at_sign_in_and_revalidation(
         jwks,
         hd="example.com",
         blocked="false",
-        tier="gold",
     )
     credentials = result["result"]
     provider.root.data.sessions[credentials.id].refresh_after = time.time() - 1
@@ -3428,7 +3426,7 @@ async def test_required_claims_at_sign_in_and_revalidation(
         patch.object(
             child.async_client(),
             "async_verify_id_token",
-            return_value={"sub": SUBJECT, "hd": "evil.example", "tier": "gold"},
+            return_value={"sub": SUBJECT, "hd": "evil.example"},
         ),
     ):
         await provider.root._async_revalidate_sessions(dt_util.utcnow())

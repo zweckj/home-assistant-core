@@ -27,7 +27,7 @@ Decisions come first: each one has a reason, and reversing it needs a better rea
 - `get_identity_provider(data, options)` is synchronous and receives the config entry data and options only, never `hass`, which makes I/O an obvious violation. The bridge calls it when an entry loads or changes, never while signing in, linking, validating tokens or revalidating sessions.
 - `validate_identity_provider` checks exact types, so a `str` subclass or an `int` passed as a `bool` is refused, and returns a copy with read-only mappings. It enforces:
   - HTTPS URLs with a host and without credentials or a fragment, for the issuer and every configured endpoint;
-  - `openid` among the OpenID Connect scopes, and claim rules that are `Equals`, `NotEquals` or a non-empty `OneOf`;
+  - `openid` among the OpenID Connect scopes, and claim rules that are `Equals` or `NotEquals`;
   - `PROVISION` only with `OpenIDConnect`, whose verified ID token is needed to create users, and a revalidation interval between five minutes and thirty days, while `LINK` refuses an interval. Values out of bounds are rejected, not clamped.
 - Registration builds the protocol client before anything is stored, so a spec the client refuses fails with `invalid_spec` instead of at the first sign-in.
 - `async_validate_identity_provider` runs the same checks and, for OpenID Connect, fetches the discovery document, so a config flow rejects a spec before creating the entry. Every failure carries a stable `IdentityProviderError.reason`.
@@ -142,6 +142,7 @@ Ending the sessions of an identity provider removes every Home Assistant refresh
 - No outbound request follows redirects: a redirect defeats the HTTPS check, and a 307 or 308 from the token endpoint would replay the client secret.
 - The browser flow itself must be HTTPS unless the request arrived over the internal URL, since the tokens it carries are as exposed as the ones on the back channel.
 - A spec can waive all three HTTPS rules with `allow_insecure_transport`, for an identity provider on a trusted network that cannot be given a certificate; integrations should offer it in advanced mode only. It only relaxes the scheme: endpoints still need a host and may not carry credentials or a fragment. It is part of the trust key, so toggling it ends that identity provider's sessions.
+- The discovery document is read from the issuer's well-known path. A protocol whose identity provider publishes it elsewhere passes `discovery_url` to its `OidcClient`.
 - The discovery document's issuer must match the configured issuer exactly. A trailing slash is part of the identifier, so accepting either spelling would weaken issuer binding.
 - PKCE is always `S256`. A provider advertising challenge methods without it is refused rather than downgraded to `plain`.
 - Token responses must be labelled `Bearer`, compared case insensitively, because the access token is sent to userinfo as a bearer. A 200 without a bearer access token is a failure too, because some providers answer errors with 200. A 429 is retried like a 5xx, and any other 4xx from the token endpoint counts as a rejected grant.
