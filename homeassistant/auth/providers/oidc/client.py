@@ -6,9 +6,10 @@ since PyJWT's own key client fetches with blocking urllib.
 
 import asyncio
 import base64
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import logging
+import re
 import time
 from typing import Any
 
@@ -42,15 +43,21 @@ from .const import (
     DISCOVERY_CACHE_TTL,
     DISCOVERY_PATH,
     HTTP_TIMEOUT,
+    ISSUER_PLACEHOLDER_PATTERN,
+    ISSUER_PLACEHOLDER_VALUE_PATTERN,
     JWKS_CACHE_TTL,
     JWKS_REFETCH_COOLDOWN,
     PKCE_CHALLENGE_METHOD,
+    RESERVED_PROFILE_HEADERS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Names the token request errors; OIDC runs under the auth component.
 AUTH_DOMAIN = "auth"
+
+_ISSUER_TEMPLATE_RE = re.compile(ISSUER_PLACEHOLDER_PATTERN)
+_ISSUER_PLACEHOLDER_VALUE_RE = re.compile(ISSUER_PLACEHOLDER_VALUE_PATTERN)
 
 
 def _compute_at_hash(access_token: str, algorithm: str) -> str | None:
@@ -212,6 +219,56 @@ _USERINFO_SCHEMA = probatio.Schema(
 )
 
 
+def _origin(url: str) -> str:
+    """Return the origin of a URL."""
+    parsed = URL(url)
+    origin = f"{parsed.scheme}://{parsed.host}"
+    default_port = 443 if parsed.scheme == "https" else 80
+    if parsed.port is not None and parsed.port != default_port:
+        origin = f"{origin}:{parsed.port}"
+    return origin
+
+
+def _find_issuer_placeholder(issuer: str) -> str | None:
+    """Return the issuer template placeholder, if the issuer has one."""
+    placeholders: list[str] = []
+    for segment in URL(issuer).path.split("/"):
+        if "{" in segment or "}" in segment:
+            if (match := _ISSUER_TEMPLATE_RE.fullmatch(segment)) is None:
+                raise ValueError(
+                    "issuer templates must use exactly one placeholder path segment"
+                )
+            placeholders.append(match.group(1))
+    if len(placeholders) > 1:
+        raise ValueError("issuer templates may only contain one placeholder")
+    return placeholders[0] if placeholders else None
+
+
+def _filled_template_issuer(
+    issuer: str, issuer_claim: str, claims: Mapping[str, Any]
+) -> str:
+    """Return the issuer template filled from claims."""
+    value = claims.get(issuer_claim)
+    if not isinstance(value, str) or not _ISSUER_PLACEHOLDER_VALUE_RE.fullmatch(value):
+        raise OidcIdTokenError("ID token issuer template claim is missing or unsafe")
+    return issuer.replace(f"{{{_find_issuer_placeholder(issuer)}}}", value, 1)
+
+
+def _template_issuer_pattern(issuer: str) -> re.Pattern[str]:
+    """Return a regex matching a filled issuer template."""
+    placeholder = _find_issuer_placeholder(issuer)
+    assert placeholder is not None
+    return re.compile(
+        "^"
+        + re.escape(issuer).replace(
+            re.escape(f"{{{placeholder}}}"),
+            f"({ISSUER_PLACEHOLDER_VALUE_PATTERN})",
+            1,
+        )
+        + "$"
+    )
+
+
 def _parse_provider_metadata(
     document: Any,
     *,
@@ -315,7 +372,7 @@ async def _async_token_request(
     except ValueError as err:
         raise OidcTokenError("Token endpoint returned invalid JSON") from err
 
-    # Also refuses a 200 that carries an error instead of tokens.
+    # Also refuses a 200 carrying an error, which is how GitHub reports them.
     try:
         body = _TOKEN_RESPONSE_SCHEMA(body)
     except probatio.Invalid as err:
@@ -335,6 +392,7 @@ async def _async_bearer_get(
     *,
     endpoint: str,
     fetching: str,
+    headers: Mapping[str, str] | None = None,
 ) -> Any:
     """Fetch a JSON document with a bearer token, refusing redirects."""
     label = endpoint.capitalize()
@@ -345,6 +403,7 @@ async def _async_bearer_get(
                 {"access_token": access_token},
                 "GET",
                 url,
+                headers=headers or {},
                 allow_redirects=False,
             )
             status = response.status
@@ -378,10 +437,21 @@ class OidcClient:
         client_id: str,
         client_secret: str | None = None,
         discovery_url: str | None = None,
+        issuer_aliases: Iterable[str] = (),
+        issuer_claim: str | None = None,
         allow_insecure_transport: bool = False,
     ) -> None:
         """Initialize the client."""
         _require_https(issuer, "issuer", allow_http=allow_insecure_transport)
+        placeholder = _find_issuer_placeholder(issuer)
+        if (placeholder is None) != (issuer_claim is None):
+            raise ValueError(
+                "issuer_claim is required exactly when issuer is a template"
+            )
+        aliases = tuple(issuer_aliases)
+        for alias in aliases:
+            if _find_issuer_placeholder(alias) is not None:
+                raise ValueError("issuer aliases may not contain placeholders")
 
         self.hass = hass
         self.issuer = issuer
@@ -392,7 +462,12 @@ class OidcClient:
             "discovery_url",
             allow_http=allow_insecure_transport,
         )
+        self.issuer_aliases = aliases
+        self.issuer_claim = issuer_claim
         self.allow_insecure_transport = allow_insecure_transport
+        self._issuer_pattern = (
+            _template_issuer_pattern(issuer) if placeholder is not None else None
+        )
 
         self._metadata: ProviderMetadata | None = None
         self._metadata_fetched_at = 0.0
@@ -546,16 +621,29 @@ class OidcClient:
             "The provider offers no ID token signing algorithm we accept"
         )
 
+    def canonical_issuer(self, claims: Mapping[str, Any]) -> str:
+        """Return the issuer used to key credentials for verified claims."""
+        if self.issuer_claim is not None:
+            return _filled_template_issuer(self.issuer, self.issuer_claim, claims)
+        return self.issuer
+
     def accepts_issuer(self, issuer: str) -> bool:
         """Return whether a stored credential issuer belongs to this client."""
+        if self._issuer_pattern is not None:
+            return self._issuer_pattern.fullmatch(issuer) is not None
         return issuer == self.issuer
 
     def _verify_issuer_claim(self, claims: Mapping[str, Any]) -> None:
-        """Verify the issuer claim names this provider."""
+        """Verify the issuer claim follows this client's issuer rules."""
         issuer = claims.get("iss")
         if not isinstance(issuer, str):
             raise OidcIdTokenError("ID token issuer claim is missing or invalid")
-        if issuer != self.issuer:
+        if self.issuer_claim is not None:
+            expected = self.canonical_issuer(claims)
+            if issuer != expected:
+                raise OidcIdTokenError("ID token issuer does not match its template")
+            return
+        if issuer != self.issuer and issuer not in self.issuer_aliases:
             raise OidcIdTokenError("ID token issuer does not match this provider")
 
     async def _async_signing_key(self, kid: str | None) -> tuple[JWKDict, jwt.PyJWK]:
@@ -701,3 +789,125 @@ class OidcClient:
             raise OidcIdTokenError(
                 "ID token at_hash does not match the access token it came with"
             )
+
+
+class OAuth2ProfileClient:
+    """OAuth2 authorization-code client that identifies users from a profile."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        authorize_url: str,
+        token_url: str,
+        profile_url: str,
+        client_id: str,
+        client_secret: str | None,
+        subject_field: str,
+        account_name_field: str | None = None,
+        scopes: Sequence[str] = (),
+        headers: Mapping[str, str] | None = None,
+        token_auth_method: ClientAuthMethod = "client_secret_basic",  # noqa: S107
+        allow_insecure_transport: bool = False,
+    ) -> None:
+        """Initialize the OAuth2 profile client."""
+        if token_auth_method not in {"client_secret_basic", "client_secret_post"}:
+            raise ValueError("Unsupported token authentication method")
+        configured_headers = dict(headers or {})
+        reserved = RESERVED_PROFILE_HEADERS & {
+            header.lower() for header in configured_headers
+        }
+        if reserved:
+            raise ValueError(f"Reserved profile headers are not allowed: {reserved}")
+
+        self.hass = hass
+        self.authorize_url = _require_https(
+            authorize_url, "authorize_url", allow_http=allow_insecure_transport
+        )
+        self.token_url = _require_https(
+            token_url, "token_url", allow_http=allow_insecure_transport
+        )
+        self.profile_url = _require_https(
+            profile_url, "profile_url", allow_http=allow_insecure_transport
+        )
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.subject_field = subject_field
+        self.account_name_field = account_name_field
+        self.scopes = tuple(scopes)
+        self.headers = configured_headers
+        self.token_auth_method = token_auth_method
+        self.issuer = _origin(self.profile_url)
+
+    def async_authorize_url(
+        self, *, redirect_uri: str, state: str, code_verifier: str
+    ) -> str:
+        """Return the URL to send the user to."""
+        extra = {
+            "code_challenge": compute_code_challenge(code_verifier),
+            "code_challenge_method": PKCE_CHALLENGE_METHOD,
+        }
+        if self.scopes:
+            extra["scope"] = " ".join(self.scopes)
+        return build_authorize_url(
+            self.authorize_url,
+            client_id=self.client_id,
+            redirect_uri=redirect_uri,
+            state=state,
+            extra=extra,
+        )
+
+    async def async_exchange_code(
+        self, *, code: str, redirect_uri: str, code_verifier: str
+    ) -> TokenResponse:
+        """Exchange an authorization code for tokens."""
+        payload: dict[str, str] = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+        }
+        body, headers = client_auth(
+            payload, self.client_id, self.client_secret, self.token_auth_method
+        )
+        return await _async_token_request(
+            self.hass, self.token_url, body, headers=headers
+        )
+
+    async def async_fetch_profile(self, access_token: str) -> tuple[str, str | None]:
+        """Fetch the user's profile and return the subject and account name."""
+        body = await _async_bearer_get(
+            self.hass,
+            self.profile_url,
+            access_token,
+            endpoint="profile",
+            fetching="the profile",
+            headers={"Accept": "application/json", **self.headers},
+        )
+        if not isinstance(body, dict):
+            raise OidcError("Profile endpoint did not return a JSON object")
+
+        subject_value = body.get(self.subject_field)
+        if isinstance(subject_value, bool):
+            raise OidcError("Profile subject is not a usable string")
+        if isinstance(subject_value, int):
+            subject = str(subject_value)
+        elif isinstance(subject_value, str) and subject_value:
+            subject = subject_value
+        else:
+            raise OidcError("Profile subject is not a usable string")
+
+        account_name = None
+        if self.account_name_field is not None:
+            account_name_value = body.get(self.account_name_field)
+            if isinstance(account_name_value, str) and account_name_value:
+                account_name = account_name_value
+
+        return subject, account_name
+
+    def accepts_issuer(self, issuer: str) -> bool:
+        """Return whether a stored credential issuer belongs to this client."""
+        return issuer == self.issuer
+
+    async def async_revoke_token(self, token: str) -> None:
+        """Do nothing; the profile flow does not keep external tokens."""

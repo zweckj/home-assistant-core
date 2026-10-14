@@ -11,6 +11,9 @@
       'discovery_url': None,
       'display_name_claim': 'given_name',
       'issuer': 'https://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
       'required_claims': dict({
       }),
       'scopes': tuple(
@@ -35,6 +38,9 @@
       'discovery_url': None,
       'display_name_claim': 'name',
       'issuer': 'http://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
       'required_claims': dict({
       }),
       'scopes': tuple(
@@ -59,6 +65,9 @@
       'discovery_url': None,
       'display_name_claim': 'name',
       'issuer': 'https://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
       'required_claims': dict({
       }),
       'scopes': tuple(
@@ -83,6 +92,9 @@
       'discovery_url': None,
       'display_name_claim': 'name',
       'issuer': 'https://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
       'required_claims': dict({
       }),
       'scopes': tuple(
@@ -107,6 +119,9 @@
       'discovery_url': None,
       'display_name_claim': 'name',
       'issuer': 'https://idp.example.com',
+      'issuer_aliases': frozenset({
+      }),
+      'issuer_claim': None,
       'required_claims': dict({
       }),
       'scopes': tuple(
