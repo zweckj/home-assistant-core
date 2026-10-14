@@ -10,6 +10,20 @@
       "message": "Username \"{new_username}\" is not normalized. Please make sure the username is lowercase and does not contain any whitespace."
     }
   },
+  "issues": {
+    "identity_provider_removed": {
+      "description": "The sign-in provider **{title}** was removed. The following users no longer have any login method: {users}.\n\nTo restore access, create another login method for each listed user or add the sign-in provider again. After access has been restored, you can dismiss this repair issue.",
+      "title": "Users lost their only login method"
+    },
+    "identity_providers_disabled": {
+      "description": "A sign-in integration is configured, but the OpenID Connect auth provider is disabled.\n\nTo enable external sign-in:\n\n1. Open your Home Assistant `configuration.yaml`.\n2. Under `homeassistant:`, add `auth_providers:` with `- type: oidc`.\n3. Restart Home Assistant.\n\nThe sign-in integration will be available after the restart.",
+      "title": "External sign-in providers are disabled"
+    },
+    "invalid_identity_provider": {
+      "description": "The sign-in configuration for **{title}** from the `{domain}` integration is invalid, so it has been hidden from the login page.\n\nCheck the integration configuration and fix the reported problem. Home Assistant will make the provider available again after the integration reloads successfully.",
+      "title": "Sign-in provider configuration is invalid"
+    }
+  },
   "mfa_setup": {
     "notify": {
       "abort": {

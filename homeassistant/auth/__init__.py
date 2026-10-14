@@ -268,7 +268,11 @@ class AuthManager:
     @property
     def auth_providers(self) -> list[AuthProvider]:
         """Return a list of available auth providers."""
-        return list(self._providers.values())
+        return [
+            provider_or_child
+            for provider in self._providers.values()
+            for provider_or_child in (provider, *provider.child_providers)
+        ]
 
     @property
     def auth_mfa_modules(self) -> list[MultiFactorAuthModule]:
@@ -278,15 +282,25 @@ class AuthManager:
     def get_auth_provider(
         self, provider_type: str, provider_id: str | None
     ) -> AuthProvider | None:
-        """Return an auth provider, None if not found."""
-        return self._providers.get((provider_type, provider_id))
+        """Return an auth provider or child provider, None if not found."""
+        if (provider := self._providers.get((provider_type, provider_id))) is not None:
+            return provider
+
+        if (
+            provider_id is not None
+            and (root := self._providers.get((provider_type, None))) is not None
+        ):
+            return root.async_get_child_provider(provider_id)
+
+        return None
 
     def get_auth_providers(self, provider_type: str) -> list[AuthProvider]:
         """Return a List of auth provider of one type, Empty if not found."""
         return [
-            provider
-            for (p_type, _), provider in self._providers.items()
-            if p_type == provider_type
+            provider_or_child
+            for provider in self._providers.values()
+            if provider.type == provider_type
+            for provider_or_child in (provider, *provider.child_providers)
         ]
 
     def get_auth_mfa_module(self, module_id: str) -> MultiFactorAuthModule | None:
@@ -862,7 +876,7 @@ class AuthManager:
             credentials.auth_provider_type,
             credentials.auth_provider_id,
         )
-        return self._providers.get(auth_provider_key)
+        return self.get_auth_provider(*auth_provider_key)
 
     async def _user_should_be_owner(self) -> bool:
         """Determine if user should be owner.

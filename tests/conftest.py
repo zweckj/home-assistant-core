@@ -59,7 +59,7 @@ from . import patch_time  # isort:skip
 from homeassistant import components, core as ha, loader, runner
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY
 from homeassistant.auth.models import Credentials
-from homeassistant.auth.providers import homeassistant
+from homeassistant.auth.providers import homeassistant, oidc
 from homeassistant.components.device_tracker.legacy import Device
 from homeassistant.components.http.const import DATA_SUPERVISOR_USER
 
@@ -936,6 +936,15 @@ async def local_auth(hass: HomeAssistant) -> homeassistant.HassAuthProvider:
     prv = homeassistant.HassAuthProvider(
         hass, hass.auth._store, {"type": "homeassistant"}
     )
+    await prv.async_initialize()
+    hass.auth._providers[(prv.type, prv.id)] = prv
+    return prv
+
+
+@pytest.fixture
+async def oidc_auth(hass: HomeAssistant) -> oidc.OidcAuthProvider:
+    """Load the identity provider engine."""
+    prv = oidc.OidcAuthProvider(hass, hass.auth._store, {"type": "oidc"})
     await prv.async_initialize()
     hass.auth._providers[(prv.type, prv.id)] = prv
     return prv

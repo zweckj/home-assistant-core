@@ -1,6 +1,7 @@
 """Tests for the Home Assistant auth module."""
 
 import asyncio
+from collections.abc import Iterable, Mapping
 from datetime import timedelta
 import time
 from typing import Any
@@ -22,7 +23,7 @@ from homeassistant.auth import (
 )
 from homeassistant.auth.const import GROUP_ID_ADMIN, MFA_SESSION_EXPIRATION
 from homeassistant.auth.models import Credentials
-from homeassistant.auth.providers import InvalidStepUpError
+from homeassistant.auth.providers import AuthProvider, InvalidStepUpError, LoginFlow
 from homeassistant.auth.providers.homeassistant import HassAuthProvider
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
@@ -37,12 +38,132 @@ from tests.common import (
 )
 
 INVALID_SIGNING_KEY = b"invalid-signing-key-for-testing0"
+CHILD_AUTH_PROVIDER_TYPE = "child_test"
 
 
 @pytest.fixture
 def mock_hass(hass: HomeAssistant) -> HomeAssistant:
     """Home Assistant mock with minimum amount of data set to make it work with auth."""
     return hass
+
+
+class _ChildLoginFlow(LoginFlow):
+    """Test login flow for a child provider."""
+
+    async def async_step_init(
+        self, user_input: dict[str, str] | None = None
+    ) -> auth_models.AuthFlowResult:
+        """Handle the login step."""
+        if user_input is not None:
+            return await self.async_finish({"username": user_input["username"]})
+
+        return self.async_show_form(step_id="init")
+
+
+class _ChildAuthProvider(AuthProvider):
+    """Test child auth provider."""
+
+    validated_refresh_tokens: list[str]
+
+    async def async_login_flow(
+        self, context: auth_models.AuthFlowContext | None
+    ) -> _ChildLoginFlow:
+        """Return a flow to login."""
+        return _ChildLoginFlow(self)
+
+    async def async_get_or_create_credentials(
+        self, flow_result: Mapping[str, str]
+    ) -> Credentials:
+        """Get credentials based on the flow result."""
+        username = flow_result["username"]
+        for credential in await self.async_credentials():
+            if credential.data["username"] == username:
+                return credential
+        return self.async_create_credentials({"username": username})
+
+    async def async_user_meta_for_credentials(
+        self, credentials: Credentials
+    ) -> auth_models.UserMeta:
+        """Return extra user metadata for credentials."""
+        return auth_models.UserMeta(name=self.name, is_active=True)
+
+    @callback
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return if the credentials are a login the user can fall back to."""
+        return self.config.get("can_login", True)
+
+    @callback
+    def async_validate_refresh_token(
+        self, refresh_token: auth_models.RefreshToken, remote_ip: str | None = None
+    ) -> None:
+        """Record refresh token validation."""
+        self.validated_refresh_tokens.append(refresh_token.id)
+
+
+class _RootChildAuthProvider(_ChildAuthProvider):
+    """Test root provider exposing children."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        store: auth_store.AuthStore,
+        config: dict[str, Any],
+        children: Iterable[_ChildAuthProvider],
+    ) -> None:
+        """Initialize the test root provider."""
+        super().__init__(hass, store, config)
+        self._children = {child.id: child for child in children}
+
+    @property
+    def child_providers(self) -> Iterable[AuthProvider]:
+        """Return dynamically configured providers hosted under this provider."""
+        return self._children.values()
+
+    @callback
+    def async_get_child_provider(self, provider_id: str) -> AuthProvider | None:
+        """Return a child resolved by (type, id) like any other provider."""
+        return self._children.get(provider_id)
+
+
+async def _async_child_provider_auth_manager(
+    hass: HomeAssistant,
+) -> tuple[auth.AuthManager, _ChildAuthProvider, _ChildAuthProvider]:
+    """Create an auth manager with a root provider and two child providers."""
+    store = auth_store.AuthStore(hass)
+    await store.async_load()
+    child_a = _ChildAuthProvider(
+        hass,
+        store,
+        {
+            "type": CHILD_AUTH_PROVIDER_TYPE,
+            "id": "child-a",
+            "name": "Child A",
+        },
+    )
+    child_b = _ChildAuthProvider(
+        hass,
+        store,
+        {
+            "type": CHILD_AUTH_PROVIDER_TYPE,
+            "id": "child-b",
+            "name": "Child B",
+        },
+    )
+    child_a.validated_refresh_tokens = []
+    child_b.validated_refresh_tokens = []
+    root = _RootChildAuthProvider(
+        hass,
+        store,
+        {"type": CHILD_AUTH_PROVIDER_TYPE, "name": "Root"},
+        (child_a, child_b),
+    )
+    root.validated_refresh_tokens = []
+    manager = auth.AuthManager(
+        hass, store, {(CHILD_AUTH_PROVIDER_TYPE, None): root}, {}
+    )
+    hass.auth = manager
+    await manager.async_setup()
+    return manager, child_a, child_b
 
 
 async def test_auth_manager_from_config_validates_config(mock_hass) -> None:
@@ -148,6 +269,76 @@ async def test_auth_manager_from_config_auth_modules(mock_hass) -> None:
         {"name": "Module 1", "type": "insecure_example", "id": "insecure_example"},
         {"name": "Module 2", "type": "insecure_example", "id": "another"},
     ]
+
+
+async def test_auth_manager_child_provider_listing_and_lookup(
+    hass: HomeAssistant,
+) -> None:
+    """Test child providers are listed and resolved like configured providers."""
+    manager, child_a, child_b = await _async_child_provider_auth_manager(hass)
+
+    assert [
+        {"name": provider.name, "type": provider.type, "id": provider.id}
+        for provider in manager.auth_providers
+    ] == [
+        {"name": "Root", "type": CHILD_AUTH_PROVIDER_TYPE, "id": None},
+        {"name": "Child A", "type": CHILD_AUTH_PROVIDER_TYPE, "id": "child-a"},
+        {"name": "Child B", "type": CHILD_AUTH_PROVIDER_TYPE, "id": "child-b"},
+    ]
+    assert manager.get_auth_providers(CHILD_AUTH_PROVIDER_TYPE) == [
+        manager.get_auth_provider(CHILD_AUTH_PROVIDER_TYPE, None),
+        child_a,
+        child_b,
+    ]
+    assert manager.get_auth_provider(CHILD_AUTH_PROVIDER_TYPE, "child-a") is child_a
+    assert manager.get_auth_provider(CHILD_AUTH_PROVIDER_TYPE, "unknown") is None
+
+
+async def test_auth_manager_child_provider_login_and_token_resolution(
+    hass: HomeAssistant,
+) -> None:
+    """Test login and token validation resolve child providers."""
+    manager, child_a, _child_b = await _async_child_provider_auth_manager(hass)
+
+    step = await manager.login_flow.async_init((CHILD_AUTH_PROVIDER_TYPE, "child-a"))
+    assert step["type"] is data_entry_flow.FlowResultType.FORM
+
+    step = await manager.login_flow.async_configure(
+        step["flow_id"], {"username": "child-user"}
+    )
+    assert step["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    credential = step["result"]
+    assert credential.auth_provider_type == CHILD_AUTH_PROVIDER_TYPE
+    assert credential.auth_provider_id == "child-a"
+
+    user = await manager.async_get_or_create_user(credential)
+    assert user.name == "Child A"
+
+    refresh_token = await manager.async_create_refresh_token(
+        user, CLIENT_ID, credential=credential
+    )
+    access_token = manager.async_create_access_token(refresh_token, "127.0.0.1")
+
+    assert child_a.validated_refresh_tokens == [refresh_token.id]
+    assert manager.async_validate_access_token(access_token) is refresh_token
+
+
+async def test_auth_manager_child_provider_other_login_method(
+    hass: HomeAssistant,
+) -> None:
+    """Test fallback-login checks include child providers."""
+    manager, child_a, child_b = await _async_child_provider_auth_manager(hass)
+    user = await manager.async_create_user("Child User")
+    credential_a = child_a.async_create_credentials({"username": "child-a"})
+    credential_b = child_b.async_create_credentials({"username": "child-b"})
+    credential_a.is_new = False
+    credential_b.is_new = False
+    user.credentials.extend((credential_a, credential_b))
+
+    assert manager.async_has_other_login_method(user, credential_a) is True
+    assert (
+        manager.async_has_other_login_method(user, credential_a, credential_b) is False
+    )
 
 
 async def test_create_new_user(hass: HomeAssistant) -> None:

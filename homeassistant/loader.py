@@ -116,6 +116,7 @@ BASE_PRELOAD_PLATFORMS = [
     "energy",
     "group",
     "hardware",
+    "identity_provider",
     "intent",
     "logbook",
     "media_source",
