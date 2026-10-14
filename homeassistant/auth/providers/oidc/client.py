@@ -4,13 +4,14 @@ Cryptography and claim validation come from PyJWT; all I/O goes through aiohttp,
 since PyJWT's own key client fetches with blocking urllib.
 """
 
+from abc import ABC, abstractmethod
 import asyncio
 import base64
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import logging
 import time
-from typing import Any
+from typing import Any, override
 
 from aiohttp import ClientError
 import jwt
@@ -328,13 +329,14 @@ async def _async_token_request(
     )
 
 
-async def _async_bearer_get(
+async def async_bearer_get(
     hass: HomeAssistant,
     url: str,
     access_token: str,
     *,
     endpoint: str,
     fetching: str,
+    headers: Mapping[str, str] | None = None,
 ) -> Any:
     """Fetch a JSON document with a bearer token, refusing redirects."""
     label = endpoint.capitalize()
@@ -345,6 +347,7 @@ async def _async_bearer_get(
                 {"access_token": access_token},
                 "GET",
                 url,
+                headers=headers or {},
                 allow_redirects=False,
             )
             status = response.status
@@ -367,8 +370,25 @@ async def _async_bearer_get(
     return body
 
 
-class OidcClient:
-    """Talk to an OpenID Connect provider on behalf of Home Assistant."""
+class IdentityClient(ABC):
+    """Sign users in at an identity provider."""
+
+    @abstractmethod
+    def accepts_issuer(self, issuer: str) -> bool:
+        """Return whether a stored credential issuer belongs to this client."""
+
+    @abstractmethod
+    async def async_revoke_token(self, token: str) -> None:
+        """Ask the identity provider to revoke a token, ignoring failures."""
+
+
+class OidcClient(IdentityClient):
+    """Talk to an OpenID Connect provider on behalf of Home Assistant.
+
+    A provider that bends the issuer rules overrides canonical_issuer,
+    accepts_issuer and verify_issuer_claim. They only run once the signature,
+    audience and expiry of the ID token have been verified.
+    """
 
     def __init__(
         self,
@@ -498,7 +518,7 @@ class OidcClient:
         if not metadata.userinfo_endpoint:
             return claims
 
-        body = await _async_bearer_get(
+        body = await async_bearer_get(
             self.hass,
             metadata.userinfo_endpoint,
             access_token,
@@ -513,6 +533,7 @@ class OidcClient:
             raise OidcIdTokenError("Userinfo response describes a different subject")
         return info | claims
 
+    @override
     async def async_revoke_token(self, token: str) -> None:
         """Ask the provider to revoke a token, ignoring failures."""
         try:
@@ -546,16 +567,18 @@ class OidcClient:
             "The provider offers no ID token signing algorithm we accept"
         )
 
+    def canonical_issuer(self, claims: Mapping[str, Any]) -> str:
+        """Return the issuer used to key credentials for verified claims."""
+        return self.issuer
+
+    @override
     def accepts_issuer(self, issuer: str) -> bool:
         """Return whether a stored credential issuer belongs to this client."""
         return issuer == self.issuer
 
-    def _verify_issuer_claim(self, claims: Mapping[str, Any]) -> None:
+    def verify_issuer_claim(self, claims: Mapping[str, Any]) -> None:
         """Verify the issuer claim names this provider."""
-        issuer = claims.get("iss")
-        if not isinstance(issuer, str):
-            raise OidcIdTokenError("ID token issuer claim is missing or invalid")
-        if issuer != self.issuer:
+        if claims.get("iss") != self.issuer:
             raise OidcIdTokenError("ID token issuer does not match this provider")
 
     async def _async_signing_key(self, kid: str | None) -> tuple[JWKDict, jwt.PyJWK]:
@@ -660,7 +683,7 @@ class OidcClient:
         except jwt.InvalidTokenError as err:
             raise OidcIdTokenError(f"ID token rejected: {err}") from err
 
-        self._verify_issuer_claim(claims)
+        self.verify_issuer_claim(claims)
 
         # With several audiences, azp has to name us so another client's token
         # cannot be replayed here. PyJWT already checked that aud includes us.
@@ -701,3 +724,89 @@ class OidcClient:
             raise OidcIdTokenError(
                 "ID token at_hash does not match the access token it came with"
             )
+
+
+class OAuth2IdentityClient(IdentityClient):
+    """Sign users in with plain OAuth2 and an account lookup of the subclass.
+
+    Without a signed ID token the identity rests on the access token alone, so
+    these accounts can only be linked.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        issuer: str,
+        authorize_url: str,
+        token_url: str,
+        client_id: str,
+        client_secret: str | None,
+        scopes: Sequence[str] = (),
+        token_auth_method: ClientAuthMethod = "client_secret_basic",  # noqa: S107
+        allow_insecure_transport: bool = False,
+    ) -> None:
+        """Initialize the client."""
+        self.hass = hass
+        self.issuer = _require_https(
+            issuer, "issuer", allow_http=allow_insecure_transport
+        )
+        self.authorize_url = _require_https(
+            authorize_url, "authorize_url", allow_http=allow_insecure_transport
+        )
+        self.token_url = _require_https(
+            token_url, "token_url", allow_http=allow_insecure_transport
+        )
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.scopes = tuple(scopes)
+        self.token_auth_method = token_auth_method
+        self.allow_insecure_transport = allow_insecure_transport
+
+    def async_authorize_url(
+        self, *, redirect_uri: str, state: str, code_verifier: str
+    ) -> str:
+        """Return the URL to send the user to."""
+        extra = {
+            "code_challenge": compute_code_challenge(code_verifier),
+            "code_challenge_method": PKCE_CHALLENGE_METHOD,
+        }
+        if self.scopes:
+            extra["scope"] = " ".join(self.scopes)
+        return build_authorize_url(
+            self.authorize_url,
+            client_id=self.client_id,
+            redirect_uri=redirect_uri,
+            state=state,
+            extra=extra,
+        )
+
+    async def async_exchange_code(
+        self, *, code: str, redirect_uri: str, code_verifier: str
+    ) -> TokenResponse:
+        """Exchange an authorization code for tokens."""
+        payload: dict[str, str] = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+        }
+        body, headers = client_auth(
+            payload, self.client_id, self.client_secret, self.token_auth_method
+        )
+        return await _async_token_request(
+            self.hass, self.token_url, body, headers=headers
+        )
+
+    @abstractmethod
+    async def async_fetch_identity(self, access_token: str) -> tuple[str, str | None]:
+        """Return the subject and the optional account name for an access token."""
+
+    @override
+    def accepts_issuer(self, issuer: str) -> bool:
+        """Return whether a stored credential issuer belongs to this client."""
+        return issuer == self.issuer
+
+    @override
+    async def async_revoke_token(self, token: str) -> None:
+        """Do nothing; the access token is discarded after the lookup."""

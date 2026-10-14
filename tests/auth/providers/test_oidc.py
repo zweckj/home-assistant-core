@@ -63,6 +63,12 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.util import dt as dt_util
 
 from tests.common import async_fire_time_changed
+from tests.components.auth.common import (
+    PROFILE_ISSUER,
+    PROFILE_TOKEN_URL,
+    PROFILE_URL,
+    ProfileProtocol,
+)
 from tests.test_util.aiohttp import AiohttpClientMocker
 
 ISSUER = "https://idp.example.com"
@@ -3188,6 +3194,184 @@ async def test_manager_initializes_oidc_and_prunes_orphan_session(
     assert restored.data.sessions == {}
 
 
+PROFILE_IDP_ID = "profile-idp"
+
+
+async def _register_profile_provider(
+    manager: auth.AuthManager,
+) -> oidc_auth.OidcIdentityProvider:
+    """Register and return a child provider that signs in with plain OAuth2."""
+    root = manager.auth_providers[0]
+    assert isinstance(root, oidc_auth.OidcAuthProvider)
+    await root.async_register_identity_provider(
+        PROFILE_IDP_ID,
+        domain="profile",
+        title="Profile",
+        spec=oidc_auth.IdentityProvider(
+            client_id=CLIENT_ID, protocol=ProfileProtocol()
+        ),
+    )
+    child = root.async_get_child_provider(PROFILE_IDP_ID)
+    assert isinstance(child, oidc_auth.OidcIdentityProvider)
+    return child
+
+
+async def _finish_profile_flow(
+    manager: auth.AuthManager,
+    aioclient_mock: AiohttpClientMocker,
+    *,
+    context: dict[str, Any] | None = None,
+    token_response: dict[str, Any] | None = None,
+) -> AuthFlowResult:
+    """Complete a plain OAuth2 flow."""
+    with patch("homeassistant.auth.providers.oidc.get_url", return_value=REDIRECT_BASE):
+        result = await manager.login_flow.async_init(
+            (PROVIDER_TYPE, PROFILE_IDP_ID),
+            context={
+                "ip_address": ip_address("127.0.0.1"),
+                "redirect_uri": "https://ha.example.com/",
+            }
+            | (context or {}),
+        )
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    assert "nonce" not in URL(result["url"]).query
+    aioclient_mock.post(
+        PROFILE_TOKEN_URL,
+        json=token_response or {"access_token": "profile-at", "token_type": "Bearer"},
+    )
+    aioclient_mock.get(PROFILE_URL, json={"id": 123, "login": "octocat"})
+
+    result = await manager.login_flow.async_configure(
+        result["flow_id"], {"code": "the-code"}
+    )
+    return await manager.login_flow.async_configure(result["flow_id"])
+
+
+async def test_oauth2_linked_sign_in(
+    manager: auth.AuthManager, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Test a plain OAuth2 provider signs in a linked account without storing tokens."""
+    child = await _register_profile_provider(manager)
+    user = await manager.async_create_user("Alice")
+    credentials = child.async_create_credentials(
+        {"issuer": PROFILE_ISSUER, "subject": "123"}
+    )
+    await manager.async_link_user(user, credentials)
+
+    result = await _finish_profile_flow(manager, aioclient_mock)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].id == credentials.id
+    assert child.root.data is not None
+    assert child.root.data.sessions == {}
+
+
+async def test_oauth2_link_flow(
+    manager: auth.AuthManager, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Test a plain OAuth2 provider issues link credentials from its lookup."""
+    await _register_profile_provider(manager)
+
+    result = await _finish_profile_flow(
+        manager, aioclient_mock, context={"link_user": True}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].data == {
+        "issuer": PROFILE_ISSUER,
+        "subject": "123",
+        "account_name": "octocat",
+    }
+    assert aioclient_mock.mock_calls[-1][3]["X-Api-Version"] == "1"
+
+
+async def test_oauth2_token_error_body_fails(
+    manager: auth.AuthManager, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Test HTTP 200 token responses carrying an error abort the flow."""
+    await _register_profile_provider(manager)
+
+    result = await _finish_profile_flow(
+        manager,
+        aioclient_mock,
+        context={"link_user": True},
+        token_response={"error": "bad_verification_code"},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "authorize_failed"
+
+
+async def test_finish_oauth2_abort_branches(manager: auth.AuthManager) -> None:
+    """Test plain OAuth2 finish abort branches."""
+    child = await _register_profile_provider(manager)
+    flow = oidc_auth.OidcLoginFlow(child)
+    flow._code = "code"
+    flow._redirect_uri = f"{REDIRECT_BASE}/auth/login_callback"
+    client = AsyncMock()
+    client.issuer = PROFILE_ISSUER
+    client.async_exchange_code.return_value = oidc_auth.TokenResponse(access_token="at")
+    client.async_fetch_identity.return_value = (SUBJECT, None)
+
+    result = await flow._async_finish_oauth2(client, child.generation)
+    assert result["reason"] == "user_not_allowed"
+
+    flow = oidc_auth.OidcLoginFlow(child)
+    flow._code = "code"
+    flow._redirect_uri = f"{REDIRECT_BASE}/auth/login_callback"
+    child.async_suspend()
+    result = await flow._async_finish_oauth2(client, child.generation - 1)
+    assert result["reason"] == "configuration_changed"
+
+
+class _TenantClient(OidcClient):
+    """OIDC client that keys credentials by a tenant claim."""
+
+    def canonical_issuer(self, claims: dict[str, Any]) -> str:
+        """Return the issuer of the tenant."""
+        return f"{self.issuer}/{claims['tid']}"
+
+    def accepts_issuer(self, issuer: str) -> bool:
+        """Accept the issuer of any tenant."""
+        return issuer.startswith(f"{self.issuer}/")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _TenantOpenIDConnect(OpenIDConnect):
+    """OpenID Connect with an issuer per tenant."""
+
+    client_class = _TenantClient
+
+
+async def test_client_hooks_key_credentials(
+    manager: auth.AuthManager,
+    provider: OidcProvider,
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+    jwks: dict[str, Any],
+) -> None:
+    """Test a protocol's client decides the issuer credentials are keyed by."""
+    await provider.root.async_register_identity_provider(
+        IDP_ID,
+        domain=IDP_DOMAIN,
+        title="Example ID",
+        spec=IdentityProvider(
+            client_id=CLIENT_ID,
+            protocol=_TenantOpenIDConnect(issuer=ISSUER),
+            accounts=AccountPolicy.PROVISION,
+            revalidate_interval=timedelta(minutes=5),
+        ),
+    )
+    child = provider.root.async_get_child_provider(IDP_ID)
+    assert isinstance(child, oidc_auth.OidcIdentityProvider)
+
+    result = await _complete_login(manager, mock_idp, signing_key, jwks, tid="abc")
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].data["issuer"] == f"{ISSUER}/abc"
+    assert child.async_can_login_with_credentials(result["result"])
+
+
 async def test_required_claims_at_sign_in_and_revalidation(
     manager: auth.AuthManager,
     provider: OidcProvider,
@@ -3832,7 +4016,9 @@ async def test_register_wraps_runtime_client_error(manager: auth.AuthManager) ->
     assert isinstance(root, oidc_auth.OidcAuthProvider)
 
     with (
-        patch.object(oidc_auth, "OidcClient", side_effect=ValueError("bad issuer")),
+        patch.object(
+            OpenIDConnect, "client_class", Mock(side_effect=ValueError("bad issuer"))
+        ),
         pytest.raises(oidc_auth.IdentityProviderError) as err,
     ):
         await root.async_register_identity_provider(
@@ -4148,7 +4334,7 @@ async def test_finish_oidc_login_completion_failure(
         access_token="at", refresh_token="rt", id_token="id"
     )
     client.async_verify_id_token.return_value = {"iss": ISSUER, "sub": SUBJECT}
-    client.issuer = ISSUER
+    client.canonical_issuer = Mock(return_value=ISSUER)
 
     with patch.object(
         provider.child,

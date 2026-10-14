@@ -1,6 +1,6 @@
 """Test OIDC identity provider specifications."""
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import timedelta
 from types import MappingProxyType
 
@@ -18,11 +18,19 @@ from homeassistant.auth.providers.oidc.spec import (
     NotEquals,
     OneOf,
     OpenIDConnect,
+    ProtocolSpec,
     trust_key,
     validate_identity_provider,
 )
 
+from tests.components.auth.common import ProfileProtocol
+
 ISSUER = "https://idp.example.com"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _OtherOpenIDConnect(OpenIDConnect):
+    """OpenID Connect protocol of another integration."""
 
 
 def oidc_spec(**kwargs: object) -> IdentityProvider:
@@ -284,3 +292,47 @@ def test_default_oidc_spec_can_be_serialized_with_asdict() -> None:
     )
 
     assert data["protocol"]["required_claims"] == {}
+
+
+def test_provision_requires_openid_connect() -> None:
+    """Test only OpenID Connect protocols can create users."""
+    spec = oidc_spec(
+        protocol=ProfileProtocol(),
+        accounts=AccountPolicy.PROVISION,
+        revalidate_interval=timedelta(hours=1),
+    )
+
+    assert reason_for(spec) == "provision_requires_oidc"
+
+
+def test_protocol_without_settings_validates_as_is() -> None:
+    """Test a protocol without own validation is accepted unchanged."""
+    spec = oidc_spec(protocol=ProfileProtocol(scopes=("read:user",)))
+
+    assert validate_identity_provider(spec) == spec
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        pytest.param(_OtherOpenIDConnect(issuer=ISSUER), id="protocol-type"),
+        pytest.param(ProfileProtocol(), id="protocol"),
+    ],
+)
+def test_trust_key_changes_with_the_protocol(changed: ProtocolSpec) -> None:
+    """Test another protocol, even with the same settings, changes trust."""
+    base = validate_identity_provider(oidc_spec())
+
+    assert trust_key(base) != trust_key(
+        validate_identity_provider(oidc_spec(protocol=changed))
+    )
+
+
+def test_trust_key_changes_with_protocol_settings() -> None:
+    """Test the settings of a protocol without own trust data change trust."""
+    first = validate_identity_provider(oidc_spec(protocol=ProfileProtocol()))
+    second = validate_identity_provider(
+        oidc_spec(protocol=ProfileProtocol(scopes=("read:user",)))
+    )
+
+    assert trust_key(first) != trust_key(second)

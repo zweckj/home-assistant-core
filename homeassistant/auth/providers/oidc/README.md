@@ -11,22 +11,27 @@ Decisions come first: each one has a reason, and reversing it needs a better rea
 
 ### One audited engine, configured by integrations
 
-- All protocol, account and session logic for signing in with an external identity provider lives in this package. Each identity provider is an integration that contributes configuration only: a config flow and an `identity_provider.py` platform returning a data-only `IdentityProvider` spec.
-- The audit boundary is this package, the child provider hook in `homeassistant/auth/__init__.py` and `homeassistant/auth/providers/__init__.py`, `homeassistant/components/auth/` (views, the authorization code store, the platform bridge and the public exports), `homeassistant/components/config/auth_provider_oidc.py`, and the token request and client authentication helpers the engine shares from `homeassistant/helpers/oauth2.py`. Identity provider integrations are reviewed as configuration.
+- All protocol, account and session logic for signing in with an external identity provider lives in this package. Each identity provider is an integration that contributes configuration: a config flow and an `identity_provider.py` platform returning a data-only `IdentityProvider` spec, plus a small protocol client when its identity provider bends the rules.
+- The audit boundary is this package, the child provider hook in `homeassistant/auth/__init__.py` and `homeassistant/auth/providers/__init__.py`, `homeassistant/components/auth/` (views, the authorization code store, the platform bridge and the public exports), `homeassistant/components/config/auth_provider_oidc.py`, and the token request and client authentication helpers the engine shares from `homeassistant/helpers/oauth2.py`. Identity provider integrations are reviewed as configuration, and their protocol client, if any, as security code.
 - Adding an identity provider must not touch this package. One that needs a capability the spec cannot express, such as `private_key_jwt` or `response_mode=form_post`, is an engine change and needs a new audit.
 - The spec is a public API because custom integrations can use it, so it changes additively.
 
-### The spec is data, and integration code never runs in the auth path
+### The spec is data, and integration code in the auth path is limited to protocol hooks
 
 - `IdentityProvider`, `OpenIDConnect`, `AccountPolicy` and the claim rules are frozen, slotted dataclasses and enums without callables, imported from `homeassistant.components.auth`.
+- `OpenIDConnect` covers providers that follow the standard. A built-in integration whose identity provider does not brings a `ProtocolSpec` subclass, still a frozen dataclass, whose `create_client` returns its client:
+  - an `OidcClient` subclass overriding `canonical_issuer`, `accepts_issuer` or `verify_issuer_claim`, for issuers that are templated per tenant or spelled more than one way. They run after the engine verified the signature, audience, expiry, `azp`, nonce and `at_hash`;
+  - an `OAuth2IdentityClient` subclass implementing `async_fetch_identity`, for an identity provider without OpenID Connect.
+  PKCE, state, transport rules, token requests, credentials and sessions stay in the engine. The protocol type is part of the trust key.
+- The bridge refuses any protocol but `OpenIDConnect` from a custom integration, so only reviewed code runs while signing in.
 - `get_identity_provider(data, options)` is synchronous and receives the config entry data and options only, never `hass`, which makes I/O an obvious violation. The bridge calls it when an entry loads or changes, never while signing in, linking, validating tokens or revalidating sessions.
 - `validate_identity_provider` checks exact types, so a `str` subclass or an `int` passed as a `bool` is refused, and returns a copy with read-only mappings. It enforces:
   - HTTPS URLs with a host and without credentials or a fragment, for the issuer and every configured endpoint;
   - `openid` among the OpenID Connect scopes, and claim rules that are `Equals`, `NotEquals` or a non-empty `OneOf`;
-  - `PROVISION` only with a revalidation interval between five minutes and thirty days, while `LINK` refuses an interval. Values out of bounds are rejected, not clamped.
+  - `PROVISION` only with `OpenIDConnect`, whose verified ID token is needed to create users, and a revalidation interval between five minutes and thirty days, while `LINK` refuses an interval. Values out of bounds are rejected, not clamped.
 - Registration builds the protocol client before anything is stored, so a spec the client refuses fails with `invalid_spec` instead of at the first sign-in.
 - `async_validate_identity_provider` runs the same checks and, for OpenID Connect, fetches the discovery document, so a config flow rejects a spec before creating the entry. Every failure carries a stable `IdentityProviderError.reason`.
-- The hassfest `identity_provider` plugin checks core integrations: the manifest (`dependencies: [auth]`, `config_flow`, `integration_type: service`, no requirements), an import allowlist applied to every module of the integration (no aiohttp, no network helpers, no `homeassistant.auth` internals and no relative import leaving the package), forbidden builtins such as `open` and `exec`, and the shape of `identity_provider.py`. It is a review aid, not a sandbox.
+- The hassfest `identity_provider` plugin checks core integrations: the manifest (`dependencies: [auth]`, `config_flow`, `integration_type: service`, no requirements), an import allowlist applied to every module of the integration (no aiohttp, no network helpers, no `homeassistant.auth` internals and no relative import leaving the package), forbidden builtins such as `open` and `exec`, and the shape of `identity_provider.py`. A protocol client lives in another module and reaches the network only through `async_bearer_get` and the client base classes. It is a review aid, not a sandbox.
 - Custom integrations may contribute identity providers. hassfest never sees them, so runtime validation is their only check, and a warning is logged once per integration. Installing one is the administrator's trust decision, like any custom integration.
 
 ### Root and child providers
@@ -54,9 +59,10 @@ The spec declares what an identity may be used for; the engine enforces it.
 
 ### Identity and account mapping
 
-- An OpenID Connect credential is keyed by the issuer and `sub`. Per OIDC Core 5.7 a subject is only unique within an issuer, so binding both stops a repointed identity provider inheriting existing accounts.
+- An OpenID Connect credential is keyed by the issuer, as the client's `canonical_issuer` names it, and `sub`. Per OIDC Core 5.7 a subject is only unique within an issuer, so binding both stops a repointed identity provider inheriting existing accounts.
 - The subject claim is not configurable: another signed claim may be reassignable, turning reassignment into account takeover.
 - Nothing else is an identifier. Matching by `preferred_username` was removed; 5.7 states it is neither unique nor stable, which made it a takeover vector.
+- A plain OAuth2 credential is keyed by the client's issuer and the subject `async_fetch_identity` returns. The lookup is only reached with the access token from the same exchange, but this is weaker than a signed ID token, which is why these identities can only be linked.
 - `required_claims` are checked on the verified ID token at every sign-in and on every refreshed ID token; a refreshed token that fails them ends the session.
 - `account_name` is shown to the user next to the linked identity and refreshed at every sign-in. It is never used for matching.
 - OIDC Core 5.3.2 requires discarding a userinfo response unless its `sub` matches the ID token exactly, since a substituted access token would otherwise import another user's claims. A mismatch or a missing `sub` aborts the login.
@@ -151,7 +157,7 @@ Ending the sessions of an identity provider removes every Home Assistant refresh
 
 ### Integrations
 
-No identity provider integration ships with the engine; each one is added separately. A generic OpenID Connect integration configures any issuer through discovery, and provider specific integrations build on the same spec.
+No identity provider integration ships with the engine; each one is added separately. A generic OpenID Connect integration configures any issuer through discovery, and provider specific integrations bring a protocol of their own where the identity provider bends the rules.
 
 - Config flows subclass `IdentityProviderConfigFlow` from the `auth` component and declare their forms, title and spec builder; hassfest rejects any other config flow in a sign-in integration. The base aborts when the engine is not in `auth_providers` or no URL is available, shows the redirect URIs to register, validates every spec with `async_validate_identity_provider` before creating or updating an entry, maps validation reasons to the shared form errors and runs the options flow. An integration that derives the entry from the input, such as through discovery with `async_discover_identity_provider`, overrides `async_resolve_setup` only.
 - Reconfiguring never shows the stored client secret and always asks for it again; an empty secret turns the entry into a public client. An identity provider with pairwise subjects, such as Microsoft, keys them by client ID, so its reconfigure form only takes the secret.
@@ -164,13 +170,14 @@ No identity provider integration ships with the engine; each one is added separa
 - Authorization code flow with PKCE `S256`, with or without a client secret.
 - The browser leaves Home Assistant and returns to `/auth/login_callback`, the shared callback the `auth` component registers for any login flow with an external step. The callback validates state, flow existence, browser, IP and the relying client's redirect URI, then redirects to `/auth/authorize?flow_id=...&auth_callback=1` for a final frontend post.
 - `EXTERNAL_STEP` may only move to another external step or to `EXTERNAL_STEP_DONE`; aborting raises `ValueError`. So `async_step_authorize` records failures and `async_step_finish` reports them.
+- A plain OAuth2 flow exchanges the code, looks the account up with the access token and discards the token.
 - `EXTERNAL_STEP_DONE` needs a second `async_configure` call to reach `CREATE_ENTRY`; that is the final frontend post.
 
 ### Claims
 
 | Value | Set by | Read when |
 | --- | --- | --- |
-| Subject | Always `sub` | Every login, ID token only |
+| Subject | Always `sub`; the client's lookup for plain OAuth2 | Every login, ID token or lookup only |
 | Account name | `account_name_claim` | Every login, display only |
 | Username | `username_claim` | Account creation |
 | Display name | `display_name_claim` | Account creation |
