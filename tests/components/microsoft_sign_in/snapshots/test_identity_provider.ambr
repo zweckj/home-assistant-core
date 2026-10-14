@@ -11,9 +11,6 @@
       'discovery_url': 'https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration',
       'display_name_claim': 'name',
       'issuer': 'https://login.microsoftonline.com/{tenantid}/v2.0',
-      'issuer_aliases': frozenset({
-      }),
-      'issuer_claim': 'tid',
       'required_claims': dict({
       }),
       'scopes': tuple(
@@ -24,6 +21,9 @@
     }),
     'revalidate_interval': None,
   })
+# ---
+# name: test_get_identity_provider[common][protocol]
+  'EntraOpenIDConnect'
 # ---
 # name: test_get_identity_provider[consumers]
   dict({
@@ -37,9 +37,6 @@
       'discovery_url': 'https://login.microsoftonline.com/consumers/v2.0/.well-known/openid-configuration',
       'display_name_claim': 'name',
       'issuer': 'https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0',
-      'issuer_aliases': frozenset({
-      }),
-      'issuer_claim': None,
       'required_claims': dict({
         'tid': dict({
           'value': '9188040d-6c67-4c5b-b112-36a304b66dad',
@@ -54,6 +51,9 @@
     'revalidate_interval': None,
   })
 # ---
+# name: test_get_identity_provider[consumers][protocol]
+  'OpenIDConnect'
+# ---
 # name: test_get_identity_provider[guid-link]
   dict({
     'accounts': <AccountPolicy.LINK: 'link'>,
@@ -66,9 +66,6 @@
       'discovery_url': None,
       'display_name_claim': 'name',
       'issuer': 'https://login.microsoftonline.com/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/v2.0',
-      'issuer_aliases': frozenset({
-      }),
-      'issuer_claim': None,
       'required_claims': dict({
         'tid': dict({
           'value': 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
@@ -83,6 +80,9 @@
     'revalidate_interval': None,
   })
 # ---
+# name: test_get_identity_provider[guid-link][protocol]
+  'OpenIDConnect'
+# ---
 # name: test_get_identity_provider[guid-provision-admin-group]
   dict({
     'accounts': <AccountPolicy.PROVISION: 'provision'>,
@@ -95,9 +95,6 @@
       'discovery_url': None,
       'display_name_claim': 'name',
       'issuer': 'https://login.microsoftonline.com/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/v2.0',
-      'issuer_aliases': frozenset({
-      }),
-      'issuer_claim': None,
       'required_claims': dict({
         'tid': dict({
           'value': 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
@@ -112,6 +109,9 @@
     'revalidate_interval': datetime.timedelta(seconds=3600),
   })
 # ---
+# name: test_get_identity_provider[guid-provision-admin-group][protocol]
+  'OpenIDConnect'
+# ---
 # name: test_get_identity_provider[organizations]
   dict({
     'accounts': <AccountPolicy.LINK: 'link'>,
@@ -124,9 +124,6 @@
       'discovery_url': 'https://login.microsoftonline.com/organizations/v2.0/.well-known/openid-configuration',
       'display_name_claim': 'name',
       'issuer': 'https://login.microsoftonline.com/{tenantid}/v2.0',
-      'issuer_aliases': frozenset({
-      }),
-      'issuer_claim': 'tid',
       'required_claims': dict({
         'tid': dict({
           'value': '9188040d-6c67-4c5b-b112-36a304b66dad',
@@ -140,4 +137,7 @@
     }),
     'revalidate_interval': None,
   })
+# ---
+# name: test_get_identity_provider[organizations][protocol]
+  'EntraOpenIDConnect'
 # ---

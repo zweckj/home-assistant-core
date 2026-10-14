@@ -34,6 +34,7 @@ def test_get_identity_provider(snapshot: SnapshotAssertion) -> None:
     spec = get_identity_provider(entry.data, entry.options)
 
     assert spec == snapshot
+    assert type(spec.protocol).__name__ == snapshot(name="protocol")
     assert validate_identity_provider(spec) == spec
 
 

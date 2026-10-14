@@ -14,6 +14,7 @@ from homeassistant.components.auth import (
 )
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 
+from .client import TENANT_PLACEHOLDER, EntraOpenIDConnect
 from .const import (
     BASE_URL,
     CONF_ACCOUNTS,
@@ -47,13 +48,13 @@ def get_identity_provider(
             minutes=options.get(CONF_REVALIDATE_INTERVAL, DEFAULT_REVALIDATE_INTERVAL)
         )
 
+    protocol = EntraOpenIDConnect if tenant in MULTI_TENANT_KEYWORDS else OpenIDConnect
     return IdentityProvider(
         client_id=data[CONF_CLIENT_ID],
         client_secret=data[CONF_CLIENT_SECRET],
-        protocol=OpenIDConnect(
+        protocol=protocol(
             issuer=_issuer(tenant),
             discovery_url=_discovery_url(tenant),
-            issuer_claim="tid" if tenant in MULTI_TENANT_KEYWORDS else None,
             required_claims=_required_claims(tenant),
             scopes=_SCOPES,
             account_name_claim="preferred_username",
@@ -79,7 +80,7 @@ def _issuer(tenant: str) -> str:
     if tenant == "consumers":
         return f"{BASE_URL}/{CONSUMERS_TENANT_ID}/v2.0"
     if tenant in MULTI_TENANT_KEYWORDS:
-        return f"{BASE_URL}/{{tenantid}}/v2.0"
+        return f"{BASE_URL}/{TENANT_PLACEHOLDER}/v2.0"
     return f"{BASE_URL}/{tenant}/v2.0"
 
 

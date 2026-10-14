@@ -3,8 +3,10 @@
 from collections.abc import Mapping
 from typing import Any
 
-from homeassistant.components.auth import AccountPolicy, IdentityProvider, OpenIDConnect
+from homeassistant.components.auth import AccountPolicy, IdentityProvider
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
+
+from .client import ISSUER, GoogleOpenIDConnect
 
 
 def get_identity_provider(
@@ -14,9 +16,8 @@ def get_identity_provider(
     return IdentityProvider(
         client_id=data[CONF_CLIENT_ID],
         client_secret=data[CONF_CLIENT_SECRET],
-        protocol=OpenIDConnect(
-            issuer="https://accounts.google.com",
-            issuer_aliases=frozenset({"accounts.google.com"}),
+        protocol=GoogleOpenIDConnect(
+            issuer=ISSUER,
             scopes=("openid", "email"),
             account_name_claim="email",
         ),

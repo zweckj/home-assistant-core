@@ -3,13 +3,10 @@
 from collections.abc import Mapping
 from typing import Any
 
-from homeassistant.components.auth import AccountPolicy, IdentityProvider, OAuth2Profile
+from homeassistant.components.auth import AccountPolicy, IdentityProvider
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 
-_HEADERS = {
-    "Accept": "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-}
+from .client import GitHubOAuth2
 
 
 def get_identity_provider(
@@ -19,15 +16,6 @@ def get_identity_provider(
     return IdentityProvider(
         client_id=data[CONF_CLIENT_ID],
         client_secret=data[CONF_CLIENT_SECRET],
-        protocol=OAuth2Profile(
-            authorize_url="https://github.com/login/oauth/authorize",
-            token_url="https://github.com/login/oauth/access_token",
-            profile_url="https://api.github.com/user",
-            subject_field="id",
-            account_name_field="login",
-            scopes=(),
-            headers=_HEADERS,
-            token_auth_method="client_secret_post",
-        ),
+        protocol=GitHubOAuth2(),
         accounts=AccountPolicy.LINK,
     )

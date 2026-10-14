@@ -5,11 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from homeassistant.auth.providers.oidc.spec import (
-    AccountPolicy,
-    IdentityProviderError,
-    OpenIDConnect,
-)
+from homeassistant.auth.providers.oidc.spec import AccountPolicy, IdentityProviderError
+from homeassistant.components.google_sign_in.client import GoogleOpenIDConnect
 from homeassistant.components.google_sign_in.const import DOMAIN
 from homeassistant.components.google_sign_in.identity_provider import (
     get_identity_provider,
@@ -260,8 +257,7 @@ def test_identity_provider_uses_link_only() -> None:
     spec = get_identity_provider(USER_INPUT, {})
 
     assert spec.accounts is AccountPolicy.LINK
-    assert isinstance(spec.protocol, OpenIDConnect)
+    assert isinstance(spec.protocol, GoogleOpenIDConnect)
     assert spec.protocol.issuer == "https://accounts.google.com"
-    assert spec.protocol.issuer_aliases == frozenset({"accounts.google.com"})
     assert spec.protocol.scopes == ("openid", "email")
     assert spec.protocol.account_name_claim == "email"

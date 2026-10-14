@@ -11,10 +11,6 @@
       'discovery_url': None,
       'display_name_claim': 'name',
       'issuer': 'https://accounts.google.com',
-      'issuer_aliases': frozenset({
-        'accounts.google.com',
-      }),
-      'issuer_claim': None,
       'required_claims': dict({
       }),
       'scopes': tuple(
@@ -25,4 +21,7 @@
     }),
     'revalidate_interval': None,
   })
+# ---
+# name: test_get_identity_provider[protocol]
+  'GoogleOpenIDConnect'
 # ---
