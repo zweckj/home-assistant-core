@@ -6,9 +6,8 @@ from datetime import timedelta
 from enum import StrEnum
 import hashlib
 import json
-import re
 from types import MappingProxyType
-from typing import Any, Literal, NoReturn, cast
+from typing import Any, NoReturn, cast
 from urllib.parse import urlsplit
 
 from homeassistant.exceptions import HomeAssistantError
@@ -17,13 +16,9 @@ from .const import (
     DEFAULT_DISPLAY_NAME_CLAIM,
     DEFAULT_SCOPES,
     DEFAULT_USERNAME_CLAIM,
-    ISSUER_PLACEHOLDER_PATTERN,
     MAX_REVALIDATE_INTERVAL,
     MIN_REVALIDATE_INTERVAL,
-    RESERVED_PROFILE_HEADERS,
 )
-
-_ISSUER_PLACEHOLDER_RE = re.compile(ISSUER_PLACEHOLDER_PATTERN)
 
 
 class AccountPolicy(StrEnum):
@@ -63,8 +58,6 @@ class OpenIDConnect:
 
     issuer: str
     discovery_url: str | None = None
-    issuer_aliases: frozenset[str] = frozenset()
-    issuer_claim: str | None = None
     required_claims: Mapping[str, ClaimRule] = field(default_factory=dict)
     scopes: tuple[str, ...] = DEFAULT_SCOPES
     account_name_claim: str | None = None
@@ -74,28 +67,12 @@ class OpenIDConnect:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class OAuth2Profile:
-    """OAuth2 profile endpoint protocol settings."""
-
-    authorize_url: str
-    token_url: str
-    profile_url: str
-    subject_field: str
-    account_name_field: str | None = None
-    scopes: tuple[str, ...] = ()
-    headers: Mapping[str, str] = field(default_factory=dict)
-    token_auth_method: Literal["client_secret_basic", "client_secret_post"] = (
-        "client_secret_basic"
-    )
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class IdentityProvider:
     """Data-only identity provider specification."""
 
     client_id: str
     client_secret: str | None = None
-    protocol: OpenIDConnect | OAuth2Profile
+    protocol: OpenIDConnect
     accounts: AccountPolicy = AccountPolicy.LINK
     revalidate_interval: timedelta | None = None
     allow_insecure_transport: bool = False
@@ -160,35 +137,6 @@ def _validate_url(value: object, reason: str, *, allow_insecure_transport: bool)
     return url
 
 
-def _contains_issuer_template(issuer: str) -> bool:
-    """Return whether an issuer contains template syntax."""
-    return "{" in issuer or "}" in issuer
-
-
-def _validate_issuer_template(protocol: OpenIDConnect) -> None:
-    """Validate issuer template rules."""
-    if not _contains_issuer_template(protocol.issuer):
-        if protocol.issuer_claim is not None:
-            _raise("issuer_claim_without_template")
-        return
-
-    parsed = urlsplit(protocol.issuer)
-    segments = [
-        segment
-        for segment in parsed.path.split("/")
-        if _contains_issuer_template(segment)
-    ]
-    if (
-        _contains_issuer_template(parsed.netloc)
-        or _contains_issuer_template(parsed.query)
-        or len(segments) != 1
-        or _ISSUER_PLACEHOLDER_RE.fullmatch(segments[0]) is None
-    ):
-        _raise("invalid_issuer_template")
-    if protocol.issuer_claim is None:
-        _raise("issuer_claim_required")
-
-
 def _validate_claim_rule(value: object) -> ClaimRule:
     """Validate a claim rule."""
     if type(value) is Equals or type(value) is NotEquals:
@@ -218,21 +166,6 @@ def _validate_required_claims(value: object) -> Mapping[str, ClaimRule]:
             for key, rule in claims.items()
         }
     )
-
-
-def _validate_headers(value: object) -> Mapping[str, str]:
-    """Validate profile request headers."""
-    if not isinstance(value, Mapping):
-        _raise("invalid_headers")
-    raw_headers = cast(Mapping[object, object], value)
-    headers: dict[str, str] = {}
-    for key, header_value in raw_headers.items():
-        key = _validate_str(key, "invalid_headers", non_empty=True)
-        header_value = _validate_str(header_value, "invalid_headers")
-        if key.lower() in RESERVED_PROFILE_HEADERS:
-            _raise("reserved_header")
-        headers[key] = header_value
-    return MappingProxyType(headers)
 
 
 def _validate_bool(value: object, reason: str) -> bool:
@@ -265,18 +198,6 @@ def _validate_oidc(
             "invalid_discovery_url",
             allow_insecure_transport=allow_insecure_transport,
         )
-    if type(protocol.issuer_aliases) is not frozenset or any(
-        type(alias) is not str or _contains_issuer_template(alias)
-        for alias in protocol.issuer_aliases
-    ):
-        _raise("invalid_issuer_aliases")
-    issuer_claim = (
-        None
-        if protocol.issuer_claim is None
-        else _validate_str(
-            protocol.issuer_claim, "invalid_issuer_claim", non_empty=True
-        )
-    )
     scopes = _validate_tuple(protocol.scopes, "invalid_scopes", required="openid")
     required_claims = _validate_required_claims(protocol.required_claims)
     account_name_claim = _validate_optional_str(
@@ -289,54 +210,16 @@ def _validate_oidc(
         protocol.display_name_claim, "invalid_display_name_claim", non_empty=True
     )
     admin_group = _validate_optional_str(protocol.admin_group, "invalid_admin_group")
-    validated = replace(
+    return replace(
         protocol,
         issuer=issuer,
         discovery_url=discovery_url,
-        issuer_aliases=frozenset(protocol.issuer_aliases),
-        issuer_claim=issuer_claim,
         required_claims=required_claims,
         scopes=scopes,
         account_name_claim=account_name_claim,
         username_claim=username_claim,
         display_name_claim=display_name_claim,
         admin_group=admin_group,
-    )
-    _validate_issuer_template(validated)
-    return validated
-
-
-def _validate_oauth2_profile(
-    protocol: OAuth2Profile, *, allow_insecure_transport: bool
-) -> OAuth2Profile:
-    """Validate OAuth2 profile protocol settings."""
-    if protocol.token_auth_method not in ("client_secret_basic", "client_secret_post"):
-        _raise("invalid_token_auth_method")
-    return replace(
-        protocol,
-        authorize_url=_validate_url(
-            protocol.authorize_url,
-            "invalid_authorize_url",
-            allow_insecure_transport=allow_insecure_transport,
-        ),
-        token_url=_validate_url(
-            protocol.token_url,
-            "invalid_token_url",
-            allow_insecure_transport=allow_insecure_transport,
-        ),
-        profile_url=_validate_url(
-            protocol.profile_url,
-            "invalid_profile_url",
-            allow_insecure_transport=allow_insecure_transport,
-        ),
-        subject_field=_validate_str(
-            protocol.subject_field, "invalid_subject_field", non_empty=True
-        ),
-        account_name_field=_validate_optional_str(
-            protocol.account_name_field, "invalid_account_name_field"
-        ),
-        scopes=_validate_tuple(protocol.scopes, "invalid_scopes"),
-        headers=_validate_headers(protocol.headers),
     )
 
 
@@ -359,19 +242,11 @@ def validate_identity_provider(spec: object) -> IdentityProvider:
     if accounts is AccountPolicy.LINK and spec.revalidate_interval is not None:
         _raise("revalidate_interval_not_allowed")
 
-    protocol = spec.protocol
-    if type(protocol) is OpenIDConnect:
-        protocol = _validate_oidc(
-            protocol, allow_insecure_transport=allow_insecure_transport
-        )
-    elif type(protocol) is OAuth2Profile:
-        if accounts is AccountPolicy.PROVISION:
-            _raise("provision_requires_oidc")
-        protocol = _validate_oauth2_profile(
-            protocol, allow_insecure_transport=allow_insecure_transport
-        )
-    else:
+    if type(spec.protocol) is not OpenIDConnect:
         _raise("invalid_protocol")
+    protocol = _validate_oidc(
+        spec.protocol, allow_insecure_transport=allow_insecure_transport
+    )
 
     if accounts is AccountPolicy.PROVISION and spec.revalidate_interval is None:
         _raise("revalidate_interval_required")
@@ -407,16 +282,12 @@ def _jsonable(value: Any) -> Any:
 
 def trust_key(spec: IdentityProvider) -> str:
     """Return the trust key digest for an identity provider specification."""
-    protocol = spec.protocol
-    if type(protocol) is OpenIDConnect:
-        protocol = replace(
-            protocol,
-            account_name_claim=None,
-            username_claim="",
-            display_name_claim="",
-        )
-    elif type(protocol) is OAuth2Profile:
-        protocol = replace(protocol, account_name_field=None)
+    protocol = replace(
+        spec.protocol,
+        account_name_claim=None,
+        username_claim="",
+        display_name_claim="",
+    )
     payload = {
         "client_id": spec.client_id,
         "client_secret": spec.client_secret,
