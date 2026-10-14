@@ -52,7 +52,7 @@
   })
 # ---
 # name: test_get_identity_provider[consumers][protocol]
-  'OpenIDConnect'
+  'EntraOpenIDConnect'
 # ---
 # name: test_get_identity_provider[guid-link]
   dict({
@@ -81,7 +81,7 @@
   })
 # ---
 # name: test_get_identity_provider[guid-link][protocol]
-  'OpenIDConnect'
+  'EntraOpenIDConnect'
 # ---
 # name: test_get_identity_provider[guid-provision-admin-group]
   dict({
@@ -110,7 +110,7 @@
   })
 # ---
 # name: test_get_identity_provider[guid-provision-admin-group][protocol]
-  'OpenIDConnect'
+  'EntraOpenIDConnect'
 # ---
 # name: test_get_identity_provider[organizations]
   dict({

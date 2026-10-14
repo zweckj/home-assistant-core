@@ -5,7 +5,13 @@ from dataclasses import dataclass
 import re
 from typing import Any, override
 
-from homeassistant.components.auth import OidcClient, OidcIdTokenError, OpenIDConnect
+from homeassistant.components.auth import (
+    IdentityProvider,
+    OidcClient,
+    OidcIdTokenError,
+    OpenIDConnect,
+)
+from homeassistant.core import HomeAssistant
 
 TENANT_PLACEHOLDER = "{tenantid}"
 
@@ -48,9 +54,23 @@ class EntraClient(OidcClient):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EntraOpenIDConnect(OpenIDConnect):
-    """OpenID Connect for an Entra ID endpoint shared by many tenants.
+    """OpenID Connect for Entra ID.
 
-    The issuer contains the tenant placeholder.
+    An issuer with the tenant placeholder is an endpoint shared by many
+    tenants. Such endpoints, and the consumers one, publish their discovery
+    document under the endpoint name instead of the issuer.
     """
 
-    client_class = EntraClient
+    discovery_url: str | None = None
+
+    @override
+    def create_client(self, hass: HomeAssistant, spec: IdentityProvider) -> OidcClient:
+        """Return the client for the tenant or the shared endpoint."""
+        client_class = EntraClient if TENANT_PLACEHOLDER in self.issuer else OidcClient
+        return client_class(
+            hass,
+            issuer=self.issuer,
+            client_id=spec.client_id,
+            client_secret=spec.client_secret,
+            discovery_url=self.discovery_url,
+        )

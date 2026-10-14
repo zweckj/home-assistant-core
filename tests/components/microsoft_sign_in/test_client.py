@@ -4,13 +4,19 @@ from typing import Any
 
 import pytest
 
-from homeassistant.components.auth import OidcIdTokenError
-from homeassistant.components.microsoft_sign_in.client import EntraClient
+from homeassistant.components.auth import IdentityProvider, OidcClient, OidcIdTokenError
+from homeassistant.components.microsoft_sign_in.client import (
+    EntraClient,
+    EntraOpenIDConnect,
+)
 from homeassistant.core import HomeAssistant
 
 TEMPLATE = "https://login.microsoftonline.com/{tenantid}/v2.0"
 TENANT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 TENANT_ISSUER = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
+DISCOVERY_URL = (
+    "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+)
 
 
 @pytest.fixture
@@ -79,3 +85,24 @@ def test_verify_issuer_claim_rejects_another_tenant(
 def test_accepts_issuer(client: EntraClient, issuer: str, accepted: bool) -> None:
     """Test stored issuers of any tenant belong to the client."""
     assert client.accepts_issuer(issuer) is accepted
+
+
+@pytest.mark.parametrize(
+    ("issuer", "client_class"),
+    [
+        pytest.param(TEMPLATE, EntraClient, id="shared"),
+        pytest.param(TENANT_ISSUER, OidcClient, id="tenant"),
+    ],
+)
+def test_protocol_creates_the_client(
+    hass: HomeAssistant, issuer: str, client_class: type[OidcClient]
+) -> None:
+    """Test shared endpoints get the tenant aware client and a discovery URL."""
+    protocol = EntraOpenIDConnect(issuer=issuer, discovery_url=DISCOVERY_URL)
+
+    client = protocol.create_client(
+        hass, IdentityProvider(client_id="client-id", protocol=protocol)
+    )
+
+    assert type(client) is client_class
+    assert client.discovery_url == DISCOVERY_URL

@@ -8,7 +8,6 @@
     'protocol': dict({
       'account_name_claim': 'email',
       'admin_group': None,
-      'discovery_url': None,
       'display_name_claim': 'name',
       'issuer': 'https://accounts.google.com',
       'required_claims': dict({

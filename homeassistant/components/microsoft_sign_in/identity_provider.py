@@ -10,7 +10,6 @@ from homeassistant.components.auth import (
     Equals,
     IdentityProvider,
     NotEquals,
-    OpenIDConnect,
 )
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 
@@ -48,11 +47,10 @@ def get_identity_provider(
             minutes=options.get(CONF_REVALIDATE_INTERVAL, DEFAULT_REVALIDATE_INTERVAL)
         )
 
-    protocol = EntraOpenIDConnect if tenant in MULTI_TENANT_KEYWORDS else OpenIDConnect
     return IdentityProvider(
         client_id=data[CONF_CLIENT_ID],
         client_secret=data[CONF_CLIENT_SECRET],
-        protocol=protocol(
+        protocol=EntraOpenIDConnect(
             issuer=_issuer(tenant),
             discovery_url=_discovery_url(tenant),
             required_claims=_required_claims(tenant),
