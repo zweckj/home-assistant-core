@@ -18,14 +18,12 @@ Decisions come first: each one has a reason, and reversing it needs a better rea
 
 ### The spec is data, and integration code never runs in the auth path
 
-- `IdentityProvider`, `OpenIDConnect`, `OAuth2Profile`, `AccountPolicy` and the claim rules are frozen, slotted dataclasses and enums without callables, imported from `homeassistant.components.auth`.
+- `IdentityProvider`, `OpenIDConnect`, `AccountPolicy` and the claim rules are frozen, slotted dataclasses and enums without callables, imported from `homeassistant.components.auth`.
 - `get_identity_provider(data, options)` is synchronous and receives the config entry data and options only, never `hass`, which makes I/O an obvious violation. The bridge calls it when an entry loads or changes, never while signing in, linking, validating tokens or revalidating sessions.
 - `validate_identity_provider` checks exact types, so a `str` subclass or an `int` passed as a `bool` is refused, and returns a copy with read-only mappings. It enforces:
   - HTTPS URLs with a host and without credentials or a fragment, for the issuer and every configured endpoint;
-  - an issuer template with exactly one placeholder that is a whole path segment, plus an `issuer_claim` to fill it; aliases cannot be templates;
   - `openid` among the OpenID Connect scopes, and claim rules that are `Equals`, `NotEquals` or a non-empty `OneOf`;
-  - no reserved headers, such as `Authorization`, `Cookie`, `Host` or the framing headers, on profile requests;
-  - `PROVISION` only with `OpenIDConnect` and a revalidation interval between five minutes and thirty days, while `LINK` refuses an interval. Values out of bounds are rejected, not clamped.
+  - `PROVISION` only with a revalidation interval between five minutes and thirty days, while `LINK` refuses an interval. Values out of bounds are rejected, not clamped.
 - Registration builds the protocol client before anything is stored, so a spec the client refuses fails with `invalid_spec` instead of at the first sign-in.
 - `async_validate_identity_provider` runs the same checks and, for OpenID Connect, fetches the discovery document, so a config flow rejects a spec before creating the entry. Every failure carries a stable `IdentityProviderError.reason`.
 - The hassfest `identity_provider` plugin checks core integrations: the manifest (`dependencies: [auth]`, `config_flow`, `integration_type: service`, no requirements), an import allowlist applied to every module of the integration (no aiohttp, no network helpers, no `homeassistant.auth` internals and no relative import leaving the package), forbidden builtins such as `open` and `exec`, and the shape of `identity_provider.py`. It is a review aid, not a sandbox.
@@ -50,18 +48,15 @@ The spec declares what an identity may be used for; the engine enforces it.
   - Home Assistant multi-factor authentication applies after the external sign-in.
 - `PROVISION` adds:
   - signing in with an unknown identity creates a user, never an owner, in `system-users` unless the ID token grants the admin group;
-  - a JWKS-verified ID token is mandatory, so `OAuth2Profile` cannot provision;
   - revalidation is mandatory, and multi-factor authentication is left to the identity provider;
   - its identities cannot be unlinked, because the next sign-in would provision a new user.
 - The remaining risk is an integration declaring `PROVISION` for an identity provider anyone can register with, such as Google, GitHub or Microsoft `common`. Integrations default to `LINK` and offer `PROVISION` only as an explicit option where one organisation controls the accounts, such as the administrator's own issuer or a single Microsoft tenant. Spec snapshot tests make such a change visible in review.
 
 ### Identity and account mapping
 
-- An OpenID Connect credential is keyed by the canonical issuer and `sub`. Per OIDC Core 5.7 a subject is only unique within an issuer, so binding both stops a repointed identity provider inheriting existing accounts.
-- Aliases are accepted in `iss` but never stored; credentials always carry the canonical issuer. A templated issuer stores the filled-in value, so subjects of different tenants stay apart. The filling claim must match a conservative character pattern, and `iss` must equal the filled template exactly.
+- An OpenID Connect credential is keyed by the issuer and `sub`. Per OIDC Core 5.7 a subject is only unique within an issuer, so binding both stops a repointed identity provider inheriting existing accounts.
 - The subject claim is not configurable: another signed claim may be reassignable, turning reassignment into account takeover.
 - Nothing else is an identifier. Matching by `preferred_username` was removed; 5.7 states it is neither unique nor stable, which made it a takeover vector.
-- An `OAuth2Profile` credential is keyed by the origin of the profile URL and the configured profile field. That field has to be a non-empty string or an integer; a boolean is refused. The profile endpoint is only reached with the access token from the same exchange, but this is weaker than a signed ID token, which is why these identities can only be linked.
 - `required_claims` are checked on the verified ID token at every sign-in and on every refreshed ID token; a refreshed token that fails them ends the session.
 - `account_name` is shown to the user next to the linked identity and refreshed at every sign-in. It is never used for matching.
 - OIDC Core 5.3.2 requires discarding a userinfo response unless its `sub` matches the ID token exactly, since a substituted access token would otherwise import another user's claims. A mismatch or a missing `sub` aborts the login.
@@ -137,17 +132,17 @@ Ending the sessions of an identity provider removes every Home Assistant refresh
 
 ### Transport, tokens and storage
 
-- Every endpoint must be HTTPS, including `userinfo_endpoint` and `revocation_endpoint` from discovery, which carry bearer and refresh tokens, and the profile endpoint.
+- Every endpoint must be HTTPS, including `userinfo_endpoint` and `revocation_endpoint` from discovery, which carry bearer and refresh tokens.
 - No outbound request follows redirects: a redirect defeats the HTTPS check, and a 307 or 308 from the token endpoint would replay the client secret.
 - The browser flow itself must be HTTPS unless the request arrived over the internal URL, since the tokens it carries are as exposed as the ones on the back channel.
 - A spec can waive all three HTTPS rules with `allow_insecure_transport`, for an identity provider on a trusted network that cannot be given a certificate; integrations should offer it in advanced mode only. It only relaxes the scheme: endpoints still need a host and may not carry credentials or a fragment. It is part of the trust key, so toggling it ends that identity provider's sessions.
 - The discovery document's issuer must match the configured issuer exactly. A trailing slash is part of the identifier, so accepting either spelling would weaken issuer binding.
 - PKCE is always `S256`. A provider advertising challenge methods without it is refused rather than downgraded to `plain`.
-- Token responses must be labelled `Bearer`, compared case insensitively, because the access token is sent to userinfo as a bearer. A 200 without a bearer access token is a failure too, because GitHub answers errors with 200. A 429 is retried like a 5xx, and any other 4xx from the token endpoint counts as a rejected grant.
+- Token responses must be labelled `Bearer`, compared case insensitively, because the access token is sent to userinfo as a bearer. A 200 without a bearer access token is a failure too, because some providers answer errors with 200. A 429 is retried like a 5xx, and any other 4xx from the token endpoint counts as a rejected grant.
 - ID token algorithms are an allowlist intersected with what the provider advertises; `none` and the HMAC family are never accepted.
 - A key is only used when the provider publishes it for verifying signatures, and a key that declares an algorithm is held to it.
 - `aud`, `azp`, `nonce`, `exp` and `iat` are verified with a small clock-skew leeway. `at_hash` is verified when present using constant-time comparison; EdDSA is excluded because OIDC pins no hash for it.
-- OpenID Connect client authentication prefers `client_secret_basic` (the RFC 6749 default), falling back to `client_secret_post` only when advertised. Explicitly unsupported methods fail before the secret is sent. `OAuth2Profile` has no discovery, so its spec names the method.
+- OpenID Connect client authentication prefers `client_secret_basic` (the RFC 6749 default), falling back to `client_secret_post` only when advertised. Explicitly unsupported methods fail before the secret is sent.
 - Unknown key IDs trigger a JWKS refetch behind a cooldown, so a forged `kid` cannot hammer the provider.
 - The store uses `private=True` and atomic writes. It holds the identity provider registry and the sessions with their external refresh tokens, but never client secrets; those live in config entries.
 - Stored records and sessions are validated during eager initialization. Unreadable entries are discarded, and sessions without a registered identity provider or without a credential of the same subject are pruned before revalidation starts.
@@ -156,7 +151,7 @@ Ending the sessions of an identity provider removes every Home Assistant refresh
 
 ### Integrations
 
-No identity provider integration ships with the engine; each one is added separately. A generic OpenID Connect integration configures any issuer through discovery, and provider specific integrations build on the same spec: issuer aliases (Google), an issuer template filled from a claim (Microsoft tenants) and `OAuth2Profile` for providers without OpenID Connect (GitHub).
+No identity provider integration ships with the engine; each one is added separately. A generic OpenID Connect integration configures any issuer through discovery, and provider specific integrations build on the same spec.
 
 - Config flows subclass `IdentityProviderConfigFlow` from the `auth` component and declare their forms, title and spec builder; hassfest rejects any other config flow in a sign-in integration. The base aborts when the engine is not in `auth_providers` or no URL is available, shows the redirect URIs to register, validates every spec with `async_validate_identity_provider` before creating or updating an entry, maps validation reasons to the shared form errors and runs the options flow. An integration that derives the entry from the input, such as through discovery with `async_discover_identity_provider`, overrides `async_resolve_setup` only.
 - Reconfiguring never shows the stored client secret and always asks for it again; an empty secret turns the entry into a public client. An identity provider with pairwise subjects, such as Microsoft, keys them by client ID, so its reconfigure form only takes the secret.
@@ -170,14 +165,13 @@ No identity provider integration ships with the engine; each one is added separa
 - The browser leaves Home Assistant and returns to `/auth/login_callback`, the shared callback the `auth` component registers for any login flow with an external step. The callback validates state, flow existence, browser, IP and the relying client's redirect URI, then redirects to `/auth/authorize?flow_id=...&auth_callback=1` for a final frontend post.
 - `EXTERNAL_STEP` may only move to another external step or to `EXTERNAL_STEP_DONE`; aborting raises `ValueError`. So `async_step_authorize` records failures and `async_step_finish` reports them.
 - `EXTERNAL_STEP_DONE` needs a second `async_configure` call to reach `CREATE_ENTRY`; that is the final frontend post.
-- An `OAuth2Profile` flow exchanges the code, reads the profile with the access token and discards the token.
 
 ### Claims
 
 | Value | Set by | Read when |
 | --- | --- | --- |
-| Subject | Always `sub`; `subject_field` for `OAuth2Profile` | Every login, ID token or profile only |
-| Account name | `account_name_claim` or `account_name_field` | Every login, display only |
+| Subject | Always `sub` | Every login, ID token only |
+| Account name | `account_name_claim` | Every login, display only |
 | Username | `username_claim` | Account creation |
 | Display name | `display_name_claim` | Account creation |
 | Groups | Always `groups`, only with `admin_group` | Verified ID tokens at login and refresh |
@@ -194,6 +188,5 @@ No identity provider integration ships with the engine; each one is added separa
 - Step up authentication is not offered. Proving an identity again means a full browser redirect to the identity provider, so `support_step_up` stays off and a sensitive action has to be confirmed with another provider the account is linked to.
 - A `LINK` sign-in code minted just before a trust key change that keeps the child active can still be exchanged within its ten minutes. `PROVISION` is not affected, because ending the sessions leaves the code without the session it needs.
 - A link code minted before its identity provider was suspended can still be redeemed. The linked identity cannot sign in until the provider is active again.
-- `OAuth2Profile` access tokens are discarded, not revoked; GitHub offers no standard revocation endpoint.
 - Login buttons only appear once the identity provider integrations are loaded. Existing sessions keep working in the meantime.
 - The repair issue naming users left without a login after a removal stays until it is dismissed.
