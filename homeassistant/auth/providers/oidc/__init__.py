@@ -62,7 +62,6 @@ from .spec import (
     IdentityProvider,
     IdentityProviderError,
     NotEquals,
-    OneOf,
     OpenIDConnect,
     ProtocolSpec,
     trust_key,
@@ -83,7 +82,6 @@ __all__ = [
     "NotEquals",
     "OidcAuthProvider",
     "OidcIdentityProvider",
-    "OneOf",
     "OpenIDConnect",
     "ProtocolSpec",
     "ProviderMetadata",
@@ -150,13 +148,11 @@ def _needs_userinfo(spec: OpenIDConnect, claims: Mapping[str, Any]) -> bool:
     )
 
 
-def _claim_matches(rule: Equals | NotEquals | OneOf, value: Any) -> bool:
+def _claim_matches(rule: ClaimRule, value: Any) -> bool:
     """Return if a claim value satisfies a required claim rule."""
     if isinstance(rule, Equals):
         return bool(value == rule.value)
-    if isinstance(rule, NotEquals):
-        return bool(value != rule.value)
-    return isinstance(value, str) and value in rule.values
+    return bool(value != rule.value)
 
 
 def _required_claims_match(protocol: OpenIDConnect, claims: Mapping[str, Any]) -> bool:
