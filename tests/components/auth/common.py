@@ -12,6 +12,7 @@ The helpers exercise the actual Home Assistant auth HTTP endpoints and the
 audited OIDC/OAuth2 engine; integrations only need to provide their spec.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 import time
@@ -25,6 +26,12 @@ from jwt.algorithms import RSAAlgorithm
 from yarl import URL
 
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH
+from homeassistant.auth.providers.oidc import IdentityProvider, ProtocolSpec
+from homeassistant.auth.providers.oidc.client import (
+    OAuth2IdentityClient,
+    async_bearer_get,
+)
+from homeassistant.core import HomeAssistant
 
 from tests.common import CLIENT_ID, CLIENT_REDIRECT_URI
 from tests.test_util.aiohttp import AiohttpClientMocker, AiohttpClientMockResponse
@@ -135,6 +142,85 @@ class FakeOpenIDProvider:
         )
 
 
+PROFILE_ISSUER = "https://api.profile.example.com"
+PROFILE_AUTHORIZE_URL = "https://profile.example.com/authorize"
+PROFILE_TOKEN_URL = "https://profile.example.com/token"
+PROFILE_URL = "https://api.profile.example.com/user"
+
+
+class ProfileClient(OAuth2IdentityClient):
+    """OAuth2 client that reads the account from a profile endpoint."""
+
+    async def async_fetch_identity(self, access_token: str) -> tuple[str, str | None]:
+        """Return the subject and account name from the profile."""
+        body = await async_bearer_get(
+            self.hass,
+            PROFILE_URL,
+            access_token,
+            endpoint="profile",
+            fetching="the profile",
+            headers={"X-Api-Version": "1"},
+        )
+        return str(body["id"]), body.get("login")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ProfileProtocol(ProtocolSpec):
+    """Protocol of an identity provider without OpenID Connect."""
+
+    scopes: tuple[str, ...] = ()
+
+    def create_client(
+        self, hass: HomeAssistant, spec: IdentityProvider
+    ) -> ProfileClient:
+        """Return the profile client."""
+        return ProfileClient(
+            hass,
+            issuer=PROFILE_ISSUER,
+            authorize_url=PROFILE_AUTHORIZE_URL,
+            token_url=PROFILE_TOKEN_URL,
+            client_id=spec.client_id,
+            client_secret=spec.client_secret,
+            scopes=self.scopes,
+            token_auth_method="client_secret_post",
+            allow_insecure_transport=spec.allow_insecure_transport,
+        )
+
+
+class FakeOAuth2ProfileProvider:
+    """Fake OAuth2 provider that serves token and profile endpoint responses."""
+
+    def __init__(
+        self,
+        aioclient_mock: AiohttpClientMocker,
+        *,
+        authorize_url: str,
+        token_url: str,
+        profile_url: str,
+        profile: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Initialize the provider and register HTTP mocks."""
+        self.authorize_url = authorize_url
+        self.token_url = token_url
+        self.profile_url = profile_url
+        self.profile = dict(profile or {"id": "user-1234", "login": "alice"})
+        aioclient_mock.post(
+            self.token_url,
+            json={"access_token": "profile-access-token", "token_type": "Bearer"},
+        )
+        aioclient_mock.get(self.profile_url, side_effect=self._async_profile)
+
+    def set_profile(self, **profile: Any) -> None:
+        """Set the profile endpoint response."""
+        self.profile = profile
+
+    async def _async_profile(
+        self, method: str, url: URL, data: Any
+    ) -> AiohttpClientMockResponse:
+        """Return the current profile response."""
+        return AiohttpClientMockResponse(method=method, url=url, json=self.profile)
+
+
 def _state_and_nonce(url: str) -> tuple[str, str | None]:
     """Return the state and optional nonce from an external step URL."""
     parsed = URL(url)
@@ -183,27 +269,33 @@ async def _finish_flow(client: TestClient, state: str) -> dict[str, Any]:
 async def async_sign_in(
     client: TestClient,
     idp_id: str,
-    fake: FakeOpenIDProvider,
+    fake: FakeOpenIDProvider | FakeOAuth2ProfileProvider,
     **claims: Any,
 ) -> dict[str, Any]:
     """Drive a real identity provider sign-in flow and return the final flow JSON."""
     state, nonce = await _start_flow(client, idp_id, access_token=None)
-    assert nonce is not None
-    fake.set_next_token(nonce=nonce, **claims)
+    if isinstance(fake, FakeOpenIDProvider):
+        assert nonce is not None
+        fake.set_next_token(nonce=nonce, **claims)
+    elif claims:
+        fake.set_profile(**claims)
     return await _finish_flow(client, state)
 
 
 async def async_link(
     client: TestClient,
     idp_id: str,
-    fake: FakeOpenIDProvider,
+    fake: FakeOpenIDProvider | FakeOAuth2ProfileProvider,
     access_token: str,
     **claims: Any,
 ) -> dict[str, Any]:
     """Drive a real identity provider link flow and return the link response JSON."""
     state, nonce = await _start_flow(client, idp_id, access_token=access_token)
-    assert nonce is not None
-    fake.set_next_token(nonce=nonce, **claims)
+    if isinstance(fake, FakeOpenIDProvider):
+        assert nonce is not None
+        fake.set_next_token(nonce=nonce, **claims)
+    elif claims:
+        fake.set_profile(**claims)
     step = await _finish_flow(client, state)
     resp = await client.post(
         "/auth/link_user",

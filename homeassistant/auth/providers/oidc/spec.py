@@ -1,5 +1,6 @@
 """Public identity provider specification for the OIDC auth engine."""
 
+from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from datetime import timedelta
@@ -7,11 +8,13 @@ from enum import StrEnum
 import hashlib
 import json
 from types import MappingProxyType
-from typing import Any, NoReturn, cast
+from typing import Any, ClassVar, NoReturn, Self, cast, override
 from urllib.parse import urlsplit
 
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
+from .client import IdentityClient, OidcClient
 from .const import (
     DEFAULT_DISPLAY_NAME_CLAIM,
     DEFAULT_SCOPES,
@@ -53,8 +56,33 @@ type ClaimRule = Equals | NotEquals | OneOf
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class OpenIDConnect:
+class ProtocolSpec(ABC):
+    """How the engine talks to an identity provider.
+
+    Only built-in integrations may bring their own subclass; a custom
+    integration is limited to OpenIDConnect.
+    """
+
+    def validate(self, *, allow_insecure_transport: bool) -> Self:
+        """Return a validated copy, raising IdentityProviderError."""
+        return self
+
+    def trust_data(self) -> Any:
+        """Return the settings whose change ends existing sessions."""
+        return _jsonable(self)
+
+    @abstractmethod
+    def create_client(
+        self, hass: HomeAssistant, spec: IdentityProvider
+    ) -> IdentityClient:
+        """Return the client that signs users in."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OpenIDConnect(ProtocolSpec):
     """OpenID Connect protocol settings."""
+
+    client_class: ClassVar[type[OidcClient]] = OidcClient
 
     issuer: str
     discovery_url: str | None = None
@@ -65,6 +93,33 @@ class OpenIDConnect:
     display_name_claim: str = DEFAULT_DISPLAY_NAME_CLAIM
     admin_group: str | None = None
 
+    @override
+    def validate(self, *, allow_insecure_transport: bool) -> Self:
+        """Return a validated copy, raising IdentityProviderError."""
+        return _validate_oidc(self, allow_insecure_transport=allow_insecure_transport)
+
+    @override
+    def trust_data(self) -> Any:
+        """Return the settings whose change ends existing sessions."""
+        # Claims that only label an account do not change who signs in.
+        return _jsonable(
+            replace(
+                self, account_name_claim=None, username_claim="", display_name_claim=""
+            )
+        )
+
+    @override
+    def create_client(self, hass: HomeAssistant, spec: IdentityProvider) -> OidcClient:
+        """Return the client that signs users in."""
+        return self.client_class(
+            hass,
+            issuer=self.issuer,
+            client_id=spec.client_id,
+            client_secret=spec.client_secret,
+            discovery_url=self.discovery_url,
+            allow_insecure_transport=spec.allow_insecure_transport,
+        )
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class IdentityProvider:
@@ -72,7 +127,7 @@ class IdentityProvider:
 
     client_id: str
     client_secret: str | None = None
-    protocol: OpenIDConnect
+    protocol: ProtocolSpec
     accounts: AccountPolicy = AccountPolicy.LINK
     revalidate_interval: timedelta | None = None
     allow_insecure_transport: bool = False
@@ -182,9 +237,9 @@ def _validate_account_policy(value: object) -> AccountPolicy:
     return value
 
 
-def _validate_oidc(
-    protocol: OpenIDConnect, *, allow_insecure_transport: bool
-) -> OpenIDConnect:
+def _validate_oidc[T: OpenIDConnect](
+    protocol: T, *, allow_insecure_transport: bool
+) -> T:
     """Validate OIDC protocol settings."""
     issuer = _validate_url(
         protocol.issuer,
@@ -242,11 +297,12 @@ def validate_identity_provider(spec: object) -> IdentityProvider:
     if accounts is AccountPolicy.LINK and spec.revalidate_interval is not None:
         _raise("revalidate_interval_not_allowed")
 
-    if type(spec.protocol) is not OpenIDConnect:
+    if not isinstance(spec.protocol, ProtocolSpec):
         _raise("invalid_protocol")
-    protocol = _validate_oidc(
-        spec.protocol, allow_insecure_transport=allow_insecure_transport
-    )
+    protocol = spec.protocol.validate(allow_insecure_transport=allow_insecure_transport)
+    # Creating users needs the verified claims of an ID token.
+    if accounts is AccountPolicy.PROVISION and not isinstance(protocol, OpenIDConnect):
+        _raise("provision_requires_oidc")
 
     if accounts is AccountPolicy.PROVISION and spec.revalidate_interval is None:
         _raise("revalidate_interval_required")
@@ -282,16 +338,12 @@ def _jsonable(value: Any) -> Any:
 
 def trust_key(spec: IdentityProvider) -> str:
     """Return the trust key digest for an identity provider specification."""
-    protocol = replace(
-        spec.protocol,
-        account_name_claim=None,
-        username_claim="",
-        display_name_claim="",
-    )
+    protocol_type = type(spec.protocol)
     payload = {
         "client_id": spec.client_id,
         "client_secret": spec.client_secret,
-        "protocol": _jsonable(protocol),
+        "protocol_type": f"{protocol_type.__module__}.{protocol_type.__qualname__}",
+        "protocol": spec.protocol.trust_data(),
         "accounts": spec.accounts.value,
         "allow_insecure_transport": spec.allow_insecure_transport,
     }

@@ -12,6 +12,7 @@ from homeassistant.auth.providers.oidc import (
     IdentityProviderError,
     OidcAuthProvider,
     OidcIdentityProvider,
+    OpenIDConnect,
     async_get_provider,
 )
 from homeassistant.config_entries import (
@@ -204,6 +205,19 @@ class _IdentityProviderBridge:
             spec = platform.get_identity_provider(entry.data, entry.options)
         except Exception:
             _LOGGER.exception("Error getting identity provider from %s", entry.domain)
+            self._async_suspend(provider, entry_id)
+            self._async_create_invalid_issue(entry.title, entry.domain, entry_id)
+            return
+
+        # A protocol of its own runs integration code while signing in.
+        if (
+            type(getattr(spec, "protocol", None)) is not OpenIDConnect
+            and not async_get_loaded_integration(self.hass, entry.domain).is_built_in
+        ):
+            _LOGGER.warning(
+                "The custom integration %s may only use the OpenIDConnect protocol",
+                entry.domain,
+            )
             self._async_suspend(provider, entry_id)
             self._async_create_invalid_issue(entry.title, entry.domain, entry_id)
             return
