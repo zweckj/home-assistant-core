@@ -5340,6 +5340,12 @@
       "config_flow": true,
       "iot_class": "local_polling"
     },
+    "openid_connect": {
+      "name": "OpenID Connect",
+      "integration_type": "service",
+      "config_flow": true,
+      "iot_class": "local_polling"
+    },
     "openrgb": {
       "name": "OpenRGB",
       "integration_type": "hub",

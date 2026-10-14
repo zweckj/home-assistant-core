@@ -1,0 +1,86 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]",
+      "identity_providers_disabled": "Signing in with identity providers is turned off. Add `type: oidc` to `auth_providers` in your configuration to use it.",
+      "no_url_available": "Home Assistant has no URL that the identity provider could redirect back to. Set up an internal or external URL in the network settings first."
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_config": "The identity provider configuration is not valid.",
+      "invalid_discovery": "The identity provider returned an invalid OpenID Connect configuration.",
+      "invalid_scopes": "Scopes must include `openid`.",
+      "issuer_mismatch": "The identity provider reported issuer `{reported_issuer}`, which does not match the entered issuer.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "reconfigure": {
+        "data": {
+          "allow_insecure_transport": "Allow insecure transport",
+          "client_id": "Client ID",
+          "client_secret": "Client secret"
+        },
+        "data_description": {
+          "allow_insecure_transport": "Allow HTTP issuer and endpoint URLs for lab setups.",
+          "client_id": "OAuth2 client ID from the identity provider.",
+          "client_secret": "OAuth2 client secret from the identity provider. Leave empty for a public client using PKCE only."
+        },
+        "description": "Update the client credentials for `{issuer}`. The issuer cannot be changed because it identifies the linked accounts. Changing the client ID breaks linked accounts if the identity provider issues pairwise subject identifiers."
+      },
+      "user": {
+        "data": {
+          "allow_insecure_transport": "Allow insecure transport",
+          "client_id": "Client ID",
+          "client_secret": "Client secret",
+          "issuer": "Issuer"
+        },
+        "data_description": {
+          "allow_insecure_transport": "Allow HTTP issuer and endpoint URLs for lab setups.",
+          "client_id": "OAuth2 client ID from the identity provider.",
+          "client_secret": "OAuth2 client secret from the identity provider. Leave empty for a public client using PKCE only.",
+          "issuer": "OpenID Connect issuer URL. The discovery document is loaded from `/.well-known/openid-configuration` below this URL."
+        },
+        "description": "Register these redirect URIs with the identity provider:\n\n{redirect_uris}"
+      }
+    }
+  },
+  "options": {
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_config": "The identity provider configuration is not valid.",
+      "invalid_discovery": "The identity provider returned an invalid OpenID Connect configuration.",
+      "invalid_scopes": "Scopes must include `openid`.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "init": {
+        "data": {
+          "account_name_claim": "Linked account name claim",
+          "accounts": "Accounts",
+          "admin_group": "Admin group",
+          "display_name_claim": "Display name claim",
+          "revalidate_interval": "Revalidation interval",
+          "scopes": "Scopes",
+          "username_claim": "Username claim"
+        },
+        "data_description": {
+          "account_name_claim": "Claim shown as the linked account's name.",
+          "accounts": "Provision creates Home Assistant users for everyone the identity provider lets sign in: never owners, and administrators only through the admin group.",
+          "admin_group": "Only used when provisioning. Members of this identity provider group are Home Assistant administrators.",
+          "display_name_claim": "Only used when provisioning. Claim used for the Home Assistant user's display name.",
+          "revalidate_interval": "Only used when provisioning. How often Home Assistant revalidates provisioned sessions, in minutes.",
+          "scopes": "Space-separated OAuth2 scopes. Must include `openid`.",
+          "username_claim": "Only used when provisioning. Claim used for the Home Assistant username."
+        }
+      }
+    }
+  },
+  "selector": {
+    "accounts": {
+      "options": {
+        "link": "Link to existing users only",
+        "provision": "Provision Home Assistant users"
+      }
+    }
+  }
+}
