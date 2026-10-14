@@ -45,6 +45,10 @@ AUTH_PROVIDER_SCHEMA = probatio.Schema(
 )
 
 
+class InvalidStepUpError(HomeAssistantError):
+    """Raised when a step up authentication could not be verified."""
+
+
 class AuthProvider:
     """Provider of user authentication."""
 
@@ -81,6 +85,11 @@ class AuthProvider:
         """Return whether multi-factor auth supported by the auth provider."""
         return True
 
+    @property
+    def support_step_up(self) -> bool:
+        """Return whether the provider can re-verify an already signed in user."""
+        return False
+
     async def async_credentials(self) -> list[Credentials]:
         """Return all credentials of this provider."""
         users = await self.store.async_get_users()
@@ -110,6 +119,16 @@ class AuthProvider:
         """
         raise NotImplementedError
 
+    @callback
+    def async_can_start_login(self, context: AuthFlowContext) -> bool:
+        """Return if the login screen may offer this provider for the context."""
+        return True
+
+    @callback
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return if the credentials are a login the user can fall back to."""
+        return True
+
     async def async_get_or_create_credentials(
         self, flow_result: Mapping[str, str]
     ) -> Credentials:
@@ -125,8 +144,23 @@ class AuthProvider:
         """
         raise NotImplementedError
 
+    async def async_start_step_up(
+        self, user: User, context: AuthFlowContext | None
+    ) -> dict[str, Any]:
+        """Return the data the client needs to build a step up proof."""
+        raise NotImplementedError
+
+    async def async_verify_step_up(
+        self, user: User, data: Mapping[str, Any], context: AuthFlowContext | None
+    ) -> None:
+        """Verify a step up proof, raising InvalidStepUpError if it fails."""
+        raise NotImplementedError
+
     async def async_initialize(self) -> None:
         """Initialize the auth provider."""
+
+    async def async_will_remove_credentials(self, credentials: Credentials) -> None:
+        """Clean up provider owned data before credentials are removed."""
 
     @callback
     def async_validate_refresh_token(

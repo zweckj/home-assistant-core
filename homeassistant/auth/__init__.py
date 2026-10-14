@@ -2,9 +2,10 @@
 
 import asyncio
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from functools import partial
+import logging
 import time
 from typing import Any, cast, override
 
@@ -25,12 +26,20 @@ from . import auth_store, jwt_wrapper, models
 from .const import ACCESS_TOKEN_EXPIRATION, GROUP_ID_ADMIN, REFRESH_TOKEN_EXPIRATION
 from .mfa_modules import MultiFactorAuthModule, auth_mfa_module_from_config
 from .models import AuthFlowContext, AuthFlowResult
-from .providers import AuthProvider, LoginFlow, auth_provider_from_config
-from .providers.homeassistant import HassAuthProvider
+from .providers import (
+    AuthProvider,
+    InvalidStepUpError,
+    LoginFlow,
+    auth_provider_from_config,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 EVENT_USER_ADDED = "user_added"
 EVENT_USER_UPDATED = "user_updated"
 EVENT_USER_REMOVED = "user_removed"
+
+STEP_UP_VALIDITY = timedelta(minutes=5)
 
 type _MfaModuleDict = dict[str, MultiFactorAuthModule]
 type _ProviderKey = tuple[str, str | None]
@@ -72,14 +81,21 @@ async def auth_manager_from_config(
         key = (provider.type, provider.id)
         provider_hash[key] = provider
 
-        if isinstance(provider, HassAuthProvider):
-            # Can be removed in 2026.7 with the legacy mode of
-            # homeassistant auth provider.
-            # We need to initialize the provider to create the repair
-            # if needed as otherwise the provider will be initialized
-            # on first use, which could be rare as users don't
-            # frequently change auth settings
-            await provider.async_initialize()
+    # A broken provider must not take every other way into the instance with it.
+    results = await asyncio.gather(
+        *(provider.async_initialize() for provider in providers),
+        return_exceptions=True,
+    )
+    for provider, result in zip(providers, results, strict=True):
+        if isinstance(result, Exception):
+            _LOGGER.error(
+                "Error initializing auth provider %s: %s",
+                provider.type,
+                result,
+                exc_info=result,
+            )
+        elif isinstance(result, BaseException):
+            raise result
 
     if module_configs:
         modules = await asyncio.gather(
@@ -185,7 +201,14 @@ class AuthManager:
         self._providers = providers
         self._mfa_modules = mfa_modules
         self.login_flow = AuthManagerFlowManager(hass, self)
+        # Stops two logins racing on one new credential from creating two users.
+        self._credential_lock = asyncio.Lock()
         self._revoke_callbacks: dict[str, set[CALLBACK_TYPE]] = {}
+        # Refresh token id to when its step up proof stops counting.
+        self._step_ups: dict[str, datetime] = {}
+        self._credentials_revoked_listeners: set[
+            Callable[[models.Credentials], None]
+        ] = set()
         self._expire_callback: CALLBACK_TYPE | None = None
         self._remove_expired_job = HassJob(
             self._async_remove_expired_refresh_tokens, job_type=HassJobType.Callback
@@ -301,46 +324,106 @@ class AuthManager:
 
         return user
 
+    @callback
+    def async_get_step_up_providers(self, user: models.User) -> list[AuthProvider]:
+        """Return the providers the user can prove their identity with again."""
+        return [
+            provider
+            for credential in user.credentials
+            if (provider := self._async_get_auth_provider(credential)) is not None
+            and provider.support_step_up
+        ]
+
+    @callback
+    def async_get_interactive_refresh_token(
+        self, refresh_token_id: str | None
+    ) -> models.RefreshToken | None:
+        """Return the refresh token of a session a person signed in to."""
+        if refresh_token_id is None or (
+            (refresh_token := self.async_get_refresh_token(refresh_token_id)) is None
+        ):
+            return None
+        # A long-lived access token never signed in, so it cannot prove anything.
+        if refresh_token.token_type != models.TOKEN_TYPE_NORMAL:
+            return None
+        return refresh_token
+
+    async def async_step_up(
+        self,
+        refresh_token_id: str | None,
+        provider: AuthProvider,
+        data: Mapping[str, Any],
+        context: AuthFlowContext | None,
+    ) -> None:
+        """Verify a step up proof and remember it for the session."""
+        if (
+            refresh_token := self.async_get_interactive_refresh_token(refresh_token_id)
+        ) is None:
+            raise InvalidStepUpError("Step up needs an interactive session.")
+
+        await provider.async_verify_step_up(refresh_token.user, data, context)
+        self._step_ups[refresh_token.id] = dt_util.utcnow() + STEP_UP_VALIDITY
+
+    @callback
+    def async_consume_step_up(self, refresh_token_id: str | None) -> bool:
+        """Return if the session recently proved its user, using up the proof."""
+        if (
+            refresh_token := self.async_get_interactive_refresh_token(refresh_token_id)
+        ) is None:
+            return False
+
+        now = dt_util.utcnow()
+        if (expires := self._step_ups.pop(refresh_token.id, None)) is not None:
+            return now < expires
+
+        # A user nothing can re-verify, such as one created by an identity
+        # provider, has to rely on having signed in moments ago.
+        return now < refresh_token.created_at + STEP_UP_VALIDITY and not (
+            self.async_get_step_up_providers(refresh_token.user)
+        )
+
     async def async_get_or_create_user(
         self, credentials: models.Credentials
     ) -> models.User:
         """Get or create a user."""
-        if not credentials.is_new:
-            user = await self.async_get_user_by_credentials(credentials)
-            if user is None:
-                raise ValueError("Unable to find the user.")
+        async with self._credential_lock:
+            if not credentials.is_new:
+                user = await self.async_get_user_by_credentials(credentials)
+                if user is None:
+                    raise ValueError("Unable to find the user.")
+                return user
+
+            auth_provider = self._async_get_auth_provider(credentials)
+
+            if auth_provider is None:
+                raise RuntimeError("Credential with unknown provider encountered")
+
+            info = await auth_provider.async_user_meta_for_credentials(credentials)
+
+            user = await self._store.async_create_user(
+                credentials=credentials,
+                name=info.name,
+                is_active=info.is_active,
+                group_ids=[GROUP_ID_ADMIN if info.group is None else info.group],
+                local_only=info.local_only,
+            )
+
+            self.hass.bus.async_fire(EVENT_USER_ADDED, {"user_id": user.id})
+
             return user
-
-        auth_provider = self._async_get_auth_provider(credentials)
-
-        if auth_provider is None:
-            raise RuntimeError("Credential with unknown provider encountered")
-
-        info = await auth_provider.async_user_meta_for_credentials(credentials)
-
-        user = await self._store.async_create_user(
-            credentials=credentials,
-            name=info.name,
-            is_active=info.is_active,
-            group_ids=[GROUP_ID_ADMIN if info.group is None else info.group],
-            local_only=info.local_only,
-        )
-
-        self.hass.bus.async_fire(EVENT_USER_ADDED, {"user_id": user.id})
-
-        return user
 
     async def async_link_user(
         self, user: models.User, credentials: models.Credentials
     ) -> None:
         """Link credentials to an existing user."""
-        linked_user = await self.async_get_user_by_credentials(credentials)
-        if linked_user == user:
-            return
-        if linked_user is not None:
-            raise ValueError("Credential is already linked to a user")
+        async with self._credential_lock:
+            linked_user = await self.async_get_user_by_credentials(credentials)
+            if linked_user == user:
+                return
+            if linked_user is not None:
+                raise ValueError("Credential is already linked to a user")
 
-        await self._store.async_link_user(user, credentials)
+            await self._store.async_link_user(user, credentials)
 
     async def async_remove_user(self, user: models.User) -> None:
         """Remove a user."""
@@ -407,12 +490,59 @@ class AuthManager:
 
     async def async_remove_credentials(self, credentials: models.Credentials) -> None:
         """Remove credentials."""
-        provider = self._async_get_auth_provider(credentials)
-
-        if provider is not None and hasattr(provider, "async_will_remove_credentials"):
+        if (provider := self._async_get_auth_provider(credentials)) is not None:
             await provider.async_will_remove_credentials(credentials)
 
         await self._store.async_remove_credentials(credentials)
+
+    @callback
+    def async_has_other_login_method(
+        self, user: models.User, *credentials: models.Credentials
+    ) -> bool:
+        """Test if the user can still log in without the given credentials."""
+        removed = {credential.id for credential in credentials}
+        return any(
+            credential.id not in removed
+            and (provider := self._async_get_auth_provider(credential)) is not None
+            and provider.async_can_login_with_credentials(credential)
+            for credential in user.credentials
+        )
+
+    async def async_remove_refresh_tokens_for_credentials(
+        self, credentials: models.Credentials
+    ) -> None:
+        """Remove every refresh token issued for these credentials.
+
+        Matches on the credentials each token was issued for, so this still works
+        after the credentials were detached from their user.
+        """
+        for user in await self.async_get_users():
+            for refresh_token in list(user.refresh_tokens.values()):
+                if (
+                    refresh_token.credential is not None
+                    and refresh_token.credential.id == credentials.id
+                ):
+                    self.async_remove_refresh_token(refresh_token)
+
+        for listener in list(self._credentials_revoked_listeners):
+            listener(credentials)
+
+    @callback
+    def async_add_credentials_revoked_listener(
+        self, listener: Callable[[models.Credentials], None]
+    ) -> CALLBACK_TYPE:
+        """Call the listener whenever every login for some credentials is revoked.
+
+        Lets holders of state derived from a login, such as pending
+        authorization codes, drop it together with the sessions.
+        """
+        self._credentials_revoked_listeners.add(listener)
+
+        @callback
+        def remove_listener() -> None:
+            self._credentials_revoked_listeners.discard(listener)
+
+        return remove_listener
 
     async def async_enable_user_mfa(
         self, user: models.User, mfa_module_id: str, data: Any
@@ -532,6 +662,7 @@ class AuthManager:
     def async_remove_refresh_token(self, refresh_token: models.RefreshToken) -> None:
         """Delete a refresh token."""
         self._store.async_remove_refresh_token(refresh_token)
+        self._step_ups.pop(refresh_token.id, None)
 
         callbacks = self._revoke_callbacks.pop(refresh_token.id, ())
         for revoke_callback in callbacks:

@@ -105,6 +105,12 @@ class TrustedNetworksAuthProvider(AuthProvider):
         """Trusted Networks auth provider does not support MFA."""
         return False
 
+    @callback
+    @override
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return False, as a trusted network login only works on that network."""
+        return False
+
     @override
     async def async_login_flow(
         self, context: AuthFlowContext | None
@@ -207,6 +213,18 @@ class TrustedNetworksAuthProvider(AuthProvider):
 
         if is_cloud_connection(self.hass):
             raise InvalidAuthError("Can't allow access from Home Assistant Cloud")
+
+    @callback
+    @override
+    def async_can_start_login(self, context: AuthFlowContext) -> bool:
+        """Return if the request comes from a trusted network."""
+        if (ip_addr := context.get("ip_address")) is None:
+            return False
+        try:
+            self.async_validate_access(ip_addr)
+        except InvalidAuthError:
+            return False
+        return True
 
     @callback
     @override

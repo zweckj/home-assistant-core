@@ -19,6 +19,7 @@ from homeassistant.auth.models import (
     Credentials,
     RefreshToken,
 )
+from homeassistant.auth.providers import homeassistant as prov_ha
 from homeassistant.components import auth
 from homeassistant.components.auth import DOMAIN
 from homeassistant.core import HomeAssistant
@@ -179,33 +180,99 @@ def test_auth_code_store_expiration(
     mock_credential, freezer: FrozenDateTimeFactory
 ) -> None:
     """Test that the auth code store will not return expired tokens."""
-    store, retrieve = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store()
     client_id = "bla"
     now = utcnow()
 
     freezer.move_to(now)
-    code = store(client_id, mock_credential)
+    code = store(client_id, mock_credential, "authorize")
 
     freezer.move_to(now + timedelta(minutes=10))
-    assert retrieve(client_id, code) is None
+    assert retrieve(client_id, code, "authorize") is None
 
     freezer.move_to(now)
-    code = store(client_id, mock_credential)
+    code = store(client_id, mock_credential, "authorize")
 
     freezer.move_to(now + timedelta(minutes=9, seconds=59))
-    entry = retrieve(client_id, code)
+    entry = retrieve(client_id, code, "authorize")
     assert entry is not None
     assert entry.credentials == mock_credential
 
 
+def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
+    """Test a code minted for one purpose cannot be redeemed for the other."""
+    store, retrieve, _ = auth._create_auth_code_store()
+    client_id = "bla"
+
+    code = store(client_id, mock_credential, "link_user")
+    assert retrieve(client_id, code, "authorize") is None
+    # The mismatch must not consume the code either.
+    entry = retrieve(client_id, code, "link_user")
+    assert entry is not None
+    assert entry.credentials == mock_credential
+
+    code = store(client_id, mock_credential, "authorize")
+    assert retrieve(client_id, code, "link_user") is None
+    entry = retrieve(client_id, code, "authorize")
+    assert entry is not None
+    assert entry.credentials == mock_credential
+
+
+def test_auth_code_store_discards_codes_of_revoked_credentials(
+    mock_credential,
+) -> None:
+    """Test pending codes die with the sessions of their credentials."""
+    store, retrieve, discard = auth._create_auth_code_store()
+    client_id = "bla"
+    other_credential = Credentials(
+        id="other",
+        auth_provider_type="insecure_example",
+        auth_provider_id=None,
+        data={"username": "other-user"},
+        is_new=False,
+    )
+
+    revoked_code = store(client_id, mock_credential, "authorize")
+    kept_code = store(client_id, other_credential, "authorize")
+
+    discard(mock_credential)
+
+    assert retrieve(client_id, revoked_code, "authorize") is None
+    entry = retrieve(client_id, kept_code, "authorize")
+    assert entry is not None
+    assert entry.credentials == other_credential
+
+
+async def test_auth_code_is_refused_after_the_credentials_are_revoked(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a login code cannot buy a session once the login was revoked."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    credentials = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(credentials)
+    code = await _async_login_for_code(client)
+
+    await hass.auth.async_remove_refresh_tokens_for_credentials(credentials)
+
+    resp = await client.post(
+        "/auth/token",
+        data={"client_id": CLIENT_ID, "grant_type": "authorization_code", "code": code},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert (await resp.json())["error"] == "invalid_request"
+
+
 def test_auth_code_store_requires_credentials(mock_credential) -> None:
     """Test we require credentials."""
-    store, _retrieve = auth._create_auth_code_store()
+    store, _retrieve, _ = auth._create_auth_code_store()
 
     with pytest.raises(TypeError):
-        store(None, MockUser())
+        store(None, MockUser(), "authorize")
 
-    store(None, mock_credential)
+    store(None, mock_credential, "authorize")
 
 
 async def test_ws_current_user(
@@ -461,6 +528,113 @@ async def test_ws_long_lived_access_token(
     assert refresh_token.client_id is None
     assert refresh_token.client_name == "GPS Logger"
     assert refresh_token.client_icon is None
+
+
+async def test_ws_step_up(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    hass_access_token: str,
+    local_auth: prov_ha.HassAuthProvider,
+) -> None:
+    """Test a step up proof unlocks exactly one sensitive change."""
+    assert await async_setup_component(hass, DOMAIN, {"http": {}})
+    await hass.async_add_executor_job(local_auth.data.add_auth, "admin", "test-pass")
+    refresh_token_id = hass.auth.async_validate_access_token(hass_access_token).id
+    ws_client = await hass_ws_client(hass, hass_access_token)
+
+    await ws_client.send_json(
+        {"id": 5, "type": "auth/step_up/start", "handler": ["homeassistant", None]}
+    )
+    result = await ws_client.receive_json()
+    assert result["success"], result
+    assert result["result"] == {}
+
+    await ws_client.send_json(
+        {
+            "id": 6,
+            "type": "auth/step_up",
+            "handler": ["homeassistant", None],
+            "data": {"password": "wrong-pass"},
+        }
+    )
+    result = await ws_client.receive_json()
+    assert not result["success"]
+    assert result["error"]["code"] == "invalid_step_up"
+    assert not hass.auth.async_consume_step_up(refresh_token_id)
+
+    await ws_client.send_json(
+        {
+            "id": 7,
+            "type": "auth/step_up",
+            "handler": ["homeassistant", None],
+            "data": {"password": "test-pass"},
+        }
+    )
+    result = await ws_client.receive_json()
+    assert result["success"], result
+
+    assert hass.auth.async_consume_step_up(refresh_token_id)
+    # The proof is used up by the change it unlocked.
+    assert not hass.auth.async_consume_step_up(refresh_token_id)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"type": "auth/step_up/start"}, id="start"),
+        pytest.param(
+            {"type": "auth/step_up", "data": {"password": "test-pass"}}, id="verify"
+        ),
+    ],
+)
+async def test_ws_step_up_needs_a_provider_of_the_user(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    hass_access_token: str,
+    payload: dict[str, Any],
+) -> None:
+    """Test only a provider that can verify the user is accepted."""
+    assert await async_setup_component(hass, DOMAIN, {"http": {}})
+    ws_client = await hass_ws_client(hass, hass_access_token)
+
+    await ws_client.send_json(
+        {"id": 5, "handler": ["insecure_example", None], **payload}
+    )
+    result = await ws_client.receive_json()
+    assert not result["success"]
+    assert result["error"]["code"] == "invalid_provider"
+
+
+async def test_ws_step_up_refuses_long_lived_access_token(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    hass_admin_user: MockUser,
+    hass_admin_credential: Credentials,
+) -> None:
+    """Test a long-lived access token cannot earn a step up proof."""
+    assert await async_setup_component(hass, DOMAIN, {"http": {}})
+    await hass.auth.async_link_user(hass_admin_user, hass_admin_credential)
+    refresh_token = await hass.auth.async_create_refresh_token(
+        hass_admin_user,
+        client_name="Script",
+        token_type=TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+    )
+    ws_client = await hass_ws_client(
+        hass, hass.auth.async_create_access_token(refresh_token)
+    )
+
+    await ws_client.send_json(
+        {
+            "id": 5,
+            "type": "auth/step_up",
+            "handler": ["homeassistant", None],
+            "data": {"password": "test-pass"},
+        }
+    )
+    result = await ws_client.receive_json()
+    assert not result["success"]
+    assert result["error"]["code"] == "invalid_step_up"
+    assert not hass.auth.async_consume_step_up(refresh_token.id)
 
 
 async def test_ws_refresh_tokens(
