@@ -13,7 +13,6 @@ from homeassistant.auth.providers.oidc import OidcAuthProvider, async_get_provid
 from homeassistant.components.auth import (
     AccountPolicy,
     IdentityProvider,
-    OAuth2Profile,
     OpenIDConnect,
     async_get_redirect_uris,
     async_identity_providers_enabled,
@@ -27,8 +26,12 @@ from homeassistant.setup import async_setup_component
 
 from . import async_setup_auth
 from .common import (
+    PROFILE_AUTHORIZE_URL,
+    PROFILE_TOKEN_URL,
+    PROFILE_URL,
     FakeOAuth2ProfileProvider,
     FakeOpenIDProvider,
+    ProfileProtocol,
     async_link,
     async_sign_in,
 )
@@ -81,20 +84,6 @@ def _oidc_spec(
         revalidate_interval=timedelta(hours=1)
         if accounts is AccountPolicy.PROVISION
         else None,
-    )
-
-
-def _oauth2_profile_spec() -> IdentityProvider:
-    """Return a valid OAuth2 profile identity provider spec."""
-    return IdentityProvider(
-        client_id=CLIENT_ID,
-        protocol=OAuth2Profile(
-            authorize_url="https://github.example.com/authorize",
-            token_url="https://github.example.com/token",
-            profile_url="https://github.example.com/user",
-            subject_field="id",
-            account_name_field="login",
-        ),
     )
 
 
@@ -437,6 +426,36 @@ async def test_custom_integration_warning_logged_once(
     assert caplog.text.count("has not been reviewed by Home Assistant") == 1
 
 
+async def test_custom_integration_cannot_bring_a_protocol(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+    caplog: pytest.LogCaptureFixture,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    """Test custom integrations are limited to the OpenID Connect protocol."""
+    await _setup_auth_with_oidc(hass, aiohttp_client, aioclient_mock)
+    entry = _entry()
+    entry.add_to_hass(hass)
+    _mock_platform(
+        hass,
+        IdentityProvider(client_id=CLIENT_ID, protocol=ProfileProtocol()),
+        built_in=False,
+    )
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.entry_id not in _root(hass).identity_provider_ids
+    assert "may only use the OpenIDConnect protocol" in caplog.text
+    assert (
+        issue_registry.async_get_issue(
+            "auth", f"invalid_identity_provider_{entry.entry_id}"
+        )
+        is not None
+    )
+
+
 async def test_orphan_cleanup_at_started(
     hass: HomeAssistant,
 ) -> None:
@@ -579,22 +598,24 @@ async def test_openid_connect_provision_helper(
     assert refresh_token.user.name == "Alice"
 
 
-async def test_oauth2_profile_link_helper(
+async def test_oauth2_protocol_links_and_signs_in(
     hass: HomeAssistant,
     aiohttp_client: ClientSessionGenerator,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
-    """Test OAuth2Profile LINK specs can link and then sign in."""
+    """Test a built-in integration's own protocol can link and then sign in."""
     fake = FakeOAuth2ProfileProvider(
         aioclient_mock,
-        authorize_url="https://github.example.com/authorize",
-        token_url="https://github.example.com/token",
-        profile_url="https://github.example.com/user",
+        authorize_url=PROFILE_AUTHORIZE_URL,
+        token_url=PROFILE_TOKEN_URL,
+        profile_url=PROFILE_URL,
     )
     client = await _setup_auth_with_oidc(hass, aiohttp_client, aioclient_mock)
     entry = _entry()
     entry.add_to_hass(hass)
-    _mock_platform(hass, _oauth2_profile_spec())
+    _mock_platform(
+        hass, IdentityProvider(client_id=CLIENT_ID, protocol=ProfileProtocol())
+    )
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     user = await hass.auth.async_create_user("Alice")

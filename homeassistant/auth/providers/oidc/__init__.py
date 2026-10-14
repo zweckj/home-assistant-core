@@ -35,7 +35,8 @@ from ...models import (
 )
 from .. import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
 from .client import (
-    OAuth2ProfileClient,
+    IdentityClient,
+    OAuth2IdentityClient,
     OidcClient,
     OidcError,
     OidcInsecureTransportError,
@@ -61,9 +62,9 @@ from .spec import (
     IdentityProvider,
     IdentityProviderError,
     NotEquals,
-    OAuth2Profile,
     OneOf,
     OpenIDConnect,
+    ProtocolSpec,
     trust_key,
     validate_identity_provider,
 )
@@ -80,11 +81,11 @@ __all__ = [
     "IdentityProvider",
     "IdentityProviderError",
     "NotEquals",
-    "OAuth2Profile",
     "OidcAuthProvider",
     "OidcIdentityProvider",
     "OneOf",
     "OpenIDConnect",
+    "ProtocolSpec",
     "ProviderMetadata",
     "async_discover_identity_provider",
     "async_get_provider",
@@ -166,44 +167,16 @@ def _required_claims_match(protocol: OpenIDConnect, claims: Mapping[str, Any]) -
     )
 
 
-type ProtocolClient = OidcClient | OAuth2ProfileClient
-
-
-def _build_client(hass: HomeAssistant, spec: IdentityProvider) -> ProtocolClient:
+def _build_client(hass: HomeAssistant, spec: IdentityProvider) -> IdentityClient:
     """Return the protocol client for a validated spec."""
-    protocol = spec.protocol
     try:
-        if isinstance(protocol, OpenIDConnect):
-            return OidcClient(
-                hass,
-                issuer=protocol.issuer,
-                client_id=spec.client_id,
-                client_secret=spec.client_secret,
-                discovery_url=protocol.discovery_url,
-                issuer_aliases=protocol.issuer_aliases,
-                issuer_claim=protocol.issuer_claim,
-                allow_insecure_transport=spec.allow_insecure_transport,
-            )
-        return OAuth2ProfileClient(
-            hass,
-            authorize_url=protocol.authorize_url,
-            token_url=protocol.token_url,
-            profile_url=protocol.profile_url,
-            client_id=spec.client_id,
-            client_secret=spec.client_secret,
-            subject_field=protocol.subject_field,
-            account_name_field=protocol.account_name_field,
-            scopes=protocol.scopes,
-            headers=protocol.headers,
-            token_auth_method=protocol.token_auth_method,
-            allow_insecure_transport=spec.allow_insecure_transport,
-        )
+        return spec.protocol.create_client(hass, spec)
     except (ValueError, OidcError) as err:
         raise IdentityProviderError("invalid_spec", str(err)) from err
 
 
 def _revoke_refresh_tokens(
-    hass: HomeAssistant, client: ProtocolClient | None, sessions: list[OidcSession]
+    hass: HomeAssistant, client: IdentityClient | None, sessions: list[OidcSession]
 ) -> None:
     """Revoke the external refresh tokens of ended sessions in the background."""
     if client is None:
@@ -404,7 +377,7 @@ class OidcAuthProvider(AuthProvider):
         )
 
     async def _async_end_identity_provider_sessions(
-        self, idp_id: str, client: ProtocolClient | None
+        self, idp_id: str, client: IdentityClient | None
     ) -> None:
         """End sessions of an identity provider, revoking with the given client."""
         data = await self.async_get_data()
@@ -472,11 +445,7 @@ class OidcAuthProvider(AuthProvider):
                 if timestamp < session.refresh_after:
                     continue
                 child = self._children.get(session.idp_id)
-                if (
-                    child is None
-                    or not child.active
-                    or not isinstance(child.protocol, OpenIDConnect)
-                ):
+                if child is None or not child.active:
                     if timestamp >= session.revalidate_after:
                         expired.append(session)
                     continue
@@ -554,8 +523,8 @@ class OidcIdentityProvider(AuthProvider):
         self.record = record
         self._title: str | None = None
         self._spec: IdentityProvider | None = None
-        self._client: ProtocolClient | None = None
-        self._revocation_client: ProtocolClient | None = None
+        self._client: IdentityClient | None = None
+        self._revocation_client: IdentityClient | None = None
         self._generation = 0
         self._pending_credentials: WeakValueDictionary[tuple[str, str], Credentials] = (
             WeakValueDictionary()
@@ -581,7 +550,7 @@ class OidcIdentityProvider(AuthProvider):
         return self._spec
 
     @property
-    def protocol(self) -> OpenIDConnect | OAuth2Profile | None:
+    def protocol(self) -> ProtocolSpec | None:
         """Return the runtime protocol spec."""
         return self._spec.protocol if self._spec is not None else None
 
@@ -610,7 +579,7 @@ class OidcIdentityProvider(AuthProvider):
         title: str,
         spec: IdentityProvider,
         record: IdentityProviderRecord,
-        client: ProtocolClient,
+        client: IdentityClient,
     ) -> None:
         """Activate the child with a runtime spec."""
         self.record = record
@@ -630,7 +599,7 @@ class OidcIdentityProvider(AuthProvider):
         self._pending_credentials.clear()
 
     @property
-    def revocation_client(self) -> ProtocolClient | None:
+    def revocation_client(self) -> IdentityClient | None:
         """Return the last active client, if available, for token revocation."""
         return self._revocation_client
 
@@ -664,7 +633,7 @@ class OidcIdentityProvider(AuthProvider):
         return f"{url}{LOGIN_CALLBACK_PATH}"
 
     @callback
-    def async_client(self) -> ProtocolClient:
+    def async_client(self) -> IdentityClient:
         """Return the protocol client of the active identity provider."""
         if self._client is None:
             raise OidcError("The identity provider is dormant")
@@ -1014,8 +983,8 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
         self._code: str | None = None
         self._error: str | None = None
         self._generation: int | None = None
-        self._client: ProtocolClient | None = None
-        self._protocol: OpenIDConnect | OAuth2Profile | None = None
+        self._client: IdentityClient | None = None
+        self._protocol: ProtocolSpec | None = None
 
     @override
     async def async_step_init(
@@ -1040,7 +1009,7 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
         self._client = client = provider.async_client()
         self._protocol = protocol = provider.spec.protocol
         state = self._auth_manager.login_flow.async_encode_external_state(self.flow_id)
-        if isinstance(client, OAuth2ProfileClient):
+        if isinstance(client, OAuth2IdentityClient):
             url = client.async_authorize_url(
                 redirect_uri=self._redirect_uri,
                 state=state,
@@ -1048,6 +1017,7 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
             )
             return self.async_external_step(step_id="authorize", url=url)
 
+        assert isinstance(client, OidcClient)
         assert isinstance(protocol, OpenIDConnect)
         try:
             metadata = await client.async_metadata()
@@ -1094,8 +1064,9 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
         ):
             return self.async_abort(reason="configuration_changed")
 
-        if isinstance(client, OAuth2ProfileClient):
-            return await self._async_finish_oauth2_profile(client, generation)
+        if isinstance(client, OAuth2IdentityClient):
+            return await self._async_finish_oauth2(client, generation)
+        assert isinstance(client, OidcClient)
         assert isinstance(self._protocol, OpenIDConnect)
         return await self._async_finish_oidc(client, self._protocol, generation)
 
@@ -1189,10 +1160,10 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
             if not keep_refresh_token and tokens.refresh_token is not None:
                 await client.async_revoke_token(tokens.refresh_token)
 
-    async def _async_finish_oauth2_profile(
-        self, client: OAuth2ProfileClient, generation: int
+    async def _async_finish_oauth2(
+        self, client: OAuth2IdentityClient, generation: int
     ) -> AuthFlowResult:
-        """Finish an OAuth2 profile flow."""
+        """Finish a plain OAuth2 flow, which can only link accounts."""
         provider = self._auth_provider
         try:
             tokens = await client.async_exchange_code(
@@ -1200,11 +1171,11 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
                 redirect_uri=cast(str, self._redirect_uri),
                 code_verifier=self._code_verifier,
             )
-            subject, account_name = await client.async_fetch_profile(
+            subject, account_name = await client.async_fetch_identity(
                 tokens.access_token
             )
         except OidcError as err:
-            _LOGGER.error("Could not finish the OAuth2 profile flow: %s", err)
+            _LOGGER.error("Could not finish the OAuth2 flow: %s", err)
             return self.async_abort(reason="authorize_failed")
 
         async with provider.async_config_guard(generation) as config_is_current:

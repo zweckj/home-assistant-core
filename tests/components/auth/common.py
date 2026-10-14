@@ -26,6 +26,12 @@ from jwt.algorithms import RSAAlgorithm
 from yarl import URL
 
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH
+from homeassistant.auth.providers.oidc import IdentityProvider, ProtocolSpec
+from homeassistant.auth.providers.oidc.client import (
+    OAuth2IdentityClient,
+    async_bearer_get,
+)
+from homeassistant.core import HomeAssistant
 
 from tests.common import CLIENT_ID, CLIENT_REDIRECT_URI
 from tests.test_util.aiohttp import AiohttpClientMocker, AiohttpClientMockResponse
@@ -133,6 +139,51 @@ class FakeOpenIDProvider:
                 "refresh_token": "idp-refresh-token",
                 "token_type": "Bearer",
             },
+        )
+
+
+PROFILE_ISSUER = "https://api.profile.example.com"
+PROFILE_AUTHORIZE_URL = "https://profile.example.com/authorize"
+PROFILE_TOKEN_URL = "https://profile.example.com/token"
+PROFILE_URL = "https://api.profile.example.com/user"
+
+
+class ProfileClient(OAuth2IdentityClient):
+    """OAuth2 client that reads the account from a profile endpoint."""
+
+    async def async_fetch_identity(self, access_token: str) -> tuple[str, str | None]:
+        """Return the subject and account name from the profile."""
+        body = await async_bearer_get(
+            self.hass,
+            PROFILE_URL,
+            access_token,
+            endpoint="profile",
+            fetching="the profile",
+            headers={"X-Api-Version": "1"},
+        )
+        return str(body["id"]), body.get("login")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ProfileProtocol(ProtocolSpec):
+    """Protocol of an identity provider without OpenID Connect."""
+
+    scopes: tuple[str, ...] = ()
+
+    def create_client(
+        self, hass: HomeAssistant, spec: IdentityProvider
+    ) -> ProfileClient:
+        """Return the profile client."""
+        return ProfileClient(
+            hass,
+            issuer=PROFILE_ISSUER,
+            authorize_url=PROFILE_AUTHORIZE_URL,
+            token_url=PROFILE_TOKEN_URL,
+            client_id=spec.client_id,
+            client_secret=spec.client_secret,
+            scopes=self.scopes,
+            token_auth_method="client_secret_post",
+            allow_insecure_transport=spec.allow_insecure_transport,
         )
 
 
