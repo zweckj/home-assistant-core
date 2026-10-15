@@ -1,6 +1,7 @@
 """Test the Home Assistant local auth provider."""
 
 import asyncio
+from typing import Any
 from unittest.mock import Mock, patch
 
 import probatio
@@ -264,3 +265,122 @@ async def test_change_username_not_normalized(
         hass_auth.InvalidUsername, match='Username "TEST-user " is not normalized'
     ):
         data.change_username("test-user", "TEST-user ")
+
+
+@pytest.fixture
+async def colliding_data(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> hass_auth.Data:
+    """Create a loaded data class with usernames only differing in case."""
+    data = hass_auth.Data(hass)
+    hass_storage[hass_auth.STORAGE_KEY] = {
+        "version": 1,
+        "data": {
+            "users": [
+                {
+                    "username": username,
+                    "password": data.hash_password(password, True).decode(),
+                }
+                for username, password in (
+                    ("Bob", "owner-pass"),
+                    ("bob", "guest-pass"),
+                    ("Alice", "alice-pass"),
+                )
+            ]
+        },
+    }
+    await data.async_load()
+    return data
+
+
+@pytest.mark.parametrize(
+    ("username", "password"),
+    [
+        pytest.param("Bob", "owner-pass", id="exact_first"),
+        pytest.param("bob", "guest-pass", id="exact_second"),
+        pytest.param("alice ", "alice-pass", id="not_colliding_normalized"),
+    ],
+)
+async def test_colliding_usernames_login(
+    colliding_data: hass_auth.Data, username: str, password: str
+) -> None:
+    """Test colliding usernames log in with their exact username."""
+    colliding_data.validate_login(username, password)
+
+
+@pytest.mark.parametrize(
+    ("username", "password"),
+    [
+        pytest.param("bob", "owner-pass", id="other_user_password"),
+        pytest.param("Bob", "guest-pass", id="other_user_password_reversed"),
+        pytest.param("BOB", "guest-pass", id="not_exact"),
+        pytest.param("bob ", "guest-pass", id="whitespace"),
+    ],
+)
+async def test_colliding_usernames_login_invalid(
+    colliding_data: hass_auth.Data, username: str, password: str
+) -> None:
+    """Test colliding usernames don't log in with a normalized match."""
+    with pytest.raises(hass_auth.InvalidAuth):
+        colliding_data.validate_login(username, password)
+
+
+async def test_colliding_usernames_change_password(
+    colliding_data: hass_auth.Data,
+) -> None:
+    """Test changing the password of a colliding username only changes that user."""
+    colliding_data.change_password("bob", "new-pass")
+
+    colliding_data.validate_login("bob", "new-pass")
+    colliding_data.validate_login("Bob", "owner-pass")
+
+    with pytest.raises(hass_auth.InvalidUser):
+        colliding_data.change_password("BOB", "new-pass")
+
+
+async def test_colliding_usernames_remove_auth(
+    colliding_data: hass_auth.Data,
+) -> None:
+    """Test removing a colliding username only removes that user."""
+    with pytest.raises(hass_auth.InvalidUser):
+        colliding_data.async_remove_auth("BOB")
+
+    colliding_data.async_remove_auth("bob")
+
+    assert [user["username"] for user in colliding_data.users] == ["Bob", "Alice"]
+    colliding_data.validate_login("bob", "owner-pass")
+
+
+async def test_colliding_usernames_credentials(
+    hass: HomeAssistant, colliding_data: hass_auth.Data
+) -> None:
+    """Test colliding usernames never resolve to the other user's credentials."""
+    manager = await auth_manager_from_config(hass, [{"type": "homeassistant"}], [])
+    provider = manager.auth_providers[0]
+    provider.data = colliding_data
+    owner_credentials = await provider.async_get_or_create_credentials(
+        {"username": "Bob"}
+    )
+    assert owner_credentials.data == {"username": "Bob"}
+
+    with patch.object(provider, "async_credentials", return_value=[owner_credentials]):
+        guest_credentials = await provider.async_get_or_create_credentials(
+            {"username": "bob"}
+        )
+    assert guest_credentials is not owner_credentials
+    assert guest_credentials.is_new
+    assert guest_credentials.data == {"username": "bob"}
+
+    with patch.object(
+        provider,
+        "async_credentials",
+        return_value=[owner_credentials, guest_credentials],
+    ):
+        assert (
+            await provider.async_get_or_create_credentials({"username": "bob"})
+            is guest_credentials
+        )
+        assert (
+            await provider.async_get_or_create_credentials({"username": "Bob"})
+            is owner_credentials
+        )

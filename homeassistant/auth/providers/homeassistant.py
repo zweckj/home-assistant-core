@@ -89,12 +89,41 @@ class Data:
         """Normalize a username based on the mode."""
         return username.strip().casefold()
 
+    @callback
+    def username_collides(self, username: str) -> bool:
+        """Return if more than one stored username normalizes to this username."""
+        normalized = self.normalize_username(username)
+        return (
+            sum(
+                self.normalize_username(user["username"]) == normalized
+                for user in self.users
+            )
+            > 1
+        )
+
     async def async_load(self) -> None:
         """Load stored data."""
         if (data := await self._store.async_load()) is None:
             data = cast(dict[str, list[dict[str, str]]], {"users": []})
 
         self._data = data
+
+    def _find_user(self, username: str) -> dict[str, str] | None:
+        """Return the stored user for a username."""
+        # Usernames stored before normalization was enforced can collide,
+        # only an exact match is safe for those.
+        exact = self.username_collides(username)
+        normalized = self.normalize_username(username)
+        found = None
+        # Compare all users to avoid timing attacks.
+        for user in self.users:
+            if exact:
+                matches = user["username"] == username
+            else:
+                matches = self.normalize_username(user["username"]) == normalized
+            if matches:
+                found = user
+        return found
 
     @property
     def users(self) -> list[dict[str, str]]:
@@ -107,16 +136,9 @@ class Data:
 
         Raises InvalidAuth if auth invalid.
         """
-        username = self.normalize_username(username)
         dummy = b"$2b$12$CiuFGszHx9eNHxPuQcwBWez4CwDTOcLTX5CbOpV6gef2nYuXkY7BO"
-        found = None
 
-        # Compare all users to avoid timing attacks.
-        for user in self.users:
-            if self.normalize_username(user["username"]) == username:
-                found = user
-
-        if found is None:
+        if (found := self._find_user(username)) is None:
             # check a hash to make timing the same as if user was found
             bcrypt.checkpw(b"foo", dummy)
             raise InvalidAuth
@@ -158,32 +180,20 @@ class Data:
     @callback
     def async_remove_auth(self, username: str) -> None:
         """Remove authentication."""
-        username = self.normalize_username(username)
-
-        index = None
-        for i, user in enumerate(self.users):
-            if self.normalize_username(user["username"]) == username:
-                index = i
-                break
-
-        if index is None:
+        if (user := self._find_user(username)) is None:
             raise InvalidUser(translation_key="user_not_found")
 
-        self.users.pop(index)
+        self.users.remove(user)
 
     def change_password(self, username: str, new_password: str) -> None:
         """Update the password.
 
         Raises InvalidUser if user cannot be found.
         """
-        username = self.normalize_username(username)
-
-        for user in self.users:
-            if self.normalize_username(user["username"]) == username:
-                user["password"] = self.hash_password(new_password, True).decode()
-                break
-        else:
+        if (user := self._find_user(username)) is None:
             raise InvalidUser(translation_key="user_not_found")
+
+        user["password"] = self.hash_password(new_password, True).decode()
 
     @callback
     def _validate_new_username(self, new_username: str) -> None:
@@ -214,16 +224,12 @@ class Data:
         Raises InvalidUser if user cannot be found.
         Raises InvalidUsername if the new username is invalid.
         """
-        username = self.normalize_username(username)
         self._validate_new_username(new_username)
 
-        for user in self.users:
-            if self.normalize_username(user["username"]) == username:
-                user["username"] = new_username
-                assert self._data is not None
-                break
-        else:
+        if (user := self._find_user(username)) is None:
             raise InvalidUser(translation_key="user_not_found")
+
+        user["username"] = new_username
 
     async def async_save(self) -> None:
         """Save data."""
@@ -321,8 +327,16 @@ class HassAuthProvider(AuthProvider):
             await self.async_initialize()
             assert self.data is not None
 
+        username = flow_result["username"]
+
+        if self.data.username_collides(username):
+            for credential in await self.async_credentials():
+                if credential.data["username"] == username:
+                    return credential
+            return self.async_create_credentials({"username": username})
+
         norm_username = self.data.normalize_username
-        username = norm_username(flow_result["username"])
+        username = norm_username(username)
 
         for credential in await self.async_credentials():
             if norm_username(credential.data["username"]) == username:
