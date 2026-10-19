@@ -195,7 +195,10 @@ async def test_register_and_list(
     assert len(user.credentials) == 1
     assert user.credentials[0].auth_provider_type == "webauthn"
     assert user.credentials[0].auth_provider_id is None
-    assert user.credentials[0].data == {"user_id": user.id}
+    assert user.credentials[0].data == {
+        "user_id": user.id,
+        "credential_id": CREDENTIAL_ID,
+    }
     assert not user.credentials[0].is_new
     assert await hass.auth.async_get_user_by_credentials(user.credentials[0]) is user
 
@@ -222,14 +225,17 @@ async def test_registered_passkeys_survive_reload(
     registration_result: VerifiedRegistration,
     snapshot: SnapshotAssertion,
 ) -> None:
-    """Test registration, rename, and deletion persist without duplicating HA credentials."""
+    """Test registration, rename, and deletion persist one HA credential per passkey."""
     provider, user = webauthn_account
     client = await _connect_user(hass, aiohttp_client, user, {"Origin": ORIGIN})
     await _register_passkey(client, registration_result, 1)
     await _register_passkey(
         client, replace(registration_result, credential_id=b"credential-2"), 3
     )
-    assert len(user.credentials) == 1
+    assert [credential.data["credential_id"] for credential in user.credentials] == [
+        CREDENTIAL_ID,
+        bytes_to_base64url(b"credential-2"),
+    ]
     credentials = user.credentials[0]
 
     await client.send_json(
@@ -698,41 +704,19 @@ async def test_list_and_modify_only_own_passkeys(
 
 
 @pytest.mark.usefixtures("stepped_up")
-@pytest.mark.parametrize(
-    ("credential_ids", "remaining_ids"),
-    [
-        pytest.param(
-            ["credential-1", "credential-2"],
-            ["credential-2"],
-            id="one-of-two-passkeys",
-        ),
-        pytest.param(["credential-1"], [], id="last-passkey-with-password"),
-    ],
-)
 async def test_delete_from_own_session_returns_result_before_disconnect(
-    hass: HomeAssistant,
-    hass_ws_client: WebSocketGenerator,
-    credential_ids: list[str],
-    remaining_ids: list[str],
+    hass: HomeAssistant, hass_ws_client: WebSocketGenerator
 ) -> None:
     """Test passkey deletion replies before closing the session that invoked it."""
-    hass.auth = await auth_manager_from_config(
-        hass, [{"type": "homeassistant"}, {"type": "webauthn"}], []
-    )
+    hass.auth = await auth_manager_from_config(hass, [{"type": "webauthn"}], [])
     provider = hass.auth.get_auth_provider("webauthn", None)
     assert isinstance(provider, WebAuthnProvider)
     assert provider.data is not None
     auth_provider_webauthn.async_setup(hass)
 
     user = await hass.auth.async_create_user("Alice")
-    password_provider = hass.auth.get_auth_provider("homeassistant", None)
-    assert password_provider is not None
-    await hass.auth.async_link_user(
-        user, password_provider.async_create_credentials({"username": "alice"})
-    )
-    credentials = provider.async_create_credentials({"user_id": user.id})
-    await hass.auth.async_link_user(user, credentials)
-    for credential_id in credential_ids:
+    passkeys = []
+    for credential_id in ("credential-1", "credential-2"):
         await provider.data.async_add_credential(
             user.id,
             WebAuthnCredential(
@@ -744,15 +728,21 @@ async def test_delete_from_own_session_returns_result_before_disconnect(
                 credential_backed_up=True,
             ),
         )
+        credentials = provider.async_create_credentials(
+            {"user_id": user.id, "credential_id": credential_id}
+        )
+        await hass.auth.async_link_user(user, credentials)
+        passkeys.append(credentials)
+    deleted, kept = passkeys
 
     refresh_token = await hass.auth.async_create_refresh_token(
-        user, CLIENT_ID, credential=credentials
+        user, CLIENT_ID, credential=deleted
     )
     access_token = hass.auth.async_create_access_token(refresh_token)
     client = await hass_ws_client(hass, access_token)
     peer = await hass_ws_client(hass, access_token)
-    unrelated = await hass.auth.async_create_refresh_token(
-        user, "https://other-client.example.com"
+    other_passkey_token = await hass.auth.async_create_refresh_token(
+        user, "https://other-client.example.com", credential=kept
     )
     command = {
         "type": "config/auth_provider/webauthn/delete",
@@ -765,12 +755,14 @@ async def test_delete_from_own_session_returns_result_before_disconnect(
     assert result["id"] == command["id"]
     assert result["success"]
     assert hass.auth.async_get_refresh_token(refresh_token.id) is None
-    assert hass.auth.async_get_refresh_token(unrelated.id) is unrelated
-    assert (credentials in user.credentials) is bool(remaining_ids)
+    assert hass.auth.async_get_refresh_token(other_passkey_token.id) is (
+        other_passkey_token
+    )
+    assert user.credentials == [kept]
     assert [
         credential.credential_id
         for credential in await provider.async_list_credentials_meta(user)
-    ] == remaining_ids
+    ] == ["credential-2"]
     assert (await peer.receive()).type is WSMsgType.CLOSE
     assert (await client.receive()).type is WSMsgType.CLOSE
 
