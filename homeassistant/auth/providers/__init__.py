@@ -90,6 +90,11 @@ class AuthProvider:
         """Return whether the provider can re-verify an already signed in user."""
         return False
 
+    @property
+    def support_multiple_credentials(self) -> bool:
+        """Return whether a user can have several credentials of this provider."""
+        return False
+
     async def async_credentials(self) -> list[Credentials]:
         """Return all credentials of this provider."""
         users = await self.store.async_get_users()

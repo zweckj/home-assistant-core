@@ -340,6 +340,12 @@ class WebAuthnProvider(AuthProvider):
         """Return that a signed in user can re-verify with a passkey."""
         return True
 
+    @property
+    @override
+    def support_multiple_credentials(self) -> bool:
+        """Return True, as every passkey has its own credentials."""
+        return True
+
     @override
     async def async_initialize(self) -> None:
         """Initialize the auth provider."""
