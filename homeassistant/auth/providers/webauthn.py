@@ -66,6 +66,7 @@ REGISTER_TIMEOUT_MS: Final = 60000
 CONF_RP_NAME: Final = "rp_name"
 CONF_AUTHENTICATION_CREDENTIAL: Final = "authentication_credential"
 CONF_USER_ID: Final = "user_id"
+CONF_CREDENTIAL_ID: Final = "credential_id"
 
 DEFAULT_CREDENTIAL_NAME: Final = "Passkey"
 
@@ -93,6 +94,13 @@ class _RelyingParty(NamedTuple):
 
     id: str
     origin: str
+
+
+class VerifiedPasskey(NamedTuple):
+    """Passkey an assertion was verified with."""
+
+    user_id: str
+    credential_id: str
 
 
 @callback
@@ -251,12 +259,6 @@ class WebAuthnDataStore:
         credential.name = new_name
         await self._async_save()
 
-    async def async_delete_user_credentials(self, user_id: str) -> None:
-        """Delete all credentials of a user from persistent storage."""
-        if self._data.pop(user_id, None) is None:
-            return
-        await self._async_save()
-
     async def async_update_user_registration(
         self,
         user_id: str,
@@ -287,16 +289,6 @@ class WebAuthnDataStore:
             PublicKeyCredentialDescriptor(id=base64url_to_bytes(cred_id))
             for cred_id in self._data.get(user_id, {})
         ]
-
-    def has_usable_credential(
-        self, user_id: str, rp_ids: set[str], *, excluding: str | None = None
-    ) -> bool:
-        """Return if the user keeps a passkey for one of the relying parties."""
-        return any(
-            credential.rp_id in rp_ids
-            for credential_id, credential in self._data.get(user_id, {}).items()
-            if credential_id != excluding
-        )
 
     def get_credential(
         self, user_id: str, credential_id: str
@@ -383,10 +375,18 @@ class WebAuthnProvider(AuthProvider):
     @callback
     @override
     def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
-        """Return if the account keeps a passkey it can still sign in with."""
-        return self.data is not None and self.data.has_usable_credential(
-            credentials.data[CONF_USER_ID], _async_served_relying_party_ids(self.hass)
-        )
+        """Return if the passkey is one this instance can still sign in with."""
+        if (
+            self.data is None
+            or (
+                registration := self.data.get_credential(
+                    credentials.data[CONF_USER_ID], credentials.data[CONF_CREDENTIAL_ID]
+                )
+            )
+            is None
+        ):
+            return False
+        return registration.rp_id in _async_served_relying_party_ids(self.hass)
 
     async def async_start_registration(
         self, user: User, origin: str
@@ -462,36 +462,42 @@ class WebAuthnProvider(AuthProvider):
         )
 
         await data.async_add_credential(user.id, web_authn_credential)
-        await self._async_link_credentials(user)
-
-    async def _async_link_credentials(self, user: User) -> None:
-        """Give the user credentials for this provider if they have none yet."""
-        if self._async_user_credentials(user) is not None:
-            return
-
+        # Each passkey is its own login, so its sessions can be told apart.
         await self.hass.auth.async_link_user(
-            user, self.async_create_credentials({CONF_USER_ID: user.id})
+            user,
+            self.async_create_credentials(
+                {
+                    CONF_USER_ID: user.id,
+                    CONF_CREDENTIAL_ID: web_authn_credential.credential_id,
+                }
+            ),
         )
 
     @callback
-    def _async_user_credentials(self, user: User) -> Credentials | None:
-        """Return the credentials the user has for this provider."""
-        for credential in user.credentials:
+    def _async_passkey_credentials(
+        self, user: User, credential_id: str
+    ) -> Credentials | None:
+        """Return the credentials of one of the user's passkeys."""
+        for credentials in user.credentials:
             if (
-                credential.auth_provider_type == self.type
-                and credential.auth_provider_id == self.id
+                credentials.auth_provider_type == self.type
+                and credentials.auth_provider_id == self.id
+                and credentials.data[CONF_CREDENTIAL_ID] == credential_id
             ):
-                return credential
+                return credentials
 
         return None
 
     @override
     async def async_will_remove_credentials(self, credentials: Credentials) -> None:
-        """Drop the stored passkeys when the credentials are removed."""
+        """Drop the passkey and its sessions when its credentials are removed."""
         await self.hass.auth.async_remove_refresh_tokens_for_credentials(credentials)
 
         data = await self._async_get_data()
-        await data.async_delete_user_credentials(credentials.data[CONF_USER_ID])
+        with suppress(CredentialNotFoundError):
+            await data.async_delete_credential(
+                credentials.data[CONF_USER_ID], credentials.data[CONF_CREDENTIAL_ID]
+            )
 
     async def async_start_authentication(
         self, origin: str
@@ -508,8 +514,8 @@ class WebAuthnProvider(AuthProvider):
 
     async def async_verify_authentication(
         self, credential: str | dict[str, Any], challenge: bytes, origin: str
-    ) -> str:
-        """Complete the authentication process and return the ID of the user."""
+    ) -> VerifiedPasskey:
+        """Complete the authentication process and return the passkey used."""
 
         try:
             parsed = parse_authentication_credential_json(credential)
@@ -558,7 +564,7 @@ class WebAuthnProvider(AuthProvider):
         except CredentialNotFoundError as err:
             # The passkey was deleted while its assertion was being verified.
             raise InvalidAuthError("Passkey is no longer registered.") from err
-        return user_id
+        return VerifiedPasskey(user_id, parsed.id)
 
     @override
     async def async_start_step_up(
@@ -601,48 +607,37 @@ class WebAuthnProvider(AuthProvider):
             raise InvalidStepUpError("No credential to verify.")
 
         try:
-            verified_user_id = await self.async_verify_authentication(
+            passkey = await self.async_verify_authentication(
                 credential, challenge[0], origin
             )
         except InvalidAuthError as err:
             raise InvalidStepUpError("Passkey step up failed.") from err
 
         # A passkey proves whoever holds it, so it has to be one of this user's.
-        if verified_user_id != user.id:
+        if passkey.user_id != user.id:
             raise InvalidStepUpError("Passkey does not belong to this user.")
 
     async def async_delete_credential(self, user: User, credential_id: str) -> None:
         """Delete a registered credential."""
         data = await self._async_get_data()
 
-        credentials = self._async_user_credentials(user)
-        registration = data.get_credential(user.id, credential_id)
-        rp_ids = _async_served_relying_party_ids(self.hass)
-        # Only a passkey for a relying party this instance still serves can sign
-        # in, so a stale one neither protects the account nor counts as fallback.
         if (
-            registration is not None
-            and registration.rp_id in rp_ids
-            and not data.has_usable_credential(user.id, rp_ids, excluding=credential_id)
-            and credentials is not None
-            and not self.hass.auth.async_has_other_login_method(user, credentials)
-        ):
+            credentials := self._async_passkey_credentials(user, credential_id)
+        ) is None:
+            # A passkey without credentials can't sign in, so nothing relies on it.
+            await data.async_delete_credential(user.id, credential_id)
+            return
+
+        # A passkey for a relying party this instance no longer serves can't sign
+        # in, so it doesn't protect the account and can always go.
+        if self.async_can_login_with_credentials(
+            credentials
+        ) and not self.hass.auth.async_has_other_login_method(user, credentials):
             raise LastLoginMethodError(
                 "Cannot delete the last passkey without another way to log in."
             )
 
-        await data.async_delete_credential(user.id, credential_id)
-
-        # Every passkey shares one credential, so a session cannot be traced back
-        # to the key it was created with and they all have to go.
-        if credentials is not None:
-            await self.hass.auth.async_remove_refresh_tokens_for_credentials(
-                credentials
-            )
-
-        # Without a passkey left to sign in with, the credentials are dead weight.
-        if not data.get_registered_credentials(user.id) and credentials is not None:
-            await self.hass.auth.async_remove_credentials(credentials)
+        await self.hass.auth.async_remove_credentials(credentials)
 
     async def async_list_credentials_meta(
         self, user: User
@@ -666,15 +661,14 @@ class WebAuthnProvider(AuthProvider):
         self, flow_result: Mapping[str, str]
     ) -> Credentials:
         """Get credentials based on the flow result."""
+        credential_id = flow_result[CONF_CREDENTIAL_ID]
 
-        user_id = flow_result[CONF_USER_ID]
+        for credentials in await self.async_credentials():
+            if credentials.data[CONF_CREDENTIAL_ID] == credential_id:
+                return credentials
 
-        for credential in await self.async_credentials():
-            if credential.data[CONF_USER_ID] == user_id:
-                return credential
-
-        # Credentials are created when the user registers their first passkey.
-        raise InvalidAuthError("No credentials found for user.")
+        # Credentials are created when the passkey is registered.
+        raise InvalidAuthError("No credentials found for passkey.")
 
     @override
     async def async_user_meta_for_credentials(
@@ -708,14 +702,14 @@ class WebAuthnLoginFlow(LoginFlow[WebAuthnProvider]):
                 errors["base"] = "invalid_auth"
             else:
                 try:
-                    user_id = await self._auth_provider.async_verify_authentication(
+                    passkey = await self._auth_provider.async_verify_authentication(
                         user_input[CONF_AUTHENTICATION_CREDENTIAL],
                         self._challenge,
                         origin,
                     )
                     credentials = (
                         await self._auth_provider.async_get_or_create_credentials(
-                            {CONF_USER_ID: user_id}
+                            {CONF_CREDENTIAL_ID: passkey.credential_id}
                         )
                     )
                 except InvalidAuthError as err:

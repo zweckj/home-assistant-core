@@ -52,16 +52,31 @@ async def _store_passkey(
     )
 
 
+async def _add_passkey(
+    hass: HomeAssistant,
+    provider: webauthn.WebAuthnProvider,
+    user: User,
+    credential_id: str,
+    rp_id: str = "ha.example.com",
+) -> Credentials:
+    """Register a passkey for the user and link the credentials backing it."""
+    await _store_passkey(provider, user.id, credential_id, rp_id)
+    credentials = provider.async_create_credentials(
+        {"user_id": user.id, "credential_id": credential_id}
+    )
+    await hass.auth.async_link_user(user, credentials)
+    return credentials
+
+
 async def _linked_user(
     hass: HomeAssistant, provider: webauthn.WebAuthnProvider, *credential_ids: str
-) -> tuple[User, Credentials]:
-    """Return a user with passkeys and the credentials backing them."""
+) -> tuple[User, list[Credentials]]:
+    """Return a user with passkeys and the credentials backing each of them."""
     user = await hass.auth.async_create_user("Alice")
-    credentials = provider.async_create_credentials({"user_id": user.id})
-    await hass.auth.async_link_user(user, credentials)
-    for credential_id in credential_ids:
-        await _store_passkey(provider, user.id, credential_id)
-    return user, credentials
+    return user, [
+        await _add_passkey(hass, provider, user, credential_id)
+        for credential_id in credential_ids
+    ]
 
 
 @pytest.mark.usefixtures("hass")
@@ -79,8 +94,8 @@ async def test_provider_is_hidden_until_a_passkey_exists(
 async def test_removing_credentials_revokes_only_passkey_sessions(
     hass: HomeAssistant, provider: webauthn.WebAuthnProvider
 ) -> None:
-    """Test unlinking takes the passkey sessions and the stored keys with it."""
-    user, credentials = await _linked_user(hass, provider, "credential-1")
+    """Test unlinking takes the passkey sessions and the stored key with it."""
+    user, [credentials] = await _linked_user(hass, provider, "credential-1")
     passkey_token = await hass.auth.async_create_refresh_token(
         user, CLIENT_ID, credential=credentials
     )
@@ -96,30 +111,49 @@ async def test_removing_credentials_revokes_only_passkey_sessions(
     assert provider.data.list_credentials_meta(user.id) == []
 
 
-async def test_deleting_one_of_several_passkeys_revokes_the_sessions(
+async def test_deleting_a_passkey_revokes_only_its_sessions(
     hass: HomeAssistant, provider: webauthn.WebAuthnProvider
 ) -> None:
-    """Test sessions go even though the account keeps a passkey."""
-    user, credentials = await _linked_user(
+    """Test the sessions of the other passkeys stay when one passkey goes."""
+    user, [deleted, kept] = await _linked_user(
         hass, provider, "credential-1", "credential-2"
     )
-    refresh_token = await hass.auth.async_create_refresh_token(
-        user, CLIENT_ID, credential=credentials
+    deleted_token = await hass.auth.async_create_refresh_token(
+        user, CLIENT_ID, credential=deleted
+    )
+    kept_token = await hass.auth.async_create_refresh_token(
+        user, "https://other.example.com/", credential=kept
     )
 
     await provider.async_delete_credential(user, "credential-1")
 
-    assert hass.auth.async_get_refresh_token(refresh_token.id) is None
-    assert credentials in user.credentials
+    assert hass.auth.async_get_refresh_token(deleted_token.id) is None
+    assert hass.auth.async_get_refresh_token(kept_token.id) is kept_token
+    assert user.credentials == [kept]
     assert provider.data is not None
-    assert len(provider.data.list_credentials_meta(user.id)) == 1
+    assert [
+        meta.credential_id for meta in provider.data.list_credentials_meta(user.id)
+    ] == ["credential-2"]
+
+
+async def test_deleting_a_passkey_without_credentials(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test a stored passkey nothing links to can be deleted."""
+    user = await hass.auth.async_create_user("Alice")
+    await _store_passkey(provider, user.id, "credential-1")
+
+    await provider.async_delete_credential(user, "credential-1")
+
+    assert provider.data is not None
+    assert provider.data.list_credentials_meta(user.id) == []
 
 
 async def test_deleting_a_passkey_revokes_its_pending_logins(
     hass: HomeAssistant, provider: webauthn.WebAuthnProvider
 ) -> None:
     """Test a code minted before the deletion cannot be redeemed afterwards."""
-    user, credentials = await _linked_user(
+    user, [credentials, _] = await _linked_user(
         hass, provider, "credential-1", "credential-2"
     )
     revoked: list[Credentials] = []
@@ -169,7 +203,7 @@ async def test_last_passkey_guard_ignores_passkeys_for_unserved_relying_parties(
     """Test a passkey for a relying party HA no longer serves is no fallback."""
     await async_process_ha_core_config(hass, {"external_url": ORIGIN})
     user, _ = await _linked_user(hass, provider, "live-key")
-    await _store_passkey(provider, user.id, "stale-key", rp_id="old.example.com")
+    await _add_passkey(hass, provider, user, "stale-key", rp_id="old.example.com")
     assert provider.data is not None
 
     with pytest.raises(webauthn.LastLoginMethodError):
@@ -183,27 +217,41 @@ async def test_last_passkey_guard_ignores_passkeys_for_unserved_relying_parties(
 
 
 @pytest.mark.parametrize(
-    ("rp_ids", "expected"),
+    ("rp_id", "expected"),
     [
-        pytest.param(["ha.example.com"], True, id="served"),
-        pytest.param(["old.example.com"], False, id="unserved"),
-        pytest.param([], False, id="no-passkeys"),
+        pytest.param("ha.example.com", True, id="served"),
+        pytest.param("old.example.com", False, id="unserved"),
     ],
 )
 async def test_can_login_with_credentials_needs_a_usable_passkey(
     hass: HomeAssistant,
     provider: webauthn.WebAuthnProvider,
-    rp_ids: list[str],
+    rp_id: str,
     expected: bool,
 ) -> None:
     """Test only a passkey for a served relying party keeps the account open."""
     await async_process_ha_core_config(hass, {"external_url": ORIGIN})
-    user, credentials = await _linked_user(hass, provider)
-    for index, rp_id in enumerate(rp_ids):
-        await _store_passkey(provider, user.id, f"credential-{index}", rp_id=rp_id)
+    user = await hass.auth.async_create_user("Alice")
+    credentials = await _add_passkey(hass, provider, user, "credential-1", rp_id)
 
     assert provider.async_can_login_with_credentials(credentials) is expected
     assert hass.auth.async_has_other_login_method(user) is expected
+
+
+async def test_credentials_of_a_deleted_passkey(
+    hass: HomeAssistant, provider: webauthn.WebAuthnProvider
+) -> None:
+    """Test credentials whose passkey is gone can't sign in and can be removed."""
+    await async_process_ha_core_config(hass, {"external_url": ORIGIN})
+    user, [credentials] = await _linked_user(hass, provider, "credential-1")
+    assert provider.data is not None
+    await provider.data.async_delete_credential(user.id, "credential-1")
+
+    assert provider.async_can_login_with_credentials(credentials) is False
+
+    await hass.auth.async_remove_credentials(credentials)
+
+    assert user.credentials == []
 
 
 @pytest.mark.parametrize("context", [None, CONTEXT])
@@ -290,7 +338,9 @@ async def test_step_up_succeeds_with_the_users_passkey(
     provider._pending_step_up_challenges[user.id] = (b"challenge", time.time() + 60)
 
     with patch.object(
-        provider, "async_verify_authentication", return_value=user.id
+        provider,
+        "async_verify_authentication",
+        return_value=webauthn.VerifiedPasskey(user.id, "credential-1"),
     ) as verify:
         await provider.async_verify_step_up(
             user,
@@ -311,7 +361,9 @@ async def test_step_up_rejects_a_passkey_from_another_user(
 
     with (
         patch.object(
-            provider, "async_verify_authentication", return_value="another-user"
+            provider,
+            "async_verify_authentication",
+            return_value=webauthn.VerifiedPasskey("another-user", "credential-2"),
         ),
         pytest.raises(webauthn.InvalidStepUpError),
     ):
@@ -381,8 +433,13 @@ async def test_login_flow_needs_an_origin_to_run_a_ceremony_for(
 async def test_login_flow_signs_in_against_the_browser_origin(
     hass: HomeAssistant, provider: webauthn.WebAuthnProvider
 ) -> None:
-    """Test the passkey login runs its ceremony for the origin of the browser."""
-    user, credentials = await _linked_user(hass, provider, "credential-1")
+    """Test the passkey login runs for the browser origin and signs in with that key.
+
+    Each passkey has its own credentials, so the session is tied to the one used.
+    """
+    user, [_, credentials] = await _linked_user(
+        hass, provider, "credential-1", "credential-2"
+    )
 
     with patch(
         f"{webauthn.__name__}._async_relying_party", return_value=RELYING_PARTY
@@ -394,7 +451,9 @@ async def test_login_flow_signs_in_against_the_browser_origin(
         assert result["description_placeholders"]["webauthn_options"]
 
         with patch.object(
-            provider, "async_verify_authentication", return_value=user.id
+            provider,
+            "async_verify_authentication",
+            return_value=webauthn.VerifiedPasskey(user.id, "credential-2"),
         ) as verify:
             result = await hass.auth.login_flow.async_configure(
                 result["flow_id"],
@@ -421,7 +480,9 @@ async def test_login_flow_rejects_an_expired_challenge(
         flow._challenge_expires_at = time.time() - 1
 
         with patch.object(
-            provider, "async_verify_authentication", return_value=user.id
+            provider,
+            "async_verify_authentication",
+            return_value=webauthn.VerifiedPasskey(user.id, "credential-1"),
         ) as verify:
             result = await hass.auth.login_flow.async_configure(
                 result["flow_id"],

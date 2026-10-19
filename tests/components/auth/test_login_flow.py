@@ -728,7 +728,9 @@ async def test_webauthn_login_requires_linked_credentials(
         assert user.credentials == []
         assert await hass.auth.async_get_users() == existing_users
 
-        credentials = provider.async_create_credentials({"user_id": user.id})
+        credentials = provider.async_create_credentials(
+            {"user_id": user.id, "credential_id": credential_id}
+        )
         await hass.auth.async_link_user(user, credentials)
         response = await client.post(flow_url, json=login_input)
 
