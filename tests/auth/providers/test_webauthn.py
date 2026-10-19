@@ -79,6 +79,13 @@ async def _linked_user(
     ]
 
 
+def test_a_user_can_have_several_passkeys(
+    provider: webauthn.WebAuthnProvider,
+) -> None:
+    """Test the auth core may link a credential for every passkey of a user."""
+    assert provider.support_multiple_credentials is True
+
+
 @pytest.mark.usefixtures("hass")
 async def test_provider_is_hidden_until_a_passkey_exists(
     provider: webauthn.WebAuthnProvider,
