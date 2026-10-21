@@ -1,0 +1,118 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: There are no custom actions.
+  appropriate-polling:
+    status: exempt
+    comment: The integration exposes no entities and does not poll; the auth engine validates the IdP during sign-in.
+  brands:
+    status: exempt
+    comment: This generic identity provider integration has no brand asset.
+  common-modules:
+    status: exempt
+    comment: The integration has no entity platforms or shared runtime modules.
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency:
+    status: exempt
+    comment: The integration has no third-party dependencies.
+  docs-actions: done
+  docs-conditions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-triggers: done
+  entity-event-setup:
+    status: exempt
+    comment: The integration has no entities.
+  entity-unique-id:
+    status: exempt
+    comment: The integration has no entities.
+  has-entity-name:
+    status: exempt
+    comment: The integration has no entities.
+  runtime-data:
+    status: exempt
+    comment: The integration stores no runtime data.
+  test-before-configure: done
+  test-before-setup:
+    status: exempt
+    comment: The auth engine verifies the IdP when a sign-in starts.
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions:
+    status: exempt
+    comment: There are no custom actions.
+  config-entry-unloading: done
+  docs-configuration-parameters: todo
+  docs-installation-parameters: todo
+  entity-unavailable:
+    status: exempt
+    comment: The integration has no entities.
+  integration-owner: done
+  log-when-unavailable:
+    status: exempt
+    comment: The integration has no polling runtime that can become unavailable.
+  parallel-updates:
+    status: exempt
+    comment: The integration has no entities.
+  reauthentication-flow: todo
+  test-coverage: done
+
+  # Gold
+  devices:
+    status: exempt
+    comment: The integration has no devices.
+  diagnostics:
+    status: exempt
+    comment: There is no runtime data to expose as diagnostics.
+  discovery-update-info: todo
+  discovery:
+    status: exempt
+    comment: Generic OpenID Connect providers cannot be discovered automatically.
+  docs-data-update:
+    status: exempt
+    comment: The integration has no polling data updates.
+  docs-examples: todo
+  docs-known-limitations: todo
+  docs-supported-devices:
+    status: exempt
+    comment: The integration has no devices.
+  docs-supported-functions: todo
+  docs-troubleshooting: todo
+  docs-use-cases: todo
+  dynamic-devices:
+    status: exempt
+    comment: The integration has no devices.
+  entity-category:
+    status: exempt
+    comment: The integration has no entities.
+  entity-device-class:
+    status: exempt
+    comment: The integration has no entities.
+  entity-disabled-by-default:
+    status: exempt
+    comment: The integration has no entities.
+  entity-translations:
+    status: exempt
+    comment: The integration has no entities.
+  exception-translations: done
+  icon-translations:
+    status: exempt
+    comment: The integration has no entities.
+  reconfiguration-flow: done
+  repair-issues: todo
+  stale-devices:
+    status: exempt
+    comment: The integration has no devices.
+
+  # Platinum
+  async-dependency:
+    status: exempt
+    comment: The integration has no third-party dependencies.
+  inject-websession:
+    status: exempt
+    comment: The integration has no direct HTTP client.
+  strict-typing: done
