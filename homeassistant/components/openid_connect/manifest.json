@@ -1,6 +1,7 @@
 {
   "domain": "openid_connect",
   "name": "OpenID Connect",
+  "categories": ["computers_network.cloud_developer_tools"],
   "codeowners": ["@zweckj"],
   "config_flow": true,
   "dependencies": ["auth"],
