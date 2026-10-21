@@ -34,6 +34,8 @@ class AuthFlowContext(FlowContext, total=False):
     link_user: bool
     link_user_id: str
     origin: str | None
+    # A companion app restore key, scoped to RESTORE_RP_ID instead of the origin.
+    restore: bool
 
 
 class AuthFlowResult(FlowResult[AuthFlowContext, tuple[str, str]], total=False):
