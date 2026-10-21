@@ -202,6 +202,70 @@ async def test_link_user_code_is_bound_to_the_user_who_started_the_flow(
     assert len(info["user"].credentials) == 0
 
 
+async def test_link_user_provider_removed(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a link code is refused once its provider has been removed."""
+    info = await async_get_code(hass, aiohttp_client)
+    hass.auth._providers.pop(("insecure_example", "2nd auth"))
+
+    resp = await info["client"].post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": info["code"]},
+        headers={"authorization": f"Bearer {info['access_token']}"},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert info["user"].credentials == []
+
+
+async def test_login_flow_link_user_rejects_system_user(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test creating a link user flow rejects system users."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_system_user(name="System")
+    refresh_token = await hass.auth.async_create_refresh_token(user)
+    access_token = hass.auth.async_create_access_token(refresh_token)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+        headers={"authorization": f"Bearer {access_token}"},
+    )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+
+
+async def test_login_flow_link_user_rejects_inactive_user(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test an inactive user's token does not authenticate a link user flow."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_user(name="Inactive")
+    refresh_token = await hass.auth.async_create_refresh_token(user, CLIENT_ID)
+    access_token = hass.auth.async_create_access_token(refresh_token)
+    user.is_active = False
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+        headers={"authorization": f"Bearer {access_token}"},
+    )
+
+    assert resp.status == HTTPStatus.UNAUTHORIZED
+
+
 async def test_link_user_flow_does_not_mark_a_successful_login(
     hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
 ) -> None:

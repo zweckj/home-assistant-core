@@ -22,10 +22,15 @@ Pass in parameter 'client_id' and 'redirect_url' validate by indieauth.
 Pass in parameter 'handler' to specify the auth provider to use. Auth providers
 are identified by type and id.
 
+Pass in parameter 'type' to say what the resulting authorization code is for.
+The default is 'authorize', which mints a code for POST /auth/token to exchange
+for tokens. Use 'link_user' to attach the credentials to the user who is already
+signed in; starting that flow requires the user's bearer token, the code is only
+redeemable by that user at POST /auth/link_user, and a provider may allow the
+login purely so it can be linked even when it would refuse to create a new user.
+
 Pass in optional parameters 'code_challenge' and 'code_challenge_method' for
 PKCE (RFC 7636). The only supported method is 'S256'.
-
-The default 'type' is 'authorize'.
 
 {
     "client_id": "https://hassbian.local:8123/",
@@ -82,9 +87,10 @@ from yarl import URL
 from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH, LOGIN_STATE_EXPIRATION
-from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
+from homeassistant.auth.models import AuthFlowContext, AuthFlowResult, User
 from homeassistant.components import onboarding
 from homeassistant.components.http import (
+    KEY_AUTHENTICATED,
     KEY_HASS,
     KEY_HASS_REFRESH_TOKEN_ID,
     KEY_HASS_USER,
@@ -266,6 +272,7 @@ class AuthProvidersView(HomeAssistantView):
                 "id": provider.id,
                 "type": provider.type,
             }
+            | ({"domain": domain} if (domain := provider.domain) is not None else {})
             for provider in hass.auth.auth_providers
             if provider.async_can_start_login(context)
         ]
@@ -455,11 +462,15 @@ class LoginFlowIndexView(LoginFlowBaseView):
             link_user=link_user,
         )
         if link_user:
-            # The code is tied to the account that started attaching an
-            # identity, so only a signed in user can start such a flow.
-            if (user := request.get(KEY_HASS_USER)) is None:
+            # The http middleware only authenticates active users.
+            if not request[KEY_AUTHENTICATED]:
                 return self.json_message(
                     "Authentication required", HTTPStatus.UNAUTHORIZED
+                )
+            user: User = request[KEY_HASS_USER]
+            if user.system_generated:
+                return self.json_message(
+                    "System users cannot link credentials", HTTPStatus.FORBIDDEN
                 )
             # A new identity is a lasting way in, so a bare session is not enough.
             if not request.app[KEY_HASS].auth.async_consume_step_up(

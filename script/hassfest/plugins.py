@@ -14,6 +14,7 @@ INTEGRATION_PLUGINS = [
     "dependencies",
     "dhcp",
     "icons",
+    "identity_provider",
     "integration_info",
     "integration_type",
     "json",

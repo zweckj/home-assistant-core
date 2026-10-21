@@ -21,7 +21,10 @@ from homeassistant.auth.models import (
     Credentials,
     RefreshToken,
 )
-from homeassistant.auth.providers import homeassistant as prov_ha
+from homeassistant.auth.providers import (
+    auth_provider_from_config,
+    homeassistant as prov_ha,
+)
 from homeassistant.components import auth
 from homeassistant.components.auth import DOMAIN
 from homeassistant.core import HomeAssistant
@@ -41,6 +44,15 @@ def mock_credential():
         data={"username": "test-user"},
         is_new=False,
     )
+
+
+@pytest.fixture
+async def mock_credential_provider(hass: HomeAssistant) -> None:
+    """Register the auth provider of the mock credential."""
+    provider = await auth_provider_from_config(
+        hass, hass.auth._store, {"type": "insecure_example", "users": []}
+    )
+    hass.auth._providers[(provider.type, provider.id)] = provider
 
 
 async def async_setup_user_refresh_token(hass: HomeAssistant) -> RefreshToken:
@@ -250,11 +262,108 @@ async def test_auth_code_checks_local_only_user(
     assert error["error"] == "access_denied"
 
 
+async def test_auth_code_provider_rejection_removes_refresh_token(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a failed code exchange does not leave an unusable refresh token."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    code = (await resp.json())["result"]
+
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider.async_validate_refresh_token",
+        side_effect=InvalidAuthError("Invalid access"),
+    ):
+        resp = await client.post(
+            "/auth/token",
+            data={
+                "client_id": CLIENT_ID,
+                "grant_type": "authorization_code",
+                "code": code,
+            },
+        )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+    users = await hass.auth.async_get_users()
+    user = next(
+        user
+        for user in users
+        if any(
+            credentials.auth_provider_type == "insecure_example"
+            for credentials in user.credentials
+        )
+    )
+    assert user.refresh_tokens == {}
+
+
+async def test_auth_code_rejected_user_does_not_leak_the_reason(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a provider refusing the user is logged but not told to the client."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    code = (await resp.json())["result"]
+
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider.async_user_meta_for_credentials",
+        side_effect=InvalidAuthError("internal detail"),
+    ):
+        resp = await client.post(
+            "/auth/token",
+            data={
+                "client_id": CLIENT_ID,
+                "grant_type": "authorization_code",
+                "code": code,
+            },
+        )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+    assert await resp.json() == {"error": "access_denied"}
+    assert "internal detail" in caplog.text
+
+
+@pytest.mark.usefixtures("mock_credential_provider")
 def test_auth_code_store_expiration(
-    mock_credential, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    mock_credential: Credentials,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """Test that the auth code store will not return expired tokens."""
-    store, retrieve, _ = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store(hass)
     client_id = "bla"
     now = utcnow()
 
@@ -273,9 +382,12 @@ def test_auth_code_store_expiration(
     assert entry.credentials == mock_credential
 
 
-def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
+@pytest.mark.usefixtures("mock_credential_provider")
+def test_auth_code_store_rejects_another_purpose(
+    hass: HomeAssistant, mock_credential: Credentials
+) -> None:
     """Test a code minted for one purpose cannot be redeemed for the other."""
-    store, retrieve, _ = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store(hass)
     client_id = "bla"
 
     code = store(client_id, mock_credential, "link_user")
@@ -292,11 +404,12 @@ def test_auth_code_store_rejects_another_purpose(mock_credential) -> None:
     assert entry.credentials == mock_credential
 
 
+@pytest.mark.usefixtures("mock_credential_provider")
 def test_auth_code_store_discards_codes_of_revoked_credentials(
-    mock_credential,
+    hass: HomeAssistant, mock_credential: Credentials
 ) -> None:
     """Test pending codes die with the sessions of their credentials."""
-    store, retrieve, discard = auth._create_auth_code_store()
+    store, retrieve, discard = auth._create_auth_code_store(hass)
     client_id = "bla"
     other_credential = Credentials(
         id="other",
@@ -340,10 +453,12 @@ async def test_auth_code_is_refused_after_the_credentials_are_revoked(
 
 
 def test_auth_code_store_prunes_expired(
-    mock_credential, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    mock_credential: Credentials,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """Test that storing a code removes expired codes."""
-    store, retrieve, _ = auth._create_auth_code_store()
+    store, retrieve, _ = auth._create_auth_code_store(hass)
     client_id = "bla"
     now = utcnow()
 
@@ -358,9 +473,22 @@ def test_auth_code_store_prunes_expired(
     assert retrieve(client_id, code, "authorize") is None
 
 
-def test_auth_code_store_requires_credentials(mock_credential) -> None:
+def test_auth_code_store_refuses_code_of_removed_provider(
+    hass: HomeAssistant, mock_credential: Credentials
+) -> None:
+    """Test a code is refused once the provider of its credential is gone."""
+    store, retrieve, _ = auth._create_auth_code_store(hass)
+
+    code = store("bla", mock_credential, "authorize")
+
+    assert retrieve("bla", code, "authorize") is None
+
+
+def test_auth_code_store_requires_credentials(
+    hass: HomeAssistant, mock_credential: Credentials
+) -> None:
     """Test we require credentials."""
-    store, _retrieve, _ = auth._create_auth_code_store()
+    store, _retrieve, _ = auth._create_auth_code_store(hass)
 
     with pytest.raises(TypeError):
         store(None, MockUser(), "authorize")

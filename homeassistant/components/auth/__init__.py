@@ -148,6 +148,27 @@ from homeassistant.auth.models import (
     User,
 )
 from homeassistant.auth.providers import AuthProvider, InvalidStepUpError
+from homeassistant.auth.providers.oidc import (
+    AccountPolicy,
+    ClaimRule,
+    Equals,
+    IdentityProvider,
+    IdentityProviderError,
+    NotEquals,
+    OpenIDConnect,
+    ProtocolSpec,
+    ProviderMetadata,
+    async_discover_identity_provider,
+    async_validate_identity_provider,
+)
+from homeassistant.auth.providers.oidc.client import (
+    IdentityClient,
+    OAuth2IdentityClient,
+    OidcClient,
+    OidcError,
+    OidcIdTokenError,
+    async_bearer_get,
+)
 from homeassistant.components import websocket_api
 from homeassistant.components.http import KEY_HASS, HomeAssistantView
 from homeassistant.components.http.auth import async_sign_path
@@ -162,6 +183,44 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
 
 from . import indieauth, login_flow, mfa_setup_flow
+from .identity_provider_flow import (
+    IdentityProviderConfigFlow,
+    IdentityProviderFlowError,
+    IdentityProviderSetup,
+)
+from .identity_providers import (
+    async_get_redirect_uris,
+    async_identity_providers_enabled,
+    async_setup_identity_providers,
+)
+
+__all__ = [
+    "AccountPolicy",
+    "ClaimRule",
+    "Equals",
+    "IdentityClient",
+    "IdentityProvider",
+    "IdentityProviderConfigFlow",
+    "IdentityProviderError",
+    "IdentityProviderFlowError",
+    "IdentityProviderSetup",
+    "NotEquals",
+    "OAuth2IdentityClient",
+    "OidcClient",
+    "OidcError",
+    "OidcIdTokenError",
+    "OpenIDConnect",
+    "ProtocolSpec",
+    "ProviderMetadata",
+    "async_bearer_get",
+    "async_discover_identity_provider",
+    "async_get_redirect_uris",
+    "async_identity_providers_enabled",
+    "async_setup_identity_providers",
+    "async_validate_identity_provider",
+]
+
+_LOGGER = getLogger(__name__)
 
 DOMAIN = "auth"
 
@@ -216,7 +275,7 @@ def create_auth_code(
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Component to allow users to login."""
-    store_result, retrieve_result, discard_results = _create_auth_code_store()
+    store_result, retrieve_result, discard_results = _create_auth_code_store(hass)
 
     hass.data[DATA_STORE] = store_result
     hass.auth.async_add_credentials_revoked_listener(discard_results)
@@ -238,6 +297,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     login_flow.async_setup(hass, store_result)
     mfa_setup_flow.async_setup(hass)
+    await async_setup_identity_providers(hass)
 
     return True
 
@@ -397,6 +457,13 @@ class TokenView(HomeAssistantView):
                 {"error": "invalid_grant", "error_description": "Sign in again"},
                 status_code=HTTPStatus.BAD_REQUEST,
             )
+        except InvalidAuthError as exc:
+            _LOGGER.warning(
+                "Rejected a %s sign in: %s", credential.auth_provider_type, exc
+            )
+            return self.json(
+                {"error": "access_denied"}, status_code=HTTPStatus.FORBIDDEN
+            )
 
         if user_access_error := async_user_not_allowed_do_auth(hass, user):
             return self.json(
@@ -415,6 +482,7 @@ class TokenView(HomeAssistantView):
                 refresh_token, request.remote
             )
         except InvalidAuthError as exc:
+            hass.auth.async_remove_refresh_token(refresh_token)
             return self.json(
                 {"error": "access_denied", "error_description": str(exc)},
                 status_code=HTTPStatus.FORBIDDEN,
@@ -556,9 +624,9 @@ async def _async_credentials_removed(
 
 
 @callback
-def _create_auth_code_store() -> tuple[
-    StoreResultType, RetrieveResultType, Callable[[Credentials], None]
-]:
+def _create_auth_code_store(
+    hass: HomeAssistant,
+) -> tuple[StoreResultType, RetrieveResultType, Callable[[Credentials], None]]:
     """Create an in memory store."""
     temp_results: dict[tuple[str, str], AuthCodeEntry] = {}
 
@@ -612,10 +680,20 @@ def _create_auth_code_store() -> tuple[
         # The authorization code MUST expire shortly after it is issued to
         # mitigate the risk of leaks.  A maximum authorization code lifetime of
         # 10 minutes is RECOMMENDED.
-        if dt_util.utcnow() - entry.created < AUTH_CODE_EXPIRATION:
-            return entry
+        if dt_util.utcnow() - entry.created >= AUTH_CODE_EXPIRATION:
+            return None
 
-        return None
+        # Providers can be removed at runtime; a code outliving its provider
+        # would otherwise attach an orphaned credential.
+        if (
+            hass.auth.get_auth_provider(
+                entry.credentials.auth_provider_type,
+                entry.credentials.auth_provider_id,
+            )
+            is None
+        ):
+            return None
+        return entry
 
     @callback
     def discard_results(credentials: Credentials) -> None:
