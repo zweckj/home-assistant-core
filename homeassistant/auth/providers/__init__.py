@@ -282,10 +282,17 @@ class MfaLoginFlow[_AuthProviderT: AuthProvider = AuthProvider](
     @override
     async def async_finish(self, flow_result: Any) -> AuthFlowResult:
         """Ask for a second factor before finishing, if the user enabled one."""
-        credentials = await self._auth_provider.async_get_or_create_credentials(
-            flow_result
+        return await self.async_finish_credentials(
+            await self._auth_provider.async_get_or_create_credentials(flow_result)
         )
 
+    async def async_finish_credentials(
+        self, credentials: Credentials
+    ) -> AuthFlowResult:
+        """Ask for a second factor before finishing with resolved credentials.
+
+        For flows that resolve the credentials themselves.
+        """
         # New credentials are not linked to a user that could have enabled MFA
         if not credentials.is_new and (
             user := await self._auth_manager.async_get_user_by_credentials(credentials)
