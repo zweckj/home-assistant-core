@@ -53,9 +53,10 @@ class ActiveConnection:
     """Handle an active websocket client connection."""
 
     __slots__ = (
-        "_auth_revoked",
         "_cancel_ws",
         "_deferred_auth_close",
+        "_revoked_senders",
+        "_send_message",
         "binary_handlers",
         "can_coalesce",
         "handlers",
@@ -65,7 +66,6 @@ class ActiveConnection:
         "origin",
         "refresh_token_id",
         "remote",
-        "send_message",
         "subscriptions",
         "supported_features",
         "user",
@@ -83,12 +83,13 @@ class ActiveConnection:
         cancel_ws: Callable[[], None] | None = None,
     ) -> None:
         """Initialize an active connection."""
-        self._auth_revoked = False
         self._cancel_ws = cancel_ws
         self._deferred_auth_close: dict[asyncio.Task[Any], bool] = {}
+        # Set once the token is revoked, to the tasks that may still reply.
+        self._revoked_senders: set[asyncio.Task[Any]] | None = None
+        self._send_message = send_message
         self.logger = logger
         self.hass = hass
-        self.send_message = send_message
         self.user = user
         self.refresh_token_id = refresh_token.id if refresh_token else None
         self.remote = remote
@@ -126,7 +127,11 @@ class ActiveConnection:
 
     @contextmanager
     def async_defer_auth_close(self) -> Generator[None]:
-        """Let a command reply before its own token revocation closes the socket."""
+        """Let a command reply before its own token revocation closes the socket.
+
+        Only a revocation from the task running the command is deferred, not one
+        from a task it starts.
+        """
         task = asyncio.current_task()
         assert task is not None
         self._deferred_auth_close[task] = False
@@ -142,10 +147,16 @@ class ActiveConnection:
     @callback
     def async_auth_revoked(self) -> None:
         """Close a revoked connection, allowing an opted-in command to reply."""
-        self._auth_revoked = True
+        if self._revoked_senders is None:
+            self._revoked_senders = set()
         if (task := asyncio.current_task()) in self._deferred_auth_close:
             assert task is not None
             self._deferred_auth_close[task] = True
+            # Its reply may still reach the client, also an error reply sent
+            # after it left async_defer_auth_close.
+            self._revoked_senders.add(task)
+            # The auth subscription is being called right now and goes on close.
+            self._async_unsubscribe_all(keep="auth")
             return
         assert self._cancel_ws is not None
         self._cancel_ws()
@@ -191,6 +202,17 @@ class ActiveConnection:
         return index + 1, unsub
 
     @callback
+    def send_message(self, msg: bytes | str | dict[str, Any]) -> None:
+        """Send a message to the client."""
+        # Checked here, as callers may keep this method to send after an await.
+        if (
+            self._revoked_senders is not None
+            and asyncio.current_task() not in self._revoked_senders
+        ):
+            return
+        self._send_message(msg)
+
+    @callback
     def send_result(self, msg_id: int, result: Any | None = None) -> None:
         """Send a result message."""
         self.send_message(message_to_json_bytes(result_message(msg_id, result)))
@@ -227,7 +249,7 @@ class ActiveConnection:
     @callback
     def async_handle_binary(self, handler_id: int, payload: bytes) -> None:
         """Handle a single incoming binary message."""
-        if self._auth_revoked:
+        if self._revoked_senders is not None:
             return
         index = handler_id - 1
         if (
@@ -249,7 +271,7 @@ class ActiveConnection:
     @callback
     def async_handle(self, msg: JsonValueType) -> None:
         """Handle a single incoming message."""
-        if self._auth_revoked:
+        if self._revoked_senders is not None:
             return
         if (
             # Not using isinstance as we don't care about children
@@ -309,7 +331,17 @@ class ActiveConnection:
     @callback
     def async_handle_close(self) -> None:
         """Handle closing down connection."""
-        for unsub in self.subscriptions.values():
+        self._async_unsubscribe_all()
+        self._send_message = self._connect_closed_error
+        current_request.set(None)
+        current_connection.set(None)
+
+    @callback
+    def _async_unsubscribe_all(self, *, keep: Hashable | None = None) -> None:
+        """Unsubscribe from all subscriptions of the connection but one to keep."""
+        for key, unsub in list(self.subscriptions.items()):
+            if key == keep:
+                continue
             try:
                 unsub()
             except Exception:
@@ -317,10 +349,7 @@ class ActiveConnection:
                 self.logger.exception(
                     "Error unsubscribing from subscription: %s", unsub
                 )
-        self.subscriptions.clear()
-        self.send_message = self._connect_closed_error
-        current_request.set(None)
-        current_connection.set(None)
+            del self.subscriptions[key]
 
     @callback
     def _connect_closed_error(

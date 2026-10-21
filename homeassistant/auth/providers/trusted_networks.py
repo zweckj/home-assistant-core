@@ -99,12 +99,6 @@ class TrustedNetworksAuthProvider(AuthProvider):
             for trusted_proxy in self.hass.http.trusted_proxies
         ]
 
-    @property
-    @override
-    def support_mfa(self) -> bool:
-        """Trusted Networks auth provider does not support MFA."""
-        return False
-
     @callback
     @override
     def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
