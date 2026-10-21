@@ -1,9 +1,9 @@
 """Tests for the OpenID Connect integration setup."""
 
+from pytest_homeassistant.common import MockConfigEntry
+
 from homeassistant.components.openid_connect.const import DOMAIN
 from homeassistant.core import HomeAssistant
-
-from tests.common import MockConfigEntry
 
 
 async def test_setup_unload_entry(hass: HomeAssistant) -> None:

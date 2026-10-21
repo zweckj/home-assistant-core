@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pytest_homeassistant.common import MockConfigEntry
 
 from homeassistant.components.auth import IdentityProviderError, ProviderMetadata
 from homeassistant.components.openid_connect.const import (
@@ -30,8 +31,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
 from .conftest import CLIENT_ID, CLIENT_SECRET, ISSUER
-
-from tests.common import MockConfigEntry
 
 USER_INPUT = {
     CONF_ISSUER: ISSUER,
@@ -220,10 +219,10 @@ async def test_user_flow_advanced_insecure_transport(
 
 
 @pytest.mark.usefixtures("oidc_auth", "mock_setup_entry")
-async def test_user_flow_issuer_mismatch(
+async def test_user_flow_issuer_mismatch_recovers(
     hass: HomeAssistant, mock_discover: AsyncMock
 ) -> None:
-    """Test issuer mismatch is reported with the returned issuer."""
+    """Test issuer mismatch is reported with the returned issuer, and recovery."""
     result = await _start_user_flow(hass)
 
     mock_discover.return_value = _metadata("https://other.example.com")
@@ -237,6 +236,13 @@ async def test_user_flow_issuer_mismatch(
         result["description_placeholders"]["reported_issuer"]
         == "https://other.example.com"
     )
+
+    mock_discover.return_value = _metadata()
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], USER_INPUT
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
 @pytest.mark.parametrize(
@@ -390,10 +396,7 @@ async def test_reconfigure_success(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_validate: AsyncMock
 ) -> None:
     """Test reconfigure success."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": SOURCE_RECONFIGURE, "entry_id": mock_config_entry.entry_id},
-    )
+    result = await mock_config_entry.start_reconfigure_flow(hass)
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure"
@@ -442,10 +445,7 @@ async def test_reconfigure_error_recovers(
     error: str,
 ) -> None:
     """Test reconfigure errors and recovery."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": SOURCE_RECONFIGURE, "entry_id": mock_config_entry.entry_id},
-    )
+    result = await mock_config_entry.start_reconfigure_flow(hass)
 
     mock_validate.side_effect = [side_effect, None]
     result = await hass.config_entries.flow.async_configure(
@@ -528,6 +528,8 @@ async def test_reconfigure_advanced_public_client(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_validate: AsyncMock
 ) -> None:
     """Test advanced reconfigure can switch to a public insecure client."""
+    # The helper can't start the flow with advanced options.
+    # pylint: disable-next=home-assistant-test-flow-start-helper
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={

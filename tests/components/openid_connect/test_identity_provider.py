@@ -4,6 +4,9 @@ from http import HTTPStatus
 from typing import Any
 
 import pytest
+from pytest_homeassistant.common import CLIENT_ID as HA_CLIENT_ID, MockConfigEntry
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
+from pytest_homeassistant.typing import ClientSessionGenerator
 from syrupy.assertion import SnapshotAssertion
 
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_USER
@@ -26,11 +29,8 @@ from homeassistant.components.openid_connect.identity_provider import (
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
 
-from tests.common import CLIENT_ID as HA_CLIENT_ID, MockConfigEntry
 from tests.components.auth import async_setup_auth
 from tests.components.auth.common import FakeOpenIDProvider, async_link, async_sign_in
-from tests.test_util.aiohttp import AiohttpClientMocker
-from tests.typing import ClientSessionGenerator
 
 ISSUER = "https://idp.example.com"
 IDP_CLIENT_ID = "idp-client-id"
