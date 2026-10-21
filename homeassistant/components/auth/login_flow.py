@@ -635,10 +635,15 @@ class LoginFlowCallbackView(HomeAssistantView):
                 "Login was not started in this browser", HTTPStatus.BAD_REQUEST
             )
 
+        context = flow["context"]
         if not await indieauth.verify_redirect_uri(
             hass,
-            flow["context"]["client_id"],
-            flow["context"]["redirect_uri"],
+            context["client_id"],
+            context["redirect_uri"],
+            allow_loopback_port_change=bool(context.get("code_challenge"))
+            and context.get("code_challenge_method") == "S256",
+            request_scheme=request.scheme,
+            request_netloc=request.host,
         ):
             return self.json_message("Invalid redirect URI", HTTPStatus.FORBIDDEN)
 
