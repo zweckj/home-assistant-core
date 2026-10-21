@@ -1,0 +1,126 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: There are no custom actions.
+  appropriate-polling:
+    status: exempt
+    comment: This integration does not poll; the auth engine only contacts Google during sign-in.
+  brands: done
+  common-modules: done
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency: done
+  docs-actions:
+    status: exempt
+    comment: There are no custom actions.
+  docs-conditions:
+    status: exempt
+    comment: This integration does not have any conditions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-triggers:
+    status: exempt
+    comment: This integration does not have any triggers.
+  entity-event-setup:
+    status: exempt
+    comment: This integration does not provide entities.
+  entity-unique-id:
+    status: exempt
+    comment: This integration does not provide entities.
+  has-entity-name:
+    status: exempt
+    comment: This integration does not provide entities.
+  runtime-data:
+    status: exempt
+    comment: This integration has no runtime data; it only provides identity provider configuration.
+  test-before-configure: done
+  test-before-setup:
+    status: exempt
+    comment: The auth engine verifies the identity provider when a sign-in starts.
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions:
+    status: exempt
+    comment: There are no custom actions.
+  config-entry-unloading: done
+  docs-configuration-parameters: todo
+  docs-installation-parameters: todo
+  entity-unavailable:
+    status: exempt
+    comment: This integration does not provide entities.
+  integration-owner: done
+  log-when-unavailable:
+    status: exempt
+    comment: There is no continuously available device or service to track.
+  parallel-updates:
+    status: exempt
+    comment: This integration does not provide entities.
+  reauthentication-flow:
+    status: exempt
+    comment: Client credentials are updated through the reconfigure flow.
+  test-coverage: todo
+
+  # Gold
+  devices:
+    status: exempt
+    comment: This integration does not represent devices.
+  diagnostics:
+    status: exempt
+    comment: This integration stores only OAuth client credentials.
+  discovery-update-info:
+    status: exempt
+    comment: This integration does not support discovery.
+  discovery:
+    status: exempt
+    comment: This integration does not support discovery.
+  docs-data-update:
+    status: exempt
+    comment: This integration does not poll or update data.
+  docs-examples: todo
+  docs-known-limitations: todo
+  docs-supported-devices:
+    status: exempt
+    comment: This integration does not support devices.
+  docs-supported-functions: todo
+  docs-troubleshooting: todo
+  docs-use-cases: todo
+  dynamic-devices:
+    status: exempt
+    comment: This integration does not represent devices.
+  entity-category:
+    status: exempt
+    comment: This integration does not provide entities.
+  entity-device-class:
+    status: exempt
+    comment: This integration does not provide entities.
+  entity-disabled-by-default:
+    status: exempt
+    comment: This integration does not provide entities.
+  entity-translations:
+    status: exempt
+    comment: This integration does not provide entities.
+  exception-translations:
+    status: exempt
+    comment: This integration does not raise translated exceptions.
+  icon-translations:
+    status: exempt
+    comment: This integration does not provide icons.
+  reconfiguration-flow: done
+  repair-issues:
+    status: exempt
+    comment: This integration does not create repair issues.
+  stale-devices:
+    status: exempt
+    comment: This integration does not represent devices.
+
+  # Platinum
+  async-dependency:
+    status: exempt
+    comment: This integration has no dependencies.
+  inject-websession:
+    status: exempt
+    comment: This integration does not access the network directly.
+  strict-typing: done

@@ -1,0 +1,12 @@
+{
+  "domain": "microsoft_sign_in",
+  "name": "Microsoft Sign-In",
+  "categories": ["computers_network.cloud_developer_tools"],
+  "codeowners": ["@zweckj"],
+  "config_flow": true,
+  "dependencies": ["auth"],
+  "documentation": "https://www.home-assistant.io/integrations/microsoft_sign_in",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "quality_scale": "bronze"
+}

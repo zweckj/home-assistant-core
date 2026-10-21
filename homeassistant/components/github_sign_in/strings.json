@@ -1,0 +1,38 @@
+{
+  "config": {
+    "abort": {
+      "identity_providers_disabled": "Signing in with identity providers is turned off. Add `type: oidc` to `auth_providers` in your configuration to use it.",
+      "no_url_available": "Home Assistant has no URL that the identity provider could redirect back to. Set up an internal or external URL in the network settings first.",
+      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]"
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_config": "The identity provider configuration is not valid.",
+      "invalid_discovery": "The identity provider returned an invalid OpenID Connect configuration.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "reconfigure": {
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret"
+        },
+        "data_description": {
+          "client_id": "The client ID from your GitHub OAuth App.",
+          "client_secret": "The client secret from your GitHub OAuth App."
+        }
+      },
+      "user": {
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret"
+        },
+        "data_description": {
+          "client_id": "The client ID from your GitHub OAuth App.",
+          "client_secret": "The client secret from your GitHub OAuth App."
+        },
+        "description": "Create a GitHub OAuth App in Developer settings: {developer_settings_url}\n\nSet the app's Authorization callback URL to one of these redirect URIs:\n{redirect_uris}\n\nGitHub OAuth Apps accept only one callback URL. Sign-in only works through that URL's host."
+      }
+    }
+  }
+}

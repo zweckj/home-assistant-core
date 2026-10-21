@@ -683,6 +683,8 @@ CLAUDE.md @home-assistant/core
 /tests/components/gios/ @bieniu
 /homeassistant/components/github/ @timmo001 @ludeeus
 /tests/components/github/ @timmo001 @ludeeus
+/homeassistant/components/github_sign_in/ @zweckj
+/tests/components/github_sign_in/ @zweckj
 /homeassistant/components/glances/ @engrbm87
 /tests/components/glances/ @engrbm87
 /homeassistant/components/go2rtc/ @home-assistant/core
@@ -715,6 +717,8 @@ CLAUDE.md @home-assistant/core
 /tests/components/google_photos/ @allenporter
 /homeassistant/components/google_sheets/ @tkdrob
 /tests/components/google_sheets/ @tkdrob
+/homeassistant/components/google_sign_in/ @zweckj
+/tests/components/google_sign_in/ @zweckj
 /homeassistant/components/google_tasks/ @allenporter
 /tests/components/google_tasks/ @allenporter
 /homeassistant/components/google_travel_time/ @eifinger
@@ -1202,6 +1206,8 @@ CLAUDE.md @home-assistant/core
 /tests/components/metoffice/ @MrHarcombe @avee87
 /homeassistant/components/microbees/ @microBeesTech
 /tests/components/microbees/ @microBeesTech
+/homeassistant/components/microsoft_sign_in/ @zweckj
+/tests/components/microsoft_sign_in/ @zweckj
 /homeassistant/components/midea/ @chemelli74 @rokam
 /tests/components/midea/ @chemelli74 @rokam
 /homeassistant/components/miele/ @astrandb

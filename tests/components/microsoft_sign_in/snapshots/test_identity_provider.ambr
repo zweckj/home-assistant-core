@@ -1,0 +1,143 @@
+# serializer version: 1
+# name: test_get_identity_provider[common]
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': False,
+    'client_id': 'client-id',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'preferred_username',
+      'admin_group': None,
+      'discovery_url': 'https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration',
+      'display_name_claim': 'name',
+      'issuer': 'https://login.microsoftonline.com/{tenantid}/v2.0',
+      'required_claims': dict({
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': None,
+  })
+# ---
+# name: test_get_identity_provider[common][protocol]
+  'EntraOpenIDConnect'
+# ---
+# name: test_get_identity_provider[consumers]
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': False,
+    'client_id': 'client-id',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'preferred_username',
+      'admin_group': None,
+      'discovery_url': 'https://login.microsoftonline.com/consumers/v2.0/.well-known/openid-configuration',
+      'display_name_claim': 'name',
+      'issuer': 'https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0',
+      'required_claims': dict({
+        'tid': dict({
+          'value': '9188040d-6c67-4c5b-b112-36a304b66dad',
+        }),
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': None,
+  })
+# ---
+# name: test_get_identity_provider[consumers][protocol]
+  'EntraOpenIDConnect'
+# ---
+# name: test_get_identity_provider[guid-link]
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': False,
+    'client_id': 'client-id',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'preferred_username',
+      'admin_group': None,
+      'discovery_url': None,
+      'display_name_claim': 'name',
+      'issuer': 'https://login.microsoftonline.com/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/v2.0',
+      'required_claims': dict({
+        'tid': dict({
+          'value': 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        }),
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': None,
+  })
+# ---
+# name: test_get_identity_provider[guid-link][protocol]
+  'EntraOpenIDConnect'
+# ---
+# name: test_get_identity_provider[guid-provision-admin-group]
+  dict({
+    'accounts': <AccountPolicy.PROVISION: 'provision'>,
+    'allow_insecure_transport': False,
+    'client_id': 'client-id',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'preferred_username',
+      'admin_group': 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+      'discovery_url': None,
+      'display_name_claim': 'name',
+      'issuer': 'https://login.microsoftonline.com/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/v2.0',
+      'required_claims': dict({
+        'tid': dict({
+          'value': 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        }),
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': datetime.timedelta(seconds=3600),
+  })
+# ---
+# name: test_get_identity_provider[guid-provision-admin-group][protocol]
+  'EntraOpenIDConnect'
+# ---
+# name: test_get_identity_provider[organizations]
+  dict({
+    'accounts': <AccountPolicy.LINK: 'link'>,
+    'allow_insecure_transport': False,
+    'client_id': 'client-id',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'preferred_username',
+      'admin_group': None,
+      'discovery_url': 'https://login.microsoftonline.com/organizations/v2.0/.well-known/openid-configuration',
+      'display_name_claim': 'name',
+      'issuer': 'https://login.microsoftonline.com/{tenantid}/v2.0',
+      'required_claims': dict({
+        'tid': dict({
+          'value': '9188040d-6c67-4c5b-b112-36a304b66dad',
+        }),
+      }),
+      'scopes': tuple(
+        'openid',
+        'profile',
+      ),
+      'username_claim': 'preferred_username',
+    }),
+    'revalidate_interval': None,
+  })
+# ---
+# name: test_get_identity_provider[organizations][protocol]
+  'EntraOpenIDConnect'
+# ---

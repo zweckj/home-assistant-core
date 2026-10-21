@@ -3938,12 +3938,26 @@
     },
     "github": {
       "name": "GitHub",
-      "integration_type": "service",
-      "categories": [
-        "computers_network.cloud_developer_tools"
-      ],
-      "config_flow": true,
-      "iot_class": "cloud_polling"
+      "integrations": {
+        "github": {
+          "integration_type": "service",
+          "config_flow": true,
+          "iot_class": "cloud_polling",
+          "categories": [
+            "computers_network.cloud_developer_tools"
+          ],
+          "name": "GitHub"
+        },
+        "github_sign_in": {
+          "integration_type": "service",
+          "config_flow": true,
+          "iot_class": "cloud_polling",
+          "categories": [
+            "computers_network.cloud_developer_tools"
+          ],
+          "name": "GitHub Sign-In"
+        }
+      }
     },
     "gitlab_ci": {
       "name": "GitLab-CI",
@@ -4115,6 +4129,15 @@
             "computers_network.cloud_developer_tools"
           ],
           "name": "Google Pub/Sub"
+        },
+        "google_sign_in": {
+          "integration_type": "service",
+          "config_flow": true,
+          "iot_class": "cloud_polling",
+          "categories": [
+            "computers_network.cloud_developer_tools"
+          ],
+          "name": "Google Sign-In"
         },
         "google_sheets": {
           "integration_type": "service",
@@ -6867,6 +6890,15 @@
           ],
           "name": "Microsoft Text-to-Speech (TTS)"
         },
+        "microsoft_sign_in": {
+          "integration_type": "service",
+          "config_flow": true,
+          "iot_class": "cloud_polling",
+          "categories": [
+            "computers_network.cloud_developer_tools"
+          ],
+          "name": "Microsoft Sign-In"
+        },
         "onedrive": {
           "integration_type": "service",
           "config_flow": true,
@@ -8175,6 +8207,9 @@
     "openid_connect": {
       "name": "OpenID Connect",
       "integration_type": "service",
+      "categories": [
+        "computers_network.cloud_developer_tools"
+      ],
       "config_flow": true,
       "iot_class": "local_polling"
     },
