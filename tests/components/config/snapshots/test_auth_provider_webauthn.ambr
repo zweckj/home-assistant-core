@@ -1,0 +1,15 @@
+# serializer version: 1
+# name: test_registered_passkeys_survive_reload
+  dict({
+    'id': 7,
+    'result': list([
+      dict({
+        'credential_id': 'Y3JlZGVudGlhbC0x',
+        'name': 'Renamed passkey',
+        'rp_id': 'ha.example.com',
+      }),
+    ]),
+    'success': True,
+    'type': 'result',
+  })
+# ---

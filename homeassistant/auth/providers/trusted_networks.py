@@ -99,6 +99,12 @@ class TrustedNetworksAuthProvider(AuthProvider):
             for trusted_proxy in self.hass.http.trusted_proxies
         ]
 
+    @callback
+    @override
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return False, as a trusted network login only works on that network."""
+        return False
+
     @override
     async def async_login_flow(
         self, context: AuthFlowContext | None

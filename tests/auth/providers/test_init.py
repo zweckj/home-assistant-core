@@ -9,7 +9,7 @@ from homeassistant.auth.providers import AUTH_PROVIDERS, MfaLoginFlow
 
 
 def test_login_flows_ask_for_mfa() -> None:
-    """Test every login flow asks for MFA, except the trusted networks one.
+    """Test every login flow asks for MFA, except trusted networks and WebAuthn.
 
     A provider must not quietly drop the second factor by picking the wrong
     login flow base class.
@@ -26,4 +26,5 @@ def test_login_flows_ask_for_mfa() -> None:
         provider_type
         for provider_type, login_flow in login_flows.items()
         if not issubclass(get_origin(login_flow) or login_flow, MfaLoginFlow)
-    } == {"trusted_networks"}
+        # A passkey with user verification already is a second factor.
+    } == {"trusted_networks", "webauthn"}

@@ -63,6 +63,7 @@ class ActiveConnection:
         "hass",
         "last_id",
         "logger",
+        "origin",
         "refresh_token_id",
         "remote",
         "subscriptions",
@@ -78,6 +79,7 @@ class ActiveConnection:
         user: User,
         refresh_token: RefreshToken | None,
         remote: str | None,
+        origin: str | None = None,
         cancel_ws: Callable[[], None] | None = None,
     ) -> None:
         """Initialize an active connection."""
@@ -91,6 +93,7 @@ class ActiveConnection:
         self.user = user
         self.refresh_token_id = refresh_token.id if refresh_token else None
         self.remote = remote
+        self.origin = origin
         self.subscriptions: dict[Hashable, Callable[[], Any]] = {}
         self.last_id = 0
         self.can_coalesce = False

@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 from freezegun import freeze_time
+from freezegun.api import FrozenDateTimeFactory
 import jwt
 import probatio
 import pytest
@@ -32,6 +33,8 @@ from homeassistant.auth import (
 )
 from homeassistant.auth.const import GROUP_ID_ADMIN, MFA_SESSION_EXPIRATION
 from homeassistant.auth.models import Credentials
+from homeassistant.auth.providers import InvalidStepUpError
+from homeassistant.auth.providers.homeassistant import HassAuthProvider
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
@@ -1658,6 +1661,205 @@ async def test_a_provider_that_cannot_initialize_is_not_fatal(
 
     assert "Error initializing auth provider insecure_example" in caplog.text
     assert len(manager.auth_providers) == 1
+
+
+async def test_has_other_login_method(mock_hass) -> None:
+    """Test what counts as another way into an account."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass,
+        [
+            {"type": "insecure_example", "users": []},
+            {"type": "trusted_networks", "trusted_networks": ["192.168.0.0/24"]},
+        ],
+        [],
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+    second = manager.auth_providers[0].async_create_credentials({"username": "second"})
+    user.credentials.append(second)
+    assert manager.async_has_other_login_method(user, credentials) is True
+    # Removing both at once would leave nothing to log in with.
+    assert manager.async_has_other_login_method(user, credentials, second) is False
+
+    # A credential of a provider that is no longer configured cannot be used.
+    user.credentials.remove(second)
+    user.credentials.append(
+        Credentials(
+            auth_provider_type="insecure_example",
+            auth_provider_id="removed",
+            data={},
+        )
+    )
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+    # A trusted network login only works from that network, so it is not a
+    # fallback the user can rely on to get back in.
+    user.credentials[:] = [credentials]
+    trusted_networks = manager.get_auth_provider("trusted_networks", None)
+    assert trusted_networks is not None
+    user.credentials.append(
+        trusted_networks.async_create_credentials({"user_id": user.id})
+    )
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+
+async def test_get_step_up_providers(mock_hass) -> None:
+    """Test only the providers a user can re-verify with are offered."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass,
+        [{"type": "homeassistant"}, {"type": "insecure_example", "users": []}],
+        [],
+    )
+    hass_provider, example_provider = manager.auth_providers
+    user = MockUser().add_to_auth_manager(manager)
+
+    assert manager.async_get_step_up_providers(user) == []
+
+    # The example provider cannot re-verify anybody.
+    user.credentials.append(
+        example_provider.async_create_credentials({"username": "test-user"})
+    )
+    assert manager.async_get_step_up_providers(user) == []
+
+    user.credentials.append(
+        hass_provider.async_create_credentials({"username": "test-user"})
+    )
+    assert manager.async_get_step_up_providers(user) == [hass_provider]
+
+
+async def test_remove_refresh_tokens_for_credentials(mock_hass) -> None:
+    """Test only the tokens issued for the given credentials are removed."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+
+    from_credentials = await manager.async_create_refresh_token(
+        user, CLIENT_ID, credential=credentials
+    )
+    unrelated = await manager.async_create_refresh_token(
+        user, "https://elsewhere.example.com/"
+    )
+
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+
+    assert manager.async_get_refresh_token(from_credentials.id) is None
+    assert manager.async_get_refresh_token(unrelated.id) is unrelated
+
+
+async def test_remove_refresh_tokens_for_credentials_notifies_listeners(
+    mock_hass,
+) -> None:
+    """Test state derived from a login can be dropped alongside its sessions."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+    revoked: list[Credentials] = []
+    remove_listener = manager.async_add_credentials_revoked_listener(revoked.append)
+
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+    assert revoked == [credentials]
+
+    remove_listener()
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+    assert revoked == [credentials]
+
+
+async def test_remove_refresh_tokens_for_detached_credentials(mock_hass) -> None:
+    """Test sessions can still be ended after the credentials were removed."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+    refresh_token = await manager.async_create_refresh_token(
+        user, CLIENT_ID, credential=credentials
+    )
+
+    await manager.async_remove_credentials(credentials)
+    assert credentials not in user.credentials
+
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+
+    assert manager.async_get_refresh_token(refresh_token.id) is None
+
+
+async def test_step_up_proof_expires(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    hass_access_token: str,
+    local_auth: HassAuthProvider,
+) -> None:
+    """Test a step up proof only counts for a short while."""
+    await hass.async_add_executor_job(local_auth.data.add_auth, "admin", "test-pass")
+    refresh_token_id = hass.auth.async_validate_access_token(hass_access_token).id
+    await hass.auth.async_step_up(
+        refresh_token_id, local_auth, {"password": "test-pass"}, None
+    )
+
+    freezer.tick(auth.STEP_UP_VALIDITY)
+
+    assert not hass.auth.async_consume_step_up(refresh_token_id)
+
+
+async def test_step_up_needed_when_the_user_can_step_up(
+    hass: HomeAssistant, hass_access_token: str
+) -> None:
+    """Test a fresh session alone does not count when the user can step up."""
+    refresh_token = hass.auth.async_validate_access_token(hass_access_token)
+
+    assert not hass.auth.async_consume_step_up(refresh_token.id)
+
+
+async def test_step_up_falls_back_to_a_recent_sign_in(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, hass_admin_user: MockUser
+) -> None:
+    """Test a user nothing can re-verify relies on having just signed in."""
+    refresh_token = await hass.auth.async_create_refresh_token(
+        hass_admin_user, CLIENT_ID
+    )
+
+    assert hass.auth.async_consume_step_up(refresh_token.id)
+
+    freezer.tick(auth.STEP_UP_VALIDITY)
+
+    assert not hass.auth.async_consume_step_up(refresh_token.id)
+
+
+async def test_step_up_refuses_long_lived_access_token(
+    hass: HomeAssistant, hass_admin_user: MockUser, local_auth: HassAuthProvider
+) -> None:
+    """Test a long-lived access token never counts as a signed in session."""
+    refresh_token = await hass.auth.async_create_refresh_token(
+        hass_admin_user,
+        client_name="Script",
+        token_type=auth_models.TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+    )
+
+    with pytest.raises(InvalidStepUpError):
+        await hass.auth.async_step_up(
+            refresh_token.id, local_auth, {"password": "test-pass"}, None
+        )
+    # Not even as a recent sign in for a user nothing can re-verify.
+    assert not hass.auth.async_consume_step_up(refresh_token.id)
 
 
 async def test_provider_initialization_is_not_swallowed_when_cancelled(
