@@ -1,9 +1,9 @@
 """Tests for the GitHub Sign-In integration setup."""
 
+from pytest_homeassistant.common import MockConfigEntry
+
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-
-from tests.common import MockConfigEntry
 
 
 async def test_setup_unload_entry(

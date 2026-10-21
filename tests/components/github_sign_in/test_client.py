@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
 
 from homeassistant.components.auth import IdentityProvider, OidcError
 from homeassistant.components.github_sign_in.client import (
@@ -12,8 +13,6 @@ from homeassistant.components.github_sign_in.client import (
     GitHubOAuth2,
 )
 from homeassistant.core import HomeAssistant
-
-from tests.test_util.aiohttp import AiohttpClientMocker
 
 
 @pytest.fixture

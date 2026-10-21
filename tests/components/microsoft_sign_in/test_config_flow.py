@@ -4,6 +4,7 @@ from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pytest_homeassistant.common import MockConfigEntry
 
 from homeassistant.components.auth import IdentityProviderError, ProviderMetadata
 from homeassistant.components.microsoft_sign_in.config_flow import (
@@ -17,16 +18,10 @@ from homeassistant.components.microsoft_sign_in.const import (
     CONSUMERS_TENANT_ID,
     DOMAIN,
 )
-from homeassistant.config_entries import (
-    SOURCE_RECONFIGURE,
-    SOURCE_USER,
-    ConfigFlowResult,
-)
+from homeassistant.config_entries import SOURCE_USER, ConfigFlowResult
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-
-from tests.common import MockConfigEntry
 
 CLIENT_ID = "client-id"
 CLIENT_SECRET = "client-secret"
@@ -378,10 +373,7 @@ async def test_reconfigure_error_recovers(
     entry = MockConfigEntry(domain=DOMAIN, data=USER_INPUT, unique_id="common")
     entry.add_to_hass(hass)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
-    )
+    result = await entry.start_reconfigure_flow(hass)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {CONF_CLIENT_SECRET: NEW_CLIENT_SECRET},

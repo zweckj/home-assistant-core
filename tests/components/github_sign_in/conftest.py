@@ -4,12 +4,11 @@ from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pytest_homeassistant.common import MockConfigEntry
 
 from homeassistant.components.github_sign_in.const import DOMAIN
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
-
-from tests.common import MockConfigEntry
 
 CLIENT_ID = "github-client-id"
 CLIENT_SECRET = "github-client-secret"

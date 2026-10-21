@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pytest_homeassistant.common import MockConfigEntry, get_schema_suggested_value
 
 from homeassistant.components.auth import IdentityProviderError
 from homeassistant.components.github_sign_in.const import DOMAIN
@@ -15,8 +16,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
 from .conftest import NEW_USER_INPUT, TITLE, USER_INPUT
-
-from tests.common import MockConfigEntry, get_schema_suggested_value
 
 
 @pytest.mark.usefixtures("oidc_auth", "external_url")

@@ -1,11 +1,11 @@
 """Test the Google Sign-In integration setup."""
 
+from pytest_homeassistant.common import MockConfigEntry
+
 from homeassistant.components.google_sign_in.const import DOMAIN
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
-
-from tests.common import MockConfigEntry
 
 
 async def test_setup_unload_entry(hass: HomeAssistant) -> None:

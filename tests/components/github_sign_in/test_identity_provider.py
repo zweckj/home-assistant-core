@@ -4,6 +4,9 @@ from http import HTTPStatus
 from typing import Any
 
 import pytest
+from pytest_homeassistant.common import CLIENT_ID as HA_CLIENT_ID, MockConfigEntry
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
+from pytest_homeassistant.typing import ClientSessionGenerator
 from syrupy.assertion import SnapshotAssertion
 
 from homeassistant.auth.providers.oidc.spec import validate_identity_provider
@@ -16,15 +19,12 @@ from homeassistant.core import HomeAssistant
 
 from .conftest import CLIENT_ID, CLIENT_SECRET, TITLE, USER_INPUT
 
-from tests.common import CLIENT_ID as HA_CLIENT_ID, MockConfigEntry
 from tests.components.auth import async_setup_auth
 from tests.components.auth.common import (
     FakeOAuth2ProfileProvider,
     async_link,
     async_sign_in,
 )
-from tests.test_util.aiohttp import AiohttpClientMocker
-from tests.typing import ClientSessionGenerator
 
 AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 TOKEN_URL = "https://github.com/login/oauth/access_token"

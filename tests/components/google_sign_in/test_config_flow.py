@@ -4,6 +4,7 @@ from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pytest_homeassistant.common import MockConfigEntry, get_schema_suggested_value
 
 from homeassistant.auth.providers.oidc.spec import AccountPolicy, IdentityProviderError
 from homeassistant.components.google_sign_in.client import GoogleOpenIDConnect
@@ -11,16 +12,10 @@ from homeassistant.components.google_sign_in.const import DOMAIN
 from homeassistant.components.google_sign_in.identity_provider import (
     get_identity_provider,
 )
-from homeassistant.config_entries import (
-    SOURCE_RECONFIGURE,
-    SOURCE_USER,
-    ConfigFlowResult,
-)
+from homeassistant.config_entries import SOURCE_USER, ConfigFlowResult
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-
-from tests.common import MockConfigEntry, get_schema_suggested_value
 
 USER_INPUT = {CONF_CLIENT_ID: "client-id", CONF_CLIENT_SECRET: "client-secret"}
 UPDATED_INPUT = {
@@ -175,10 +170,7 @@ async def test_reconfigure_success(
     entry = MockConfigEntry(domain=DOMAIN, title="Google", data=USER_INPUT)
     entry.add_to_hass(hass)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
-    )
+    result = await entry.start_reconfigure_flow(hass)
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure"
@@ -230,10 +222,7 @@ async def test_reconfigure_error_recovers(
     entry = MockConfigEntry(domain=DOMAIN, title="Google", data=USER_INPUT)
     entry.add_to_hass(hass)
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
-    )
+    result = await entry.start_reconfigure_flow(hass)
 
     mock_validate.side_effect = [side_effect, get_identity_provider(UPDATED_INPUT, {})]
     result = await hass.config_entries.flow.async_configure(

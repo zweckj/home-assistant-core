@@ -1,9 +1,9 @@
 """Test Microsoft Sign-In setup."""
 
+from pytest_homeassistant.common import MockConfigEntry
+
 from homeassistant.components.microsoft_sign_in.const import DOMAIN
 from homeassistant.core import HomeAssistant
-
-from tests.common import MockConfigEntry
 
 
 async def test_setup_and_unload_entry(hass: HomeAssistant) -> None:
