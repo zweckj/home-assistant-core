@@ -1,6 +1,7 @@
 {
   "domain": "github_sign_in",
   "name": "GitHub Sign-In",
+  "categories": ["computers_network.cloud_developer_tools"],
   "codeowners": ["@zweckj"],
   "config_flow": true,
   "dependencies": ["auth"],

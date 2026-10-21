@@ -33,7 +33,13 @@ from ...models import (
     User,
     UserMeta,
 )
-from .. import AUTH_PROVIDER_SCHEMA, AUTH_PROVIDERS, AuthProvider, LoginFlow
+from .. import (
+    AUTH_PROVIDER_SCHEMA,
+    AUTH_PROVIDERS,
+    AuthProvider,
+    LoginFlow,
+    MfaLoginFlow,
+)
 from .client import (
     IdentityClient,
     OAuth2IdentityClient,
@@ -260,7 +266,9 @@ class OidcAuthProvider(AuthProvider):
         return False
 
     @override
-    async def async_login_flow(self, context: AuthFlowContext | None) -> LoginFlow[Any]:
+    async def async_login_flow(
+        self, context: AuthFlowContext | None
+    ) -> OidcRootLoginFlow:
         """Return a root flow that aborts."""
         return OidcRootLoginFlow(self)
 
@@ -561,12 +569,6 @@ class OidcIdentityProvider(AuthProvider):
     def domain(self) -> str | None:
         """Return the brand domain for this child."""
         return self.record.domain
-
-    @property
-    @override
-    def support_mfa(self) -> bool:
-        """Return whether Home Assistant MFA applies."""
-        return self.record.accounts is AccountPolicy.LINK
 
     @callback
     def async_activate(
@@ -956,7 +958,7 @@ class OidcIdentityProvider(AuthProvider):
             data.async_set_session(session)
 
 
-class OidcRootLoginFlow(LoginFlow[OidcAuthProvider]):
+class OidcRootLoginFlow(MfaLoginFlow[OidcAuthProvider]):
     """Root login flow, never configured for direct login."""
 
     @override
@@ -967,7 +969,7 @@ class OidcRootLoginFlow(LoginFlow[OidcAuthProvider]):
         return self.async_abort(reason="not_configured")
 
 
-class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
+class OidcLoginFlow(MfaLoginFlow[OidcIdentityProvider]):
     """Handler for child identity provider login flows."""
 
     def __init__(self, auth_provider: OidcIdentityProvider) -> None:
@@ -1066,6 +1068,13 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
         assert isinstance(self._protocol, OpenIDConnect)
         return await self._async_finish_oidc(client, self._protocol, generation)
 
+    async def _async_finish_login(self, credentials: Credentials) -> AuthFlowResult:
+        """Finish with the resolved credentials, asking linked accounts for MFA."""
+        # An account the identity provider created leaves the second factor to it.
+        if self._auth_provider.record.accounts is AccountPolicy.PROVISION:
+            return await LoginFlow.async_finish(self, credentials)
+        return await self.async_finish_credentials(credentials)
+
     async def _async_finish_oidc(
         self, client: OidcClient, protocol: OpenIDConnect, generation: int
     ) -> AuthFlowResult:
@@ -1151,7 +1160,7 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
 
             if replaced_refresh_token is not None:
                 await client.async_revoke_token(replaced_refresh_token)
-            return await self.async_finish(credentials)
+            return await self._async_finish_login(credentials)
         finally:
             if not keep_refresh_token and tokens.refresh_token is not None:
                 await client.async_revoke_token(tokens.refresh_token)
@@ -1183,4 +1192,4 @@ class OidcLoginFlow(LoginFlow[OidcIdentityProvider]):
             )
             if credentials.is_new and not self.context.get("link_user"):
                 return self.async_abort(reason="user_not_allowed")
-        return await self.async_finish(credentials)
+        return await self._async_finish_login(credentials)

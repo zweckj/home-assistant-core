@@ -6,6 +6,14 @@ from unittest.mock import AsyncMock, patch
 
 import probatio
 import pytest
+from pytest_homeassistant.common import (
+    MockConfigEntry,
+    MockModule,
+    get_schema_suggested_value,
+    mock_config_flow,
+    mock_integration,
+    mock_platform,
+)
 
 from homeassistant import data_entry_flow
 from homeassistant.components.auth import (
@@ -20,15 +28,6 @@ from homeassistant.config_entries import SOURCE_USER, ConfigFlowResult
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-
-from tests.common import (
-    MockConfigEntry,
-    MockModule,
-    get_schema_suggested_value,
-    mock_config_flow,
-    mock_integration,
-    mock_platform,
-)
 
 DOMAIN = "test_idp_flow"
 ISSUER = "https://idp.example.com"

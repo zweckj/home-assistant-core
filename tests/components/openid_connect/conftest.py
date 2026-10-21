@@ -4,6 +4,7 @@ from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pytest_homeassistant.common import MockConfigEntry
 
 from homeassistant.components.openid_connect.const import (
     CONF_ALLOW_INSECURE_TRANSPORT,
@@ -12,8 +13,6 @@ from homeassistant.components.openid_connect.const import (
 )
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
-
-from tests.common import MockConfigEntry
 
 ISSUER = "https://idp.example.com"
 CLIENT_ID = "client-id"

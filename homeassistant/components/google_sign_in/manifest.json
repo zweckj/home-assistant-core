@@ -1,6 +1,7 @@
 {
   "domain": "google_sign_in",
   "name": "Google Sign-In",
+  "categories": ["computers_network.cloud_developer_tools"],
   "codeowners": ["@zweckj"],
   "config_flow": true,
   "dependencies": ["auth"],
