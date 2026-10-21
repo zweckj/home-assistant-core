@@ -18,6 +18,8 @@ from freezegun.api import FrozenDateTimeFactory
 import jwt
 from jwt.algorithms import RSAAlgorithm
 import pytest
+from pytest_homeassistant.common import async_fire_time_changed
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
 from yarl import URL
 
 from homeassistant import auth
@@ -59,17 +61,15 @@ from homeassistant.auth.providers.oidc.store import (
 )
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, UnknownHandler
 from homeassistant.util import dt as dt_util
 
-from tests.common import async_fire_time_changed
 from tests.components.auth.common import (
     PROFILE_ISSUER,
     PROFILE_TOKEN_URL,
     PROFILE_URL,
     ProfileProtocol,
 )
-from tests.test_util.aiohttp import AiohttpClientMocker
 
 ISSUER = "https://idp.example.com"
 CLIENT_ID = "home-assistant"
@@ -936,20 +936,18 @@ async def test_login_flow(
     assert session.username == "alice"
 
 
-async def test_login_flow_aborts_when_not_configured(
+async def test_login_flow_refused_when_not_configured(
     manager: auth.AuthManager,
 ) -> None:
-    """Test signing in is refused while the provider is unconfigured."""
-    result = await manager.login_flow.async_init(
-        (PROVIDER_TYPE, None),
-        context={
-            "ip_address": ip_address("127.0.0.1"),
-            "redirect_uri": "https://ha.example.com/",
-        },
-    )
-
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "not_configured"
+    """Test signing in can't be started while the provider is unconfigured."""
+    with pytest.raises(UnknownHandler):
+        await manager.login_flow.async_init(
+            (PROVIDER_TYPE, None),
+            context={
+                "ip_address": ip_address("127.0.0.1"),
+                "redirect_uri": "https://ha.example.com/",
+            },
+        )
 
 
 async def test_login_flow_aborts_when_configuration_changes(

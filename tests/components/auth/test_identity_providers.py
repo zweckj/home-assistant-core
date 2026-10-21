@@ -6,6 +6,16 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from pytest_homeassistant.common import (
+    CLIENT_ID,
+    MockConfigEntry,
+    MockModule,
+    ensure_auth_manager_loaded,
+    mock_integration,
+    mock_platform,
+)
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
+from pytest_homeassistant.typing import ClientSessionGenerator
 
 from homeassistant import auth, config_entries
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH
@@ -35,17 +45,6 @@ from .common import (
     async_link,
     async_sign_in,
 )
-
-from tests.common import (
-    CLIENT_ID,
-    MockConfigEntry,
-    MockModule,
-    ensure_auth_manager_loaded,
-    mock_integration,
-    mock_platform,
-)
-from tests.test_util.aiohttp import AiohttpClientMocker
-from tests.typing import ClientSessionGenerator
 
 DOMAIN = "test_idp"
 ISSUER = "https://idp.example.com"

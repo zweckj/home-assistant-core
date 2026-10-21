@@ -19,7 +19,7 @@ from . import (
     AUTH_PROVIDERS,
     AuthProvider,
     InvalidStepUpError,
-    LoginFlow,
+    MfaLoginFlow,
 )
 
 STORAGE_VERSION = 1
@@ -286,7 +286,8 @@ class HassAuthProvider(AuthProvider):
         if (username := self.async_get_username(user)) is None:
             raise InvalidStepUpError("User has no credentials for this provider.")
 
-        if not (password := data.get("password")):
+        # An empty password is valid when it is the one that is stored.
+        if not isinstance(password := data.get("password"), str):
             raise InvalidStepUpError("No password provided.")
 
         try:
@@ -400,7 +401,7 @@ class HassAuthProvider(AuthProvider):
             pass
 
 
-class HassLoginFlow(LoginFlow[HassAuthProvider]):
+class HassLoginFlow(MfaLoginFlow[HassAuthProvider]):
     """Handler for the login flow."""
 
     @override

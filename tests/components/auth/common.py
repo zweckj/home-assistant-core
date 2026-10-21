@@ -23,6 +23,11 @@ from aiohttp.test_utils import TestClient
 from cryptography.hazmat.primitives.asymmetric import rsa
 import jwt
 from jwt.algorithms import RSAAlgorithm
+from pytest_homeassistant.common import CLIENT_ID, CLIENT_REDIRECT_URI
+from pytest_homeassistant.test_util.aiohttp import (
+    AiohttpClientMocker,
+    AiohttpClientMockResponse,
+)
 from yarl import URL
 
 from homeassistant.auth.const import LOGIN_CALLBACK_PATH
@@ -32,9 +37,6 @@ from homeassistant.auth.providers.oidc.client import (
     async_bearer_get,
 )
 from homeassistant.core import HomeAssistant
-
-from tests.common import CLIENT_ID, CLIENT_REDIRECT_URI
-from tests.test_util.aiohttp import AiohttpClientMocker, AiohttpClientMockResponse
 
 _KEY_ID = "test-key"
 _SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)

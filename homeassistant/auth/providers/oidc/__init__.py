@@ -562,12 +562,6 @@ class OidcIdentityProvider(AuthProvider):
         """Return the brand domain for this child."""
         return self.record.domain
 
-    @property
-    @override
-    def support_mfa(self) -> bool:
-        """Return whether Home Assistant MFA applies."""
-        return self.record.accounts is AccountPolicy.LINK
-
     @callback
     def async_activate(
         self,
