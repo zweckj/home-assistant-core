@@ -1307,6 +1307,49 @@ async def _complete_login(
     return await manager.login_flow.async_configure(result["flow_id"])
 
 
+@pytest.mark.parametrize(
+    ("accounts", "result_type", "step_id"),
+    [
+        pytest.param(AccountPolicy.LINK, FlowResultType.FORM, "mfa", id="linked"),
+        pytest.param(
+            AccountPolicy.PROVISION, FlowResultType.CREATE_ENTRY, None, id="provisioned"
+        ),
+    ],
+)
+async def test_login_flow_asks_linked_accounts_for_mfa(
+    hass: HomeAssistant,
+    hass_storage: dict[str, Any],
+    mock_idp: AiohttpClientMocker,
+    signing_key: rsa.RSAPrivateKey,
+    jwks: dict[str, Any],
+    accounts: AccountPolicy,
+    result_type: FlowResultType,
+    step_id: str | None,
+) -> None:
+    """Test a linked account keeps its MFA, a provisioned one leaves it to the IdP."""
+    manager = await auth.auth_manager_from_config(
+        hass, [{"type": PROVIDER_TYPE}], [{"type": "insecure_example", "data": []}]
+    )
+    hass.auth = manager
+    root = manager.auth_providers[0]
+    assert isinstance(root, oidc_auth.OidcAuthProvider)
+    await root.async_register_identity_provider(
+        IDP_ID, domain=IDP_DOMAIN, title="Example ID", spec=make_spec(accounts=accounts)
+    )
+    child = root.async_get_child_provider(IDP_ID)
+    assert child is not None
+    user = await manager.async_create_user("Alice")
+    await manager.async_link_user(
+        user, child.async_create_credentials({"issuer": ISSUER, "subject": SUBJECT})
+    )
+    await manager.async_enable_user_mfa(user, "insecure_example", {"pin": "123456"})
+
+    result = await _complete_login(manager, mock_idp, signing_key, jwks)
+
+    assert result["type"] is result_type
+    assert result.get("step_id") == step_id
+
+
 async def _sign_in_twice(
     manager: auth.AuthManager,
     mock_idp: AiohttpClientMocker,
@@ -3951,7 +3994,6 @@ async def test_child_basic_properties_and_dormant_errors(
     """Test child properties and dormant accessors."""
     assert provider.child.name == "Example ID"
     assert provider.child.domain == IDP_DOMAIN
-    assert not provider.child.support_mfa
     assert provider.child.protocol is not None
 
     record = IdentityProviderRecord(
@@ -3963,7 +4005,6 @@ async def test_child_basic_properties_and_dormant_errors(
     dormant = oidc_auth.OidcIdentityProvider(provider.root, record)
     assert dormant.name == oidc_auth.OidcIdentityProvider.DEFAULT_TITLE
     assert dormant.domain == "example"
-    assert dormant.support_mfa
     with pytest.raises(OidcError, match="dormant"):
         _ = dormant.spec
     with pytest.raises(OidcError, match="dormant"):
