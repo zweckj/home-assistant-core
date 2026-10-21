@@ -133,7 +133,7 @@ import hmac
 from http import HTTPStatus
 from logging import getLogger
 import re
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 import uuid
 
 from aiohttp import web
@@ -143,9 +143,11 @@ import probatio
 from homeassistant.auth import DuplicateCredentialsError, InvalidAuthError
 from homeassistant.auth.models import (
     TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+    AuthFlowContext,
     Credentials,
     User,
 )
+from homeassistant.auth.providers import AuthProvider, InvalidStepUpError
 from homeassistant.components import websocket_api
 from homeassistant.components.http import KEY_HASS, HomeAssistantView
 from homeassistant.components.http.auth import async_sign_path
@@ -168,6 +170,8 @@ __all__ = [
     "create_auth_code",
 ]
 
+type AuthCodePurpose = Literal["authorize", "link_user"]
+
 
 @dataclass(slots=True)
 class AuthCodeEntry:
@@ -175,8 +179,10 @@ class AuthCodeEntry:
 
     created: datetime
     credentials: Credentials
+    purpose: AuthCodePurpose
     code_challenge: str | None = None
     code_challenge_method: str | None = None
+    link_user_id: str | None = None
 
 
 class StoreResultType(Protocol):
@@ -186,13 +192,15 @@ class StoreResultType(Protocol):
         self,
         client_id: str,
         result: Credentials,
+        purpose: AuthCodePurpose,
         code_challenge: str | None = None,
         code_challenge_method: str | None = None,
+        link_user_id: str | None = None,
     ) -> str:
         """Store flow result and return a code to retrieve it."""
 
 
-type RetrieveResultType = Callable[[str, str], AuthCodeEntry | None]
+type RetrieveResultType = Callable[[str, str, AuthCodePurpose], AuthCodeEntry | None]
 DATA_STORE: HassKey[StoreResultType] = HassKey(DOMAIN)
 CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
@@ -203,14 +211,15 @@ def create_auth_code(
     hass: HomeAssistant, client_id: str, credential: Credentials
 ) -> str:
     """Create an authorization code to fetch tokens."""
-    return hass.data[DATA_STORE](client_id, credential)
+    return hass.data[DATA_STORE](client_id, credential, "authorize")
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Component to allow users to login."""
-    store_result, retrieve_result = _create_auth_code_store()
+    store_result, retrieve_result, discard_results = _create_auth_code_store()
 
     hass.data[DATA_STORE] = store_result
+    hass.auth.async_add_credentials_revoked_listener(discard_results)
 
     hass.http.register_view(TokenView(retrieve_result))
     hass.http.register_view(RevokeTokenView())
@@ -224,6 +233,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     websocket_api.async_register_command(hass, websocket_delete_all_refresh_tokens)
     websocket_api.async_register_command(hass, websocket_sign_path)
     websocket_api.async_register_command(hass, websocket_refresh_token_set_expiry)
+    websocket_api.async_register_command(hass, websocket_start_step_up)
+    websocket_api.async_register_command(hass, websocket_step_up)
 
     login_flow.async_setup(hass, store_result)
     mfa_setup_flow.async_setup(hass)
@@ -342,7 +353,7 @@ class TokenView(HomeAssistantView):
                 status_code=HTTPStatus.BAD_REQUEST,
             )
 
-        entry = self._retrieve_auth(client_id, code)
+        entry = self._retrieve_auth(client_id, code, "authorize")
 
         if entry is None or await _async_credentials_removed(hass, entry.credentials):
             return self.json(
@@ -510,11 +521,14 @@ class LinkUserView(HomeAssistantView):
         hass = request.app[KEY_HASS]
         user: User = request["hass_user"]
 
-        entry = self._retrieve_credentials(data["client_id"], data["code"])
+        entry = self._retrieve_credentials(data["client_id"], data["code"], "link_user")
 
+        # The code only attaches an identity to the account that started the
+        # link flow, so a delivered code cannot plant one on another user.
         if (
             entry is None
             or entry.code_challenge is not None
+            or entry.link_user_id != user.id
             or await _async_credentials_removed(hass, entry.credentials)
         ):
             return self.json_message("Invalid code", status_code=HTTPStatus.BAD_REQUEST)
@@ -542,7 +556,9 @@ async def _async_credentials_removed(
 
 
 @callback
-def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
+def _create_auth_code_store() -> tuple[
+    StoreResultType, RetrieveResultType, Callable[[Credentials], None]
+]:
     """Create an in memory store."""
     temp_results: dict[tuple[str, str], AuthCodeEntry] = {}
 
@@ -550,8 +566,10 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
     def store_result(
         client_id: str,
         result: Credentials,
+        purpose: AuthCodePurpose,
         code_challenge: str | None = None,
         code_challenge_method: str | None = None,
+        link_user_id: str | None = None,
     ) -> str:
         """Store flow result and return a code to retrieve it."""
         if not isinstance(result, Credentials):
@@ -566,20 +584,29 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
         temp_results[(client_id, code)] = AuthCodeEntry(
             created=now,
             credentials=result,
+            purpose=purpose,
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method,
+            link_user_id=link_user_id,
         )
         return code
 
     @callback
-    def retrieve_result(client_id: str, code: str) -> AuthCodeEntry | None:
+    def retrieve_result(
+        client_id: str, code: str, purpose: AuthCodePurpose
+    ) -> AuthCodeEntry | None:
         """Retrieve flow result."""
         key = (client_id, code)
 
-        if key not in temp_results:
+        if (entry := temp_results.get(key)) is None:
             return None
 
-        entry = temp_results.pop(key)
+        # A code minted to attach an identity must not buy tokens, and a login
+        # code must not silently attach an identity to whoever is signed in.
+        if entry.purpose != purpose:
+            return None
+
+        del temp_results[key]
 
         # OAuth 4.2.1
         # The authorization code MUST expire shortly after it is issued to
@@ -590,7 +617,17 @@ def _create_auth_code_store() -> tuple[StoreResultType, RetrieveResultType]:
 
         return None
 
-    return store_result, retrieve_result
+    @callback
+    def discard_results(credentials: Credentials) -> None:
+        """Drop every unredeemed code issued for the credentials.
+
+        A code is as good as a session, so it must not outlive a revocation.
+        """
+        for key, entry in list(temp_results.items()):
+            if entry.credentials.id == credentials.id:
+                del temp_results[key]
+
+    return store_result, retrieve_result, discard_results
 
 
 @websocket_api.websocket_command({probatio.Required("type"): "auth/current_user"})
@@ -660,6 +697,74 @@ async def websocket_create_long_lived_access_token(
         return
 
     connection.send_result(msg["id"], access_token)
+
+
+STEP_UP_HANDLER_SCHEMA = probatio.All(
+    [probatio.Any(str, None)], probatio.Length(2, 2), probatio.Coerce(tuple)
+)
+
+
+@callback
+def _async_step_up_provider(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> AuthProvider | None:
+    """Return the provider to step up with, reporting back when there is none."""
+    if (
+        provider := hass.auth.get_auth_provider(*msg["handler"])
+    ) in hass.auth.async_get_step_up_providers(connection.user):
+        return provider
+    connection.send_error(
+        msg["id"], "invalid_provider", "Provider cannot verify this user"
+    )
+    return None
+
+
+@websocket_api.websocket_command(
+    {
+        probatio.Required("type"): "auth/step_up/start",
+        probatio.Required("handler"): STEP_UP_HANDLER_SCHEMA,
+    }
+)
+@websocket_api.ws_require_user()
+@websocket_api.async_response
+async def websocket_start_step_up(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Return what the client needs to prove the user's identity again."""
+    if (provider := _async_step_up_provider(hass, connection, msg)) is None:
+        return
+
+    connection.send_result(
+        msg["id"],
+        await provider.async_start_step_up(connection.user, AuthFlowContext()),
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        probatio.Required("type"): "auth/step_up",
+        probatio.Required("handler"): STEP_UP_HANDLER_SCHEMA,
+        probatio.Required("data"): dict,
+    }
+)
+@websocket_api.ws_require_user()
+@websocket_api.async_response
+async def websocket_step_up(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Verify the user's identity again before a sensitive change."""
+    if (provider := _async_step_up_provider(hass, connection, msg)) is None:
+        return
+
+    try:
+        await hass.auth.async_step_up(
+            connection.refresh_token_id, provider, msg["data"], AuthFlowContext()
+        )
+    except InvalidStepUpError as err:
+        connection.send_error(msg["id"], "invalid_step_up", str(err))
+        return
+
+    connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command({probatio.Required("type"): "auth/refresh_tokens"})

@@ -80,7 +80,12 @@ from homeassistant import data_entry_flow
 from homeassistant.auth import AuthManagerFlowManager
 from homeassistant.auth.models import AuthFlowContext, AuthFlowResult
 from homeassistant.components import onboarding
-from homeassistant.components.http import KEY_HASS, HomeAssistantView
+from homeassistant.components.http import (
+    KEY_HASS,
+    KEY_HASS_REFRESH_TOKEN_ID,
+    KEY_HASS_USER,
+    HomeAssistantView,
+)
 from homeassistant.components.http.auth_util import async_user_not_allowed_do_auth
 from homeassistant.components.http.ban import (
     log_invalid_auth,
@@ -305,7 +310,8 @@ class LoginFlowBaseView(HomeAssistantView):
             return self.json_message("Invalid redirect URI", HTTPStatus.FORBIDDEN)
 
         result.pop("data")
-        result.pop("context")
+        context = result.pop("context")
+        link_user = context.get("link_user", False)
 
         result_obj = result.pop("result")
 
@@ -319,13 +325,18 @@ class LoginFlowBaseView(HomeAssistantView):
                 f"Login blocked: {user_access_error}", HTTPStatus.FORBIDDEN
             )
 
-        process_success_login(request)
+        # Attaching an identity is not a sign in, so it must not clear the
+        # failed login counter for the address.
+        if not link_user:
+            process_success_login(request)
         # We overwrite the Credentials object with the string code to retrieve it.
         result["result"] = self._store_result(
             client_id,
             result_obj,
+            "link_user" if link_user else "authorize",
             code_challenge=context.get("code_challenge"),
             code_challenge_method=context.get("code_challenge_method"),
+            link_user_id=context.get("link_user_id"),
         )  # type: ignore[typeddict-item]
 
         return self.json(result)
@@ -361,9 +372,7 @@ class LoginFlowIndexView(LoginFlowBaseView):
                 ),
                 probatio.Optional("code_challenge_method"): str,
                 probatio.Optional("response_type"): str,
-                probatio.Optional(
-                    "type", default="authorize"
-                ): str,  # not used, kept for backwards compatibility
+                probatio.Optional("type", default="authorize"): str,
             }
         )
     )
@@ -397,11 +406,26 @@ class LoginFlowIndexView(LoginFlowBaseView):
             )
 
         handler: tuple[str, str] = tuple(data["handler"])
+        link_user = data["type"] == "link_user"
 
         flow_context = AuthFlowContext(
             ip_address=ip_address(request.remote),  # type: ignore[arg-type]
             redirect_uri=redirect_uri,
+            link_user=link_user,
         )
+        if link_user:
+            # The code is tied to the account that started attaching an
+            # identity, so only a signed in user can start such a flow.
+            if (user := request.get(KEY_HASS_USER)) is None:
+                return self.json_message(
+                    "Authentication required", HTTPStatus.UNAUTHORIZED
+                )
+            # A new identity is a lasting way in, so a bare session is not enough.
+            if not request.app[KEY_HASS].auth.async_consume_step_up(
+                request.get(KEY_HASS_REFRESH_TOKEN_ID)
+            ):
+                return self.json_message("Step up required", HTTPStatus.FORBIDDEN)
+            flow_context["link_user_id"] = user.id
         if code_challenge and code_challenge_method:
             flow_context["code_challenge"] = code_challenge
             flow_context["code_challenge_method"] = code_challenge_method
