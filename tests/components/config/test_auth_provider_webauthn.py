@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 from aiohttp import ClientWebSocketResponse, WSMsgType
 from freezegun.api import FrozenDateTimeFactory
 import pytest
+from pytest_homeassistant.common import CLIENT_ID
+from pytest_homeassistant.typing import ClientSessionGenerator, WebSocketGenerator
 from syrupy.assertion import SnapshotAssertion
 from syrupy.filters import props
 from webauthn import base64url_to_bytes
@@ -34,9 +36,6 @@ from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
 from homeassistant.setup import async_setup_component
-
-from tests.common import CLIENT_ID
-from tests.typing import ClientSessionGenerator, WebSocketGenerator
 
 pytestmark = pytest.mark.usefixtures("socket_enabled")
 

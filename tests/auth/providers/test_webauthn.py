@@ -5,6 +5,7 @@ import time
 from unittest.mock import ANY, Mock, patch
 
 import pytest
+from pytest_homeassistant.common import CLIENT_ID
 from webauthn.helpers.bytes_to_base64url import bytes_to_base64url
 from webauthn.helpers.structs import CredentialDeviceType
 
@@ -13,8 +14,6 @@ from homeassistant.auth.providers import webauthn
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
 from homeassistant.data_entry_flow import FlowResultType
-
-from tests.common import CLIENT_ID
 
 ORIGIN = "https://ha.example.com"
 CONTEXT = AuthFlowContext(ip_address=ip_address("192.168.1.10"))

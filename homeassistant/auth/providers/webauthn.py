@@ -330,12 +330,6 @@ class WebAuthnProvider(AuthProvider):
 
     @property
     @override
-    def support_mfa(self) -> bool:
-        """Return False, as user verification already covers a second factor."""
-        return False
-
-    @property
-    @override
     def support_step_up(self) -> bool:
         """Return that a signed in user can re-verify with a passkey."""
         return True
