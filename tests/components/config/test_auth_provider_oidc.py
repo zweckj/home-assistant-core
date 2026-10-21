@@ -6,6 +6,12 @@ from unittest.mock import patch
 
 from aiohttp import WSMsgType
 import pytest
+from pytest_homeassistant.common import (
+    CLIENT_ID as TEST_CLIENT_ID,
+    MockConfigEntry,
+    MockUser,
+)
+from pytest_homeassistant.typing import WebSocketGenerator
 
 from homeassistant.auth import models as auth_models
 from homeassistant.auth.models import Credentials
@@ -20,9 +26,6 @@ from homeassistant.auth.providers.oidc.spec import (
 )
 from homeassistant.components.config import auth_provider_oidc
 from homeassistant.core import HomeAssistant
-
-from tests.common import CLIENT_ID as TEST_CLIENT_ID, MockConfigEntry, MockUser
-from tests.typing import WebSocketGenerator
 
 ISSUER = "https://idp.example.com"
 CLIENT_ID = "home-assistant"

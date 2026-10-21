@@ -4,6 +4,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
 
 from homeassistant.auth.providers.oidc.client import (
     OAuth2IdentityClient,
@@ -17,8 +18,6 @@ from homeassistant.auth.providers.oidc.client import (
     async_discover,
 )
 from homeassistant.core import HomeAssistant
-
-from tests.test_util.aiohttp import AiohttpClientMocker
 
 ISSUER = "https://idp.example.com"
 DISCOVERY_URL = f"{ISSUER}/.well-known/openid-configuration"

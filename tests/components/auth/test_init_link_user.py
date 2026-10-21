@@ -6,15 +6,15 @@ from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
+from pytest_homeassistant.common import CLIENT_ID, CLIENT_REDIRECT_URI
+from pytest_homeassistant.typing import ClientSessionGenerator
 
 from homeassistant.auth import STEP_UP_VALIDITY
 from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
+from homeassistant.components.auth import DATA_STORE
 from homeassistant.core import HomeAssistant
 
 from . import async_setup_auth
-
-from tests.common import CLIENT_ID, CLIENT_REDIRECT_URI
-from tests.typing import ClientSessionGenerator
 
 
 async def async_get_code(
@@ -469,3 +469,33 @@ async def test_link_user_rejects_pkce_code(
     assert resp.status == HTTPStatus.BAD_REQUEST
     assert (await resp.json())["message"] == "Invalid code"
     assert len(info["user"].credentials) == 0
+
+
+async def test_link_user_rejects_removed_credentials(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a code issued before its credentials were removed cannot link them."""
+    info = await async_get_code(hass, aiohttp_client)
+    client = info["client"]
+    headers = {"authorization": f"Bearer {info['access_token']}"}
+    resp = await client.post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": info["code"]},
+        headers=headers,
+    )
+    assert resp.status == HTTPStatus.OK
+    credentials = info["user"].credentials[0]
+    code = hass.data[DATA_STORE](
+        CLIENT_ID, credentials, "link_user", link_user_id=info["user"].id
+    )
+
+    await hass.auth.async_remove_credentials(credentials)
+    resp = await client.post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": code},
+        headers=headers,
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert (await resp.json())["message"] == "Invalid code"
+    assert info["user"].credentials == []

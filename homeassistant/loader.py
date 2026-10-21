@@ -317,6 +317,7 @@ class Manifest(TypedDict, total=False):
     issue_tracker: str
     quality_scale: str
     iot_class: str
+    categories: list[str]
     bluetooth: list[dict[str, int | str]]
     mqtt: list[str]
     lorawan: list[tuple[str, int | str]]
@@ -834,8 +835,8 @@ class Integration:
                     (
                         "The custom integration '%s' does not have a version key in the"
                         " manifest file and was blocked from loading. See"
-                        " https://developers.home-assistant.io"
-                        "/blog/2021/01/29/custom-integration-changes#versions"
+                        " https://contributors.home-assistant.io"
+                        "/blog/2021/01/29/custom-integration-changes/#versions"
                         " for more details"
                     ),
                     integration.domain,
@@ -857,8 +858,8 @@ class Integration:
                     (
                         "The custom integration '%s' does not have a valid version key"
                         " (%s) in the manifest file and was blocked from loading. See"
-                        " https://developers.home-assistant.io"
-                        "/blog/2021/01/29/custom-integration-changes#versions"
+                        " https://contributors.home-assistant.io"
+                        "/blog/2021/01/29/custom-integration-changes/#versions"
                         " for more details"
                     ),
                     integration.domain,
@@ -981,6 +982,11 @@ class Integration:
     def iot_class(self) -> str | None:
         """Return the integration IoT Class."""
         return self.manifest.get("iot_class")
+
+    @cached_property
+    def categories(self) -> list[str]:
+        """Return the integration categories, the primary category first."""
+        return self.manifest.get("categories", [])
 
     @cached_property
     def integration_type(

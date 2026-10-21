@@ -1,6 +1,7 @@
 """Test the Home Assistant local auth provider."""
 
 import asyncio
+from typing import Any
 from unittest.mock import Mock, patch
 
 import probatio
@@ -147,9 +148,9 @@ async def test_login_flow_validates(data: hass_auth.Data, hass: HomeAssistant) -
     data.add_auth("test-user", "test-pass")
     await data.async_save()
 
-    provider = hass_auth.HassAuthProvider(
-        hass, auth_store.AuthStore(hass), {"type": "homeassistant"}
-    )
+    store = auth_store.AuthStore(hass)
+    await store.async_load()
+    provider = hass_auth.HassAuthProvider(hass, store, {"type": "homeassistant"})
     flow = await provider.async_login_flow({})
     result = await flow.async_step_init()
     assert result["type"] is data_entry_flow.FlowResultType.FORM
@@ -170,7 +171,7 @@ async def test_login_flow_validates(data: hass_auth.Data, hass: HomeAssistant) -
         {"username": "test-USER", "password": "test-pass"}
     )
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result["data"]["username"] == "test-USER"
+    assert result["data"].data["username"] == "test-user"
 
 
 async def test_saving_loading(data: hass_auth.Data, hass: HomeAssistant) -> None:
@@ -269,10 +270,10 @@ async def test_change_username_not_normalized(
 
 
 async def _signed_in_user(
-    hass: HomeAssistant, data: hass_auth.Data
+    hass: HomeAssistant, data: hass_auth.Data, password: str = "test-pass"
 ) -> tuple[hass_auth.HassAuthProvider, User]:
     """Return a provider and a user who signed in with a password."""
-    data.add_auth("hello", "test-pass")
+    data.add_auth("hello", password)
     await data.async_save()
 
     manager = await auth_manager_from_config(hass, [{"type": "homeassistant"}], [])
@@ -282,38 +283,43 @@ async def _signed_in_user(
     return provider, await manager.async_get_or_create_user(credentials)
 
 
-async def test_step_up_accepts_the_current_password(
-    hass: HomeAssistant, data: hass_auth.Data
+@pytest.mark.parametrize(
+    "password",
+    [pytest.param("test-pass", id="password"), pytest.param("", id="empty-password")],
+)
+async def test_verify_step_up_accepts_the_current_password(
+    hass: HomeAssistant, data: hass_auth.Data, password: str
 ) -> None:
     """Test a signed in user can prove who they are with their password."""
-    provider, user = await _signed_in_user(hass, data)
+    provider, user = await _signed_in_user(hass, data, password)
 
-    assert provider.support_step_up is True
-    assert await provider.async_start_step_up(user, None) == {}
     assert provider.async_get_username(user) == "hello"
-
-    await provider.async_verify_step_up(user, {"password": "test-pass"}, None)
+    await provider.async_verify_step_up(user, {"password": password}, None)
 
 
 @pytest.mark.parametrize(
     "step_up_data",
-    [{"password": "wrong-pass"}, {"password": ""}, {}],
-    ids=["wrong", "empty", "missing"],
+    [
+        pytest.param({"password": "wrong-pass"}, id="wrong"),
+        pytest.param({"password": ""}, id="empty"),
+        pytest.param({}, id="missing"),
+        pytest.param({"password": 1234}, id="not-a-string"),
+    ],
 )
-async def test_step_up_rejects_a_proof_that_does_not_hold(
-    hass: HomeAssistant, data: hass_auth.Data, step_up_data: dict[str, str]
+async def test_verify_step_up_rejects_a_wrong_password(
+    hass: HomeAssistant, data: hass_auth.Data, step_up_data: dict[str, Any]
 ) -> None:
-    """Test only the current password re-verifies the user."""
+    """Test only the current password verifies the user again."""
     provider, user = await _signed_in_user(hass, data)
 
     with pytest.raises(InvalidStepUpError):
         await provider.async_verify_step_up(user, step_up_data, None)
 
 
-async def test_step_up_needs_a_credential_of_this_provider(
-    hass: HomeAssistant, data: hass_auth.Data
+async def test_verify_step_up_needs_a_credential_of_this_provider(
+    hass: HomeAssistant,
 ) -> None:
-    """Test an account without a password login cannot step up with one."""
+    """Test an account without a password login cannot be verified with one."""
     manager = await auth_manager_from_config(hass, [{"type": "homeassistant"}], [])
     provider = manager.auth_providers[0]
     assert isinstance(provider, hass_auth.HassAuthProvider)
@@ -322,3 +328,11 @@ async def test_step_up_needs_a_credential_of_this_provider(
     assert provider.async_get_username(user) is None
     with pytest.raises(InvalidStepUpError):
         await provider.async_verify_step_up(user, {"password": "test-pass"}, None)
+
+
+async def test_start_step_up(hass: HomeAssistant, data: hass_auth.Data) -> None:
+    """Test a password proof needs nothing from the server up front."""
+    provider, user = await _signed_in_user(hass, data)
+
+    assert provider.support_step_up is True
+    assert await provider.async_start_step_up(user, None) == {}
