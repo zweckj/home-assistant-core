@@ -19,7 +19,12 @@ from homeassistant.core import (
     HomeAssistant,
     callback,
 )
-from homeassistant.data_entry_flow import FlowHandler, FlowManager, FlowResultType
+from homeassistant.data_entry_flow import (
+    FlowHandler,
+    FlowManager,
+    FlowResultType,
+    UnknownHandler,
+)
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util import dt as dt_util
 
@@ -58,6 +63,10 @@ class InvalidAuthError(Exception):
 
 class InvalidProvider(Exception):
     """Authentication provider not found."""
+
+
+class DuplicateCredentialsError(Exception):
+    """Raised when new credentials match credentials stored in the meantime."""
 
 
 async def auth_manager_from_config(
@@ -176,8 +185,12 @@ class AuthManagerFlowManager(
     ) -> LoginFlow[Any]:
         """Create a login flow."""
         auth_provider = self.auth_manager.get_auth_provider(*handler_key)
-        if not auth_provider:
-            raise KeyError(f"Unknown auth provider {handler_key}")
+        # Not offered on the login screen is answered like not configured, so
+        # it doesn't reveal which providers are set up.
+        if not auth_provider or not auth_provider.async_can_start_login(
+            context or AuthFlowContext()
+        ):
+            raise UnknownHandler
         return await auth_provider.async_login_flow(context)
 
     @override
@@ -191,8 +204,6 @@ class AuthManagerFlowManager(
         This method is called when a flow step returns FlowResultType.ABORT or
         FlowResultType.CREATE_ENTRY.
         """
-        flow = cast(LoginFlow, flow)
-
         if result["type"] is not FlowResultType.CREATE_ENTRY:
             return result
 
@@ -205,24 +216,9 @@ class AuthManagerFlowManager(
         if not auth_provider:
             raise KeyError(f"Unknown auth provider {result['handler']}")
 
-        credentials = await auth_provider.async_get_or_create_credentials(
+        result["result"] = await auth_provider.async_get_or_create_credentials(
             cast(Mapping[str, str], result["data"]),
         )
-
-        # multi-factor module cannot enabled for new credential
-        # which has not linked to a user yet
-        if auth_provider.support_mfa and not credentials.is_new:
-            user = await self.auth_manager.async_get_user_by_credentials(credentials)
-            if user is not None:
-                modules = await self.auth_manager.async_get_enabled_mfa(user)
-
-                if modules:
-                    flow.credential = credentials
-                    flow.user = user
-                    flow.available_mfa_modules = modules
-                    return await flow.async_step_select_mfa_module()
-
-        result["result"] = credentials
         return result
 
 
@@ -242,9 +238,8 @@ class AuthManager:
         self._providers = providers
         self._mfa_modules = mfa_modules
         self.login_flow = AuthManagerFlowManager(hass, self)
-        # Stops two logins racing on one new credential from creating two users.
-        self._credential_lock = asyncio.Lock()
         self._revoke_callbacks: dict[str, set[CALLBACK_TYPE]] = {}
+        self._create_user_lock = asyncio.Lock()
         # Refresh token id to when its step up proof stops counting.
         self._step_ups: dict[str, datetime] = {}
         self._credentials_revoked_listeners: set[
@@ -427,7 +422,7 @@ class AuthManager:
         self, credentials: models.Credentials
     ) -> models.User:
         """Get or create a user."""
-        async with self._credential_lock:
+        async with self._create_user_lock:
             if not credentials.is_new:
                 user = await self.async_get_user_by_credentials(credentials)
                 if user is None:
@@ -439,6 +434,14 @@ class AuthManager:
             if auth_provider is None:
                 raise RuntimeError("Credential with unknown provider encountered")
 
+            # Each sign in finished before the first code was redeemed brings its
+            # own new credentials for the same account.
+            if any(
+                stored.data == credentials.data
+                for stored in await auth_provider.async_credentials()
+            ):
+                raise DuplicateCredentialsError
+
             info = await auth_provider.async_user_meta_for_credentials(credentials)
 
             user = await self._store.async_create_user(
@@ -449,22 +452,21 @@ class AuthManager:
                 local_only=info.local_only,
             )
 
-            self.hass.bus.async_fire(EVENT_USER_ADDED, {"user_id": user.id})
+        self.hass.bus.async_fire(EVENT_USER_ADDED, {"user_id": user.id})
 
-            return user
+        return user
 
     async def async_link_user(
         self, user: models.User, credentials: models.Credentials
     ) -> None:
         """Link credentials to an existing user."""
-        async with self._credential_lock:
-            linked_user = await self.async_get_user_by_credentials(credentials)
-            if linked_user == user:
-                return
-            if linked_user is not None:
-                raise ValueError("Credential is already linked to a user")
+        linked_user = await self.async_get_user_by_credentials(credentials)
+        if linked_user == user:
+            return
+        if linked_user is not None:
+            raise ValueError("Credential is already linked to a user")
 
-            await self._store.async_link_user(user, credentials)
+        await self._store.async_link_user(user, credentials)
 
     async def async_remove_user(self, user: models.User) -> None:
         """Remove a user."""
@@ -477,6 +479,10 @@ class AuthManager:
 
         if tasks:
             await asyncio.gather(*tasks)
+
+        # Revoking runs the callbacks, which close connections using the tokens.
+        for refresh_token in list(user.refresh_tokens.values()):
+            self.async_remove_refresh_token(refresh_token)
 
         await self._store.async_remove_user(user)
 
@@ -530,11 +536,21 @@ class AuthManager:
             self.async_remove_refresh_token(refresh_token)
 
     async def async_remove_credentials(self, credentials: models.Credentials) -> None:
-        """Remove credentials."""
+        """Remove credentials and end the sessions that signed in with them."""
         if (provider := self._async_get_auth_provider(credentials)) is not None:
             await provider.async_will_remove_credentials(credentials)
 
+        user = await self.async_get_user_by_credentials(credentials)
         await self._store.async_remove_credentials(credentials)
+
+        if user is None:
+            return
+        for refresh_token in list(user.refresh_tokens.values()):
+            if (
+                refresh_token.credential is not None
+                and refresh_token.credential.id == credentials.id
+            ):
+                self.async_remove_refresh_token(refresh_token)
 
     @callback
     def async_has_other_login_method(
