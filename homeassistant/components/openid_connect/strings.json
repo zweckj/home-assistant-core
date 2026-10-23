@@ -1,0 +1,42 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_service%]",
+      "identity_providers_disabled": "Signing in with identity providers is turned off. Add `type: oidc` to `auth_providers` in your configuration to use it.",
+      "no_url_available": "Home Assistant has no URL that the identity provider could redirect back to. Set up an internal or external URL in the network settings first."
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_config": "The identity provider configuration is not valid.",
+      "invalid_discovery": "The identity provider returned an invalid OpenID Connect configuration.",
+      "issuer_mismatch": "The identity provider reported issuer `{reported_issuer}`, which does not match the entered issuer.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "step": {
+      "reconfigure": {
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret"
+        },
+        "data_description": {
+          "client_id": "OAuth2 client ID from the identity provider.",
+          "client_secret": "OAuth2 client secret from the identity provider. Leave empty for a public client using PKCE only."
+        },
+        "description": "Update the client credentials for `{issuer}`. The issuer cannot be changed because it identifies the linked accounts. Changing the client ID breaks linked accounts if the identity provider issues pairwise subject identifiers."
+      },
+      "user": {
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret",
+          "issuer": "Issuer"
+        },
+        "data_description": {
+          "client_id": "OAuth2 client ID from the identity provider.",
+          "client_secret": "OAuth2 client secret from the identity provider. Leave empty for a public client using PKCE only.",
+          "issuer": "OpenID Connect issuer URL. The discovery document is loaded from `/.well-known/openid-configuration` below this URL."
+        },
+        "description": "Register these redirect URIs with the identity provider:\n\n{redirect_uris}"
+      }
+    }
+  }
+}
