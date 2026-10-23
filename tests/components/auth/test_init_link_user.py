@@ -4,10 +4,14 @@ from http import HTTPStatus
 from typing import Any
 from unittest.mock import patch
 
+from freezegun.api import FrozenDateTimeFactory
+import pytest
 from pytest_homeassistant.common import CLIENT_ID, CLIENT_REDIRECT_URI
 from pytest_homeassistant.typing import ClientSessionGenerator
 
-from homeassistant.components.auth import create_auth_code
+from homeassistant.auth import STEP_UP_VALIDITY
+from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
+from homeassistant.components.auth import DATA_STORE
 from homeassistant.core import HomeAssistant
 
 from . import async_setup_auth
@@ -54,7 +58,11 @@ async def async_get_code(
     if code_challenge_method is not None:
         flow_payload["code_challenge_method"] = code_challenge_method
 
-    resp = await client.post("/auth/login_flow", json=flow_payload)
+    resp = await client.post(
+        "/auth/login_flow",
+        json=flow_payload,
+        headers={"authorization": f"Bearer {access_token}"},
+    )
     assert resp.status == HTTPStatus.OK
     step = await resp.json()
 
@@ -97,6 +105,207 @@ async def test_link_user(
     assert len(info["user"].credentials) == 1
 
 
+async def test_link_user_flow_requires_a_signed_in_user(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test nobody can start attaching an identity without being signed in."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+    )
+
+    assert resp.status == HTTPStatus.UNAUTHORIZED
+
+
+@pytest.mark.parametrize(
+    "token_kwargs",
+    [
+        pytest.param({"client_id": CLIENT_ID}, id="session"),
+        pytest.param(
+            {
+                "client_name": "Script",
+                "token_type": TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+            },
+            id="long-lived-access-token",
+        ),
+    ],
+)
+async def test_link_user_flow_requires_a_step_up(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    freezer: FrozenDateTimeFactory,
+    token_kwargs: dict[str, Any],
+) -> None:
+    """Test a session that did not prove the user recently cannot link."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_user(name="Hello")
+    refresh_token = await hass.auth.async_create_refresh_token(user, **token_kwargs)
+    freezer.tick(STEP_UP_VALIDITY)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+        headers={
+            "authorization": (
+                f"Bearer {hass.auth.async_create_access_token(refresh_token)}"
+            )
+        },
+    )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+
+
+async def test_link_user_code_is_bound_to_the_user_who_started_the_flow(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a linking code cannot attach the identity to another account."""
+    info = await async_get_code(hass, aiohttp_client)
+    client = info["client"]
+    code = info["code"]
+
+    other_user = await hass.auth.async_create_user(name="Other")
+    other_refresh_token = await hass.auth.async_create_refresh_token(
+        other_user, CLIENT_ID
+    )
+    other_access_token = hass.auth.async_create_access_token(other_refresh_token)
+
+    resp = await client.post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": code},
+        headers={"authorization": f"Bearer {other_access_token}"},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert len(other_user.credentials) == 0
+    assert len(info["user"].credentials) == 0
+
+    # The attempt burned the code for the account that started the flow too.
+    resp = await client.post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": code},
+        headers={"authorization": f"Bearer {info['access_token']}"},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert len(info["user"].credentials) == 0
+
+
+async def test_link_user_provider_removed(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a link code is refused once its provider has been removed."""
+    info = await async_get_code(hass, aiohttp_client)
+    hass.auth._providers.pop(("insecure_example", "2nd auth"))
+
+    resp = await info["client"].post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": info["code"]},
+        headers={"authorization": f"Bearer {info['access_token']}"},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert info["user"].credentials == []
+
+
+async def test_login_flow_link_user_rejects_system_user(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test creating a link user flow rejects system users."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_system_user(name="System")
+    refresh_token = await hass.auth.async_create_refresh_token(user)
+    access_token = hass.auth.async_create_access_token(refresh_token)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+        headers={"authorization": f"Bearer {access_token}"},
+    )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+
+
+async def test_login_flow_link_user_rejects_inactive_user(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test an inactive user's token does not authenticate a link user flow."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_user(name="Inactive")
+    refresh_token = await hass.auth.async_create_refresh_token(user, CLIENT_ID)
+    access_token = hass.auth.async_create_access_token(refresh_token)
+    user.is_active = False
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+        headers={"authorization": f"Bearer {access_token}"},
+    )
+
+    assert resp.status == HTTPStatus.UNAUTHORIZED
+
+
+async def test_link_user_flow_does_not_mark_a_successful_login(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test creating a linking code does not reset failed-login tracking."""
+    with patch(
+        "homeassistant.components.auth.login_flow.process_success_login"
+    ) as process_success_login:
+        await async_get_code(hass, aiohttp_client)
+
+    process_success_login.assert_not_called()
+
+
+async def test_link_user_code_cannot_be_exchanged_for_tokens(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test an account-linking code cannot create a new login session."""
+    info = await async_get_code(hass, aiohttp_client)
+    client = info["client"]
+    code = info["code"]
+
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+        },
+    )
+    assert resp.status == HTTPStatus.BAD_REQUEST
+
+    # The refused exchange must not have burned the code.
+    resp = await client.post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": code},
+        headers={"authorization": f"Bearer {info['access_token']}"},
+    )
+    assert resp.status == HTTPStatus.OK
+    assert len(info["user"].credentials) == 1
+
+
 async def test_link_user_invalid_client_id(
     hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
 ) -> None:
@@ -127,6 +336,42 @@ async def test_link_user_invalid_code(
     resp = await client.post(
         "/auth/link_user",
         json={"client_id": CLIENT_ID, "code": "invalid"},
+        headers={"authorization": f"Bearer {info['access_token']}"},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert len(info["user"].credentials) == 0
+
+
+async def test_link_user_rejects_a_sign_in_code(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a code from a plain sign in cannot attach an identity."""
+    info = await async_get_code(hass, aiohttp_client)
+    client = info["client"]
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": CLIENT_ID,
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+    sign_in_code = (await resp.json())["result"]
+
+    resp = await client.post(
+        "/auth/link_user",
+        json={"client_id": CLIENT_ID, "code": sign_in_code},
         headers={"authorization": f"Bearer {info['access_token']}"},
     )
 
@@ -240,7 +485,9 @@ async def test_link_user_rejects_removed_credentials(
     )
     assert resp.status == HTTPStatus.OK
     credentials = info["user"].credentials[0]
-    code = create_auth_code(hass, CLIENT_ID, credentials)
+    code = hass.data[DATA_STORE](
+        CLIENT_ID, credentials, "link_user", link_user_id=info["user"].id
+    )
 
     await hass.auth.async_remove_credentials(credentials)
     resp = await client.post(

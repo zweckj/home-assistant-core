@@ -2,16 +2,26 @@
 
 import asyncio
 from http import HTTPStatus
+from ipaddress import ip_address
 from typing import Any
 from unittest.mock import patch
 
 from aiohttp import ClientResponse, web
 from aiohttp.test_utils import TestClient
 import pytest
-from pytest_homeassistant.common import CLIENT_ID, CLIENT_REDIRECT_URI
+from pytest_homeassistant.common import (
+    CLIENT_ID,
+    CLIENT_REDIRECT_URI,
+)
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
 from pytest_homeassistant.typing import ClientSessionGenerator
+from yarl import URL
 
 from homeassistant.auth import AuthManagerFlowManager
+from homeassistant.auth.const import LOGIN_CALLBACK_PATH
+from homeassistant.auth.providers.oidc import OidcAuthProvider
+from homeassistant.auth.providers.oidc.client import TokenResponse
+from homeassistant.auth.providers.oidc.spec import IdentityProvider, OpenIDConnect
 from homeassistant.components.auth import indieauth
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
@@ -72,6 +82,7 @@ async def test_fetch_auth_providers(
         hass, aiohttp_client, provider_configs, custom_ip=ip
     )
     resp = await client.get("/auth/providers")
+
     assert resp.status == HTTPStatus.OK
     assert await resp.json() == {
         "providers": expected,
@@ -120,6 +131,28 @@ async def test_fetch_auth_providers_skips_providers_that_cannot_start_login(
 
     assert resp.status == HTTPStatus.OK
     assert (await resp.json())["providers"] == []
+
+
+async def test_fetch_auth_providers_includes_domain(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test fetching auth providers includes the brand domain when set."""
+    client = await async_setup_auth(hass, aiohttp_client, BASE_CONFIG)
+    with patch(
+        "homeassistant.auth.providers.insecure_example.ExampleAuthProvider.domain",
+        new=property(lambda self: "insecure_example"),
+    ):
+        resp = await client.get("/auth/providers")
+
+    assert resp.status == HTTPStatus.OK
+    assert (await resp.json())["providers"] == [
+        {
+            "name": "Example",
+            "type": "insecure_example",
+            "id": None,
+            "domain": "insecure_example",
+        }
+    ]
 
 
 async def test_login_flow_refuses_providers_that_cannot_start_login(
@@ -471,6 +504,181 @@ async def test_login_exist_user_ip_changes(
     assert response == {"message": "IP address changed"}
 
 
+async def test_login_flow_rejects_a_changed_client_id(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a flow cannot be finished for another client than it was started for."""
+    client = await async_setup_auth(hass, aiohttp_client, setup_api=True)
+    cred = await hass.auth.auth_providers[0].async_get_or_create_credentials(
+        {"username": "test-user"}
+    )
+    await hass.auth.async_get_or_create_user(cred)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+
+    resp = await client.post(
+        f"/auth/login_flow/{step['flow_id']}",
+        json={
+            "client_id": "https://other.example.com/",
+            "username": "test-user",
+            "password": "test-pass",
+        },
+    )
+
+    assert resp.status == 400
+    assert await resp.json() == {"message": "Client ID changed"}
+
+
+async def test_a_flow_without_an_external_step_gets_no_browser_cookie(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test only a login that leaves the browser is tied back to it."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    step = await resp.json()
+
+    assert step["type"] == "form"
+    assert f"hass_login_browser_{step['flow_id']}" not in resp.cookies
+
+
+@pytest.mark.parametrize(
+    ("query", "status"),
+    [
+        ("code=the-code", HTTPStatus.BAD_REQUEST),
+        ("code=the-code&state=not-a-token", HTTPStatus.BAD_REQUEST),
+    ],
+    ids=["no state", "unsigned state"],
+)
+async def test_login_callback_requires_a_state_we_signed(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    query: str,
+    status: HTTPStatus,
+) -> None:
+    """Test the callback refuses anything it cannot tie back to a login."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?{query}")
+
+    assert resp.status == status
+
+
+async def test_login_callback_rejects_an_unknown_flow(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a correctly signed state for a flow that is gone is refused."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    state = hass.auth.login_flow.async_encode_external_state("does-not-exist")
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
+
+    assert resp.status == HTTPStatus.NOT_FOUND
+
+
+async def test_login_callback_rejects_a_flow_that_is_not_parked(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a flow waiting on a form cannot be advanced through the callback."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+        },
+    )
+    flow_id = (await resp.json())["flow_id"]
+    state = hass.auth.login_flow.async_encode_external_state(flow_id)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
+
+    assert resp.status == HTTPStatus.NOT_FOUND
+    assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "init"
+
+
+@pytest.mark.parametrize(
+    ("flow_type", "expected"),
+    [("authorize", False), (None, False)],
+    ids=["authorize", "default"],
+)
+async def test_login_flow_marks_account_linking(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    flow_type: str | None,
+    expected: bool,
+) -> None:
+    """Test the flow can tell an account link apart from a plain sign in."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_user(name="Hello")
+    refresh_token = await hass.auth.async_create_refresh_token(user, CLIENT_ID)
+    access_token = hass.auth.async_create_access_token(refresh_token)
+
+    body = {
+        "client_id": CLIENT_ID,
+        "handler": ["insecure_example", None],
+        "redirect_uri": CLIENT_REDIRECT_URI,
+    }
+    if flow_type is not None:
+        body["type"] = flow_type
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json=body,
+        headers={"authorization": f"Bearer {access_token}"},
+    )
+
+    assert resp.status == HTTPStatus.OK
+    flow_id = (await resp.json())["flow_id"]
+
+    context = hass.auth.login_flow.async_get(flow_id)["context"]
+    assert context["link_user"] is expected
+    assert context.get("link_user_id") == (user.id if expected else None)
+
+
+async def test_login_flow_marks_account_linking_for_authenticated_user(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test the link flow records the user who started it."""
+    client = await async_setup_auth(hass, aiohttp_client)
+    user = await hass.auth.async_create_user(name="Hello")
+    refresh_token = await hass.auth.async_create_refresh_token(user, CLIENT_ID)
+    access_token = hass.auth.async_create_access_token(refresh_token)
+
+    resp = await client.post(
+        "/auth/login_flow",
+        json={
+            "client_id": CLIENT_ID,
+            "handler": ["insecure_example", None],
+            "redirect_uri": CLIENT_REDIRECT_URI,
+            "type": "link_user",
+        },
+        headers={"authorization": "Bearer " + access_token},
+    )
+
+    assert resp.status == HTTPStatus.OK
+    flow = hass.auth.login_flow.async_get((await resp.json())["flow_id"])
+    assert flow["context"]["link_user"] is True
+    assert flow["context"]["link_user_id"] == user.id
+
+
 async def _async_post_while_held(
     client: TestClient,
     flow_id: str,
@@ -766,6 +974,545 @@ async def test_well_known_protected_resource_no_url(
         "/.well-known/oauth-protected-resource",
     )
     assert resp.status == 404
+
+
+_OIDC_IDP_ID = "test-idp"
+_OIDC_ISSUER = "https://idp.example.com"
+_OIDC_DISCOVERY = {
+    "issuer": _OIDC_ISSUER,
+    "authorization_endpoint": f"{_OIDC_ISSUER}/authorize",
+    "token_endpoint": f"{_OIDC_ISSUER}/token",
+    "jwks_uri": f"{_OIDC_ISSUER}/jwks",
+    "id_token_signing_alg_values_supported": ["RS256"],
+}
+
+
+async def _setup_oidc(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> TestClient:
+    """Set up authentication with a configured OpenID Connect provider."""
+    aioclient_mock.get(
+        f"{_OIDC_ISSUER}/.well-known/openid-configuration", json=_OIDC_DISCOVERY
+    )
+    aioclient_mock.get(f"{_OIDC_ISSUER}/jwks", json={"keys": []})
+
+    client = await async_setup_auth(hass, aiohttp_client, [{"type": "oidc"}])
+    root = hass.auth.auth_providers[0]
+    assert isinstance(root, OidcAuthProvider)
+    await root.async_register_identity_provider(
+        _OIDC_IDP_ID,
+        domain="openid_connect",
+        title="Example ID",
+        spec=IdentityProvider(
+            client_id="home-assistant", protocol=OpenIDConnect(issuer=_OIDC_ISSUER)
+        ),
+    )
+    provider = root.async_get_child_provider(_OIDC_IDP_ID)
+    assert provider is not None
+    user = await hass.auth.async_create_user("Alice")
+    await hass.auth.async_link_user(
+        user,
+        provider.async_create_credentials(
+            {"issuer": _OIDC_ISSUER, "subject": "user-1234"}
+        ),
+    )
+    return client
+
+
+async def _start_oidc_login(client: TestClient) -> str:
+    """Start a login flow and return the state parameter sent to the provider."""
+    with patch(
+        "homeassistant.auth.providers.oidc.get_url",
+        return_value="https://ha.example.com",
+    ):
+        resp = await client.post(
+            "/auth/login_flow",
+            json={
+                "client_id": CLIENT_ID,
+                "handler": ["oidc", _OIDC_IDP_ID],
+                "redirect_uri": CLIENT_REDIRECT_URI,
+            },
+        )
+    assert resp.status == 200
+    step = await resp.json()
+    assert step["type"] == "external"
+    return URL(step["url"]).query["state"]
+
+
+async def test_oidc_callback_resumes_the_flow(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test the callback hands the browser back to the frontend."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+
+    resp = await client.get(
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
+    )
+
+    assert resp.status == 302
+    location = URL(resp.headers["location"])
+    assert location.path == "/auth/authorize"
+    assert location.query["auth_callback"] == "1"
+    # The authorize page needs to know where to send the user afterwards.
+    assert location.query["client_id"] == CLIENT_ID
+    assert location.query["redirect_uri"] == CLIENT_REDIRECT_URI
+    # The authorization code is never handed out by this view.
+    assert "code" not in location.query
+
+    flow_id = location.query["flow_id"]
+    assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "finish"
+
+
+async def test_oidc_callback_renews_the_browser_cookie(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test the finish step gets a full cookie budget after the provider detour."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+
+    resp = await client.get(
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
+    )
+
+    assert resp.status == 302
+    flow_id = URL(resp.headers["location"]).query["flow_id"]
+    cookie = resp.cookies[f"hass_login_browser_{flow_id}"]
+    assert cookie["max-age"] == "300"
+    assert cookie["path"] == "/auth"
+    assert cookie["httponly"]
+
+
+async def test_oidc_complete_http_login(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test the complete OIDC browser flow issues Home Assistant tokens."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    root = hass.auth.auth_providers[0]
+    assert isinstance(root, OidcAuthProvider)
+    provider = root.async_get_child_provider(_OIDC_IDP_ID)
+    assert provider is not None
+    state = await _start_oidc_login(client)
+    oidc_client = provider.async_client()
+
+    with (
+        patch.object(
+            oidc_client,
+            "async_exchange_code",
+            return_value=TokenResponse(
+                access_token="idp-access-token",
+                id_token="id-token",
+                refresh_token="idp-refresh-token",
+            ),
+        ),
+        patch.object(
+            oidc_client,
+            "async_verify_id_token",
+            return_value={
+                "iss": _OIDC_ISSUER,
+                "sub": "user-1234",
+                "name": "Alice",
+                "preferred_username": "alice",
+            },
+        ),
+    ):
+        resp = await client.get(
+            f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
+            allow_redirects=False,
+        )
+        flow_id = URL(resp.headers["location"]).query["flow_id"]
+        resp = await client.post(
+            f"/auth/login_flow/{flow_id}", json={"client_id": CLIENT_ID}
+        )
+
+    code = (await resp.json())["result"]
+    resp = await client.post(
+        "/auth/token",
+        data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "code": code,
+        },
+    )
+
+    assert resp.status == HTTPStatus.OK
+    tokens = await resp.json()
+    refresh_token = hass.auth.async_validate_access_token(tokens["access_token"])
+    assert refresh_token is not None
+    assert refresh_token.user.name == "Alice"
+
+
+async def test_concurrent_oidc_finish_posts_execute_once(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test only one request can execute a flow's final OIDC step."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    root = hass.auth.auth_providers[0]
+    assert isinstance(root, OidcAuthProvider)
+    provider = root.async_get_child_provider(_OIDC_IDP_ID)
+    assert provider is not None
+    state = await _start_oidc_login(client)
+    resp = await client.get(
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
+        allow_redirects=False,
+    )
+    flow_id = URL(resp.headers["location"]).query["flow_id"]
+    exchange_started = asyncio.Event()
+    release_exchange = asyncio.Event()
+    exchange_calls = 0
+
+    async def exchange_code(**kwargs: str) -> TokenResponse:
+        nonlocal exchange_calls
+        exchange_calls += 1
+        if exchange_calls > 1:
+            return TokenResponse(
+                access_token="second-access-token",
+                id_token="second-id-token",
+                refresh_token="second-refresh-token",
+            )
+        exchange_started.set()
+        await release_exchange.wait()
+        return TokenResponse(
+            access_token="idp-access-token",
+            id_token="id-token",
+            refresh_token="idp-refresh-token",
+        )
+
+    oidc_client = provider.async_client()
+    with (
+        patch.object(oidc_client, "async_exchange_code", side_effect=exchange_code),
+        patch.object(
+            oidc_client,
+            "async_verify_id_token",
+            return_value={
+                "iss": _OIDC_ISSUER,
+                "sub": "user-1234",
+                "name": "Alice",
+                "preferred_username": "alice",
+            },
+        ),
+    ):
+        first = asyncio.create_task(
+            client.post(f"/auth/login_flow/{flow_id}", json={"client_id": CLIENT_ID})
+        )
+        await exchange_started.wait()
+        second = await client.post(
+            f"/auth/login_flow/{flow_id}", json={"client_id": CLIENT_ID}
+        )
+        release_exchange.set()
+        first_response = await first
+
+    assert second.status == HTTPStatus.CONFLICT
+    assert first_response.status == HTTPStatus.OK
+    assert (await first_response.json())["type"] == "create_entry"
+
+
+async def test_oidc_callback_rejects_invalid_client_redirect(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test redirect validation happens before the authorization-code exchange."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    with patch(
+        "homeassistant.auth.providers.oidc.get_url",
+        return_value="https://ha.example.com",
+    ):
+        resp = await client.post(
+            "/auth/login_flow",
+            json={
+                "client_id": CLIENT_ID,
+                "handler": ["oidc", _OIDC_IDP_ID],
+                "redirect_uri": "https://other.example.com/callback",
+            },
+        )
+    state = URL((await resp.json())["url"]).query["state"]
+
+    with patch(
+        "homeassistant.components.auth.indieauth.fetch_redirect_uris",
+        return_value=[],
+    ):
+        resp = await client.get(
+            f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
+            allow_redirects=False,
+        )
+
+    assert resp.status == HTTPStatus.FORBIDDEN
+    flow_id = hass.auth.login_flow.async_decode_external_state(state)
+    assert flow_id is not None
+    assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "authorize"
+
+
+async def test_concurrent_oidc_callbacks_advance_the_flow_once(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test two callbacks cannot both consume the external flow step."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+    callback_url = f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}"
+    both_validating = asyncio.Event()
+    release_validation = asyncio.Event()
+    validation_calls = 0
+
+    async def verify_redirect_uri(*args: Any, **kwargs: Any) -> bool:
+        nonlocal validation_calls
+        validation_calls += 1
+        if validation_calls == 2:
+            both_validating.set()
+        await release_validation.wait()
+        return True
+
+    with patch(
+        "homeassistant.components.auth.login_flow.indieauth.verify_redirect_uri",
+        side_effect=verify_redirect_uri,
+    ):
+        first = asyncio.create_task(client.get(callback_url, allow_redirects=False))
+        second = asyncio.create_task(client.get(callback_url, allow_redirects=False))
+        await both_validating.wait()
+        release_validation.set()
+        responses = await asyncio.gather(first, second)
+
+    assert sorted(response.status for response in responses) == [
+        HTTPStatus.FOUND,
+        HTTPStatus.NOT_FOUND,
+    ]
+    flow_id = hass.auth.login_flow.async_decode_external_state(state)
+    assert flow_id is not None
+    assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "finish"
+
+
+async def test_oidc_external_step_rejects_direct_posts(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test only the state-validating callback can advance the external step."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+    flow_id = hass.auth.login_flow.async_decode_external_state(state)
+    assert flow_id is not None
+
+    resp = await client.post(
+        f"/auth/login_flow/{flow_id}",
+        json={"client_id": CLIENT_ID, "code": "the-code"},
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "authorize"
+
+
+async def test_oidc_finish_requires_the_browser_that_started_the_login(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test browser binding remains in force after the provider callback."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+
+    resp = await client.get(
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
+    )
+    flow_id = URL(resp.headers["location"]).query["flow_id"]
+    client.session.cookie_jar.clear()
+
+    resp = await client.post(
+        f"/auth/login_flow/{flow_id}", json={"client_id": CLIENT_ID}
+    )
+
+    assert resp.status == HTTPStatus.BAD_REQUEST
+    assert hass.auth.login_flow.async_get(flow_id)["step_id"] == "finish"
+
+
+async def test_concurrent_oidc_logins_have_independent_browser_tokens(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test starting another login does not invalidate the first one."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    first_state = await _start_oidc_login(client)
+    await _start_oidc_login(client)
+
+    resp = await client.get(
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={first_state}",
+        allow_redirects=False,
+    )
+
+    assert resp.status == HTTPStatus.FOUND
+
+
+async def test_oidc_callback_requires_the_browser_that_started_the_login(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test a login cannot be finished in a browser that did not start it."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+    client.session.cookie_jar.clear()
+
+    resp = await client.get(
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}", allow_redirects=False
+    )
+
+    assert resp.status == 400
+
+
+async def test_oidc_callback_rejects_a_foreign_browser_token(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test a cookie from another login does not unlock this one."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+    flow_id = hass.auth.login_flow.async_decode_external_state(state)
+    assert flow_id is not None
+
+    resp = await client.get(
+        f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}",
+        cookies={f"hass_login_browser_{flow_id}": "not-the-one"},
+        allow_redirects=False,
+    )
+
+    assert resp.status == 400
+
+
+async def test_oidc_callback_requires_state(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test a callback without a state parameter is refused."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code")
+
+    assert resp.status == 400
+
+
+async def test_oidc_callback_rejects_tampered_state(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test a state parameter that we did not sign is refused."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = await _start_oidc_login(client)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}x")
+
+    assert resp.status == 400
+
+
+async def test_oidc_callback_rejects_unknown_flow(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test a correctly signed state for a finished flow is refused."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    state = hass.auth.login_flow.async_encode_external_state("does-not-exist")
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
+
+    assert resp.status == 404
+
+
+async def test_oidc_callback_rejects_changed_ip(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test the browser cannot move to another address mid login."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+
+    with patch(
+        "homeassistant.auth.providers.oidc.get_url",
+        return_value="https://ha.example.com",
+    ):
+        result = await hass.auth.login_flow.async_init(
+            ("oidc", _OIDC_IDP_ID),
+            context={
+                "ip_address": ip_address("1.2.3.4"),
+                "redirect_uri": CLIENT_REDIRECT_URI,
+            },
+        )
+
+    state = URL(result["url"]).query["state"]
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state={state}")
+
+    assert resp.status == 400
+
+
+async def test_login_callback_without_an_external_login(
+    hass: HomeAssistant, aiohttp_client: ClientSessionGenerator
+) -> None:
+    """Test a state Home Assistant never signed is refused."""
+    client = await async_setup_auth(hass, aiohttp_client)
+
+    resp = await client.get(f"{LOGIN_CALLBACK_PATH}?code=the-code&state=whatever")
+
+    assert resp.status == 400
+
+
+async def test_oidc_provider_hidden_until_registered(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test the root is hidden and only active children are offered."""
+    client = await async_setup_auth(hass, aiohttp_client, [{"type": "oidc"}])
+
+    resp = await client.get("/auth/providers")
+    assert (await resp.json())["providers"] == []
+
+    await hass.auth.auth_providers[0].async_register_identity_provider(
+        _OIDC_IDP_ID,
+        domain="openid_connect",
+        title="Example ID",
+        spec=IdentityProvider(
+            client_id="home-assistant",
+            protocol=OpenIDConnect(issuer=_OIDC_ISSUER),
+        ),
+    )
+
+    resp = await client.get("/auth/providers")
+    assert (await resp.json())["providers"] == [
+        {
+            "name": "Example ID",
+            "id": _OIDC_IDP_ID,
+            "type": "oidc",
+            "domain": "openid_connect",
+        }
+    ]
+
+
+async def test_dormant_oidc_provider_is_hidden(
+    hass: HomeAssistant,
+    aiohttp_client: ClientSessionGenerator,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Test suspended children are hidden from new logins."""
+    client = await _setup_oidc(hass, aiohttp_client, aioclient_mock)
+    hass.auth.auth_providers[0].async_suspend_identity_provider(_OIDC_IDP_ID)
+
+    resp = await client.get("/auth/providers")
+
+    assert (await resp.json())["providers"] == []
 
 
 @pytest.mark.parametrize(

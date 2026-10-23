@@ -1,6 +1,6 @@
 """Auth providers for Home Assistant."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import logging
 import types
 from typing import Any, override
@@ -81,6 +81,21 @@ class AuthProvider:
         return self.config.get(CONF_NAME, self.DEFAULT_TITLE)  # type: ignore[no-any-return]
 
     @property
+    def child_providers(self) -> Iterable[AuthProvider]:
+        """Return dynamically configured providers hosted under this provider."""
+        return ()
+
+    @callback
+    def async_get_child_provider(self, provider_id: str) -> AuthProvider | None:
+        """Return a child resolved by (type, id) like any other provider."""
+        return None
+
+    @property
+    def domain(self) -> str | None:
+        """Return the integration whose brand the login screen shows."""
+        return None
+
+    @property
     def support_step_up(self) -> bool:
         """Return whether the provider can re-verify an already signed in user."""
         return False
@@ -120,6 +135,11 @@ class AuthProvider:
 
         The login screen only offers the providers for which this returns True.
         """
+        return True
+
+    @callback
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return if the credentials are a login the user can fall back to."""
         return True
 
     async def async_get_or_create_credentials(
@@ -262,10 +282,17 @@ class MfaLoginFlow[_AuthProviderT: AuthProvider = AuthProvider](
     @override
     async def async_finish(self, flow_result: Any) -> AuthFlowResult:
         """Ask for a second factor before finishing, if the user enabled one."""
-        credentials = await self._auth_provider.async_get_or_create_credentials(
-            flow_result
+        return await self.async_finish_credentials(
+            await self._auth_provider.async_get_or_create_credentials(flow_result)
         )
 
+    async def async_finish_credentials(
+        self, credentials: Credentials
+    ) -> AuthFlowResult:
+        """Ask for a second factor before finishing with resolved credentials.
+
+        For flows that resolve the credentials themselves.
+        """
         # New credentials are not linked to a user that could have enabled MFA
         if not credentials.is_new and (
             user := await self._auth_manager.async_get_user_by_credentials(credentials)
