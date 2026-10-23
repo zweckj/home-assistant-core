@@ -1,0 +1,31 @@
+# serializer version: 1
+# name: test_get_identity_provider[confidential-client]
+  dict({
+    'client_id': 'confidential-client',
+    'client_secret': 'client-secret',
+    'protocol': dict({
+      'account_name_claim': 'email',
+      'issuer': 'https://idp.example.com',
+      'scopes': tuple(
+        'openid',
+        'profile',
+        'email',
+      ),
+    }),
+  })
+# ---
+# name: test_get_identity_provider[public-client]
+  dict({
+    'client_id': 'public-client',
+    'client_secret': None,
+    'protocol': dict({
+      'account_name_claim': 'email',
+      'issuer': 'https://idp.example.com',
+      'scopes': tuple(
+        'openid',
+        'profile',
+        'email',
+      ),
+    }),
+  })
+# ---

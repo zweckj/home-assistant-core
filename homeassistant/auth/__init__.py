@@ -2,10 +2,11 @@
 
 import asyncio
 from collections import OrderedDict, deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from functools import partial
 import logging
+import secrets
 import time
 from typing import Any, cast, override
 
@@ -30,7 +31,12 @@ from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util import dt as dt_util
 
 from . import auth_store, jwt_wrapper, models
-from .const import ACCESS_TOKEN_EXPIRATION, GROUP_ID_ADMIN, REFRESH_TOKEN_EXPIRATION
+from .const import (
+    ACCESS_TOKEN_EXPIRATION,
+    GROUP_ID_ADMIN,
+    LOGIN_STATE_EXPIRATION,
+    REFRESH_TOKEN_EXPIRATION,
+)
 from .mfa_modules import MultiFactorAuthModule, auth_mfa_module_from_config
 from .models import AuthFlowContext, AuthFlowResult
 from .providers import (
@@ -137,6 +143,41 @@ class AuthManagerFlowManager(
         """Init auth manager flows."""
         super().__init__(hass)
         self.auth_manager = auth_manager
+        self._external_state_secret = secrets.token_hex(32)
+
+    @callback
+    def async_encode_external_state(self, flow_id: str) -> str:
+        """Return a signed, expiring state parameter that names a login flow."""
+        return jwt.encode(
+            {"flow_id": flow_id, "exp": int(time.time()) + LOGIN_STATE_EXPIRATION},
+            self._external_state_secret,
+            algorithm="HS256",
+        )
+
+    @callback
+    def async_decode_external_state(self, state: str) -> str | None:
+        """Return the login flow a state parameter belongs to."""
+        try:
+            claims = jwt.decode(
+                state,
+                self._external_state_secret,
+                algorithms=["HS256"],
+                options={"require": ["exp", "flow_id"]},
+            )
+        except jwt.InvalidTokenError:
+            return None
+
+        flow_id = claims["flow_id"]
+        return flow_id if isinstance(flow_id, str) else None
+
+    @callback
+    def async_is_awaiting_external_callback(self, flow_id: str) -> bool:
+        """Return if the flow is waiting on an external step."""
+        return (
+            (flow := self._progress.get(flow_id)) is not None
+            and flow.cur_step is not None
+            and flow.cur_step["type"] is FlowResultType.EXTERNAL_STEP
+        )
 
     @override
     async def async_create_flow(
@@ -207,6 +248,9 @@ class AuthManager:
         # User id to the monotonic times of their recent step up attempts.
         self._step_up_attempts: dict[str, deque[float]] = {}
         self._create_user_lock = asyncio.Lock()
+        self._credentials_revoked_listeners: set[
+            Callable[[models.Credentials], None]
+        ] = set()
         self._expire_callback: CALLBACK_TYPE | None = None
         self._remove_expired_job = HassJob(
             self._async_remove_expired_refresh_tokens, job_type=HassJobType.Callback
@@ -225,7 +269,11 @@ class AuthManager:
     @property
     def auth_providers(self) -> list[AuthProvider]:
         """Return a list of available auth providers."""
-        return list(self._providers.values())
+        return [
+            provider_or_child
+            for provider in self._providers.values()
+            for provider_or_child in (provider, *provider.child_providers)
+        ]
 
     @property
     def auth_mfa_modules(self) -> list[MultiFactorAuthModule]:
@@ -235,15 +283,25 @@ class AuthManager:
     def get_auth_provider(
         self, provider_type: str, provider_id: str | None
     ) -> AuthProvider | None:
-        """Return an auth provider, None if not found."""
-        return self._providers.get((provider_type, provider_id))
+        """Return an auth provider or child provider, None if not found."""
+        if (provider := self._providers.get((provider_type, provider_id))) is not None:
+            return provider
+
+        if (
+            provider_id is not None
+            and (root := self._providers.get((provider_type, None))) is not None
+        ):
+            return root.async_get_child_provider(provider_id)
+
+        return None
 
     def get_auth_providers(self, provider_type: str) -> list[AuthProvider]:
         """Return a List of auth provider of one type, Empty if not found."""
         return [
-            provider
-            for (p_type, _), provider in self._providers.items()
-            if p_type == provider_type
+            provider_or_child
+            for provider in self._providers.values()
+            if provider.type == provider_type
+            for provider_or_child in (provider, *provider.child_providers)
         ]
 
     def get_auth_mfa_module(self, module_id: str) -> MultiFactorAuthModule | None:
@@ -579,6 +637,55 @@ class AuthManager:
             ):
                 self.async_remove_refresh_token(refresh_token)
 
+    @callback
+    def async_has_other_login_method(
+        self, user: models.User, *credentials: models.Credentials
+    ) -> bool:
+        """Test if the user can still log in without the given credentials."""
+        removed = {credential.id for credential in credentials}
+        return any(
+            credential.id not in removed
+            and (provider := self._async_get_auth_provider(credential)) is not None
+            and provider.async_can_login_with_credentials(credential)
+            for credential in user.credentials
+        )
+
+    async def async_remove_refresh_tokens_for_credentials(
+        self, credentials: models.Credentials
+    ) -> None:
+        """Remove every refresh token issued for these credentials.
+
+        Matches on the credentials each token was issued for, so this still works
+        after the credentials were detached from their user.
+        """
+        for user in await self.async_get_users():
+            for refresh_token in list(user.refresh_tokens.values()):
+                if (
+                    refresh_token.credential is not None
+                    and refresh_token.credential.id == credentials.id
+                ):
+                    self.async_remove_refresh_token(refresh_token)
+
+        for listener in list(self._credentials_revoked_listeners):
+            listener(credentials)
+
+    @callback
+    def async_add_credentials_revoked_listener(
+        self, listener: Callable[[models.Credentials], None]
+    ) -> CALLBACK_TYPE:
+        """Call the listener whenever every login for some credentials is revoked.
+
+        Lets holders of state derived from a login, such as pending
+        authorization codes, drop it together with the sessions.
+        """
+        self._credentials_revoked_listeners.add(listener)
+
+        @callback
+        def remove_listener() -> None:
+            self._credentials_revoked_listeners.discard(listener)
+
+        return remove_listener
+
     async def async_enable_user_mfa(
         self, user: models.User, mfa_module_id: str, data: Any
     ) -> None:
@@ -856,7 +963,7 @@ class AuthManager:
             credentials.auth_provider_type,
             credentials.auth_provider_id,
         )
-        return self._providers.get(auth_provider_key)
+        return self.get_auth_provider(*auth_provider_key)
 
     async def _user_should_be_owner(self) -> bool:
         """Determine if user should be owner.

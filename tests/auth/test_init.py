@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import suppress
+from collections.abc import Iterable, Mapping
 from datetime import timedelta
 from ipaddress import ip_address
 from pathlib import Path
@@ -34,7 +35,7 @@ from homeassistant.auth import (
 )
 from homeassistant.auth.const import GROUP_ID_ADMIN, MFA_SESSION_EXPIRATION
 from homeassistant.auth.models import Credentials
-from homeassistant.auth.providers import InvalidStepUpError
+from homeassistant.auth.providers import AuthProvider, InvalidStepUpError, LoginFlow
 from homeassistant.auth.providers.homeassistant import HassAuthProvider
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import StepUpRequired
@@ -42,12 +43,132 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
 INVALID_SIGNING_KEY = b"invalid-signing-key-for-testing0"
+CHILD_AUTH_PROVIDER_TYPE = "child_test"
 
 
 @pytest.fixture
 def mock_hass(hass: HomeAssistant) -> HomeAssistant:
     """Home Assistant mock with minimum amount of data set to make it work with auth."""
     return hass
+
+
+class _ChildLoginFlow(LoginFlow):
+    """Test login flow for a child provider."""
+
+    async def async_step_init(
+        self, user_input: dict[str, str] | None = None
+    ) -> auth_models.AuthFlowResult:
+        """Handle the login step."""
+        if user_input is not None:
+            return await self.async_finish({"username": user_input["username"]})
+
+        return self.async_show_form(step_id="init")
+
+
+class _ChildAuthProvider(AuthProvider):
+    """Test child auth provider."""
+
+    validated_refresh_tokens: list[str]
+
+    async def async_login_flow(
+        self, context: auth_models.AuthFlowContext | None
+    ) -> _ChildLoginFlow:
+        """Return a flow to login."""
+        return _ChildLoginFlow(self)
+
+    async def async_get_or_create_credentials(
+        self, flow_result: Mapping[str, str]
+    ) -> Credentials:
+        """Get credentials based on the flow result."""
+        username = flow_result["username"]
+        for credential in await self.async_credentials():
+            if credential.data["username"] == username:
+                return credential
+        return self.async_create_credentials({"username": username})
+
+    async def async_user_meta_for_credentials(
+        self, credentials: Credentials
+    ) -> auth_models.UserMeta:
+        """Return extra user metadata for credentials."""
+        return auth_models.UserMeta(name=self.name, is_active=True)
+
+    @callback
+    def async_can_login_with_credentials(self, credentials: Credentials) -> bool:
+        """Return if the credentials are a login the user can fall back to."""
+        return self.config.get("can_login", True)
+
+    @callback
+    def async_validate_refresh_token(
+        self, refresh_token: auth_models.RefreshToken, remote_ip: str | None = None
+    ) -> None:
+        """Record refresh token validation."""
+        self.validated_refresh_tokens.append(refresh_token.id)
+
+
+class _RootChildAuthProvider(_ChildAuthProvider):
+    """Test root provider exposing children."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        store: auth_store.AuthStore,
+        config: dict[str, Any],
+        children: Iterable[_ChildAuthProvider],
+    ) -> None:
+        """Initialize the test root provider."""
+        super().__init__(hass, store, config)
+        self._children = {child.id: child for child in children}
+
+    @property
+    def child_providers(self) -> Iterable[AuthProvider]:
+        """Return dynamically configured providers hosted under this provider."""
+        return self._children.values()
+
+    @callback
+    def async_get_child_provider(self, provider_id: str) -> AuthProvider | None:
+        """Return a child resolved by (type, id) like any other provider."""
+        return self._children.get(provider_id)
+
+
+async def _async_child_provider_auth_manager(
+    hass: HomeAssistant,
+) -> tuple[auth.AuthManager, _ChildAuthProvider, _ChildAuthProvider]:
+    """Create an auth manager with a root provider and two child providers."""
+    store = auth_store.AuthStore(hass)
+    await store.async_load()
+    child_a = _ChildAuthProvider(
+        hass,
+        store,
+        {
+            "type": CHILD_AUTH_PROVIDER_TYPE,
+            "id": "child-a",
+            "name": "Child A",
+        },
+    )
+    child_b = _ChildAuthProvider(
+        hass,
+        store,
+        {
+            "type": CHILD_AUTH_PROVIDER_TYPE,
+            "id": "child-b",
+            "name": "Child B",
+        },
+    )
+    child_a.validated_refresh_tokens = []
+    child_b.validated_refresh_tokens = []
+    root = _RootChildAuthProvider(
+        hass,
+        store,
+        {"type": CHILD_AUTH_PROVIDER_TYPE, "name": "Root"},
+        (child_a, child_b),
+    )
+    root.validated_refresh_tokens = []
+    manager = auth.AuthManager(
+        hass, store, {(CHILD_AUTH_PROVIDER_TYPE, None): root}, {}
+    )
+    hass.auth = manager
+    await manager.async_setup()
+    return manager, child_a, child_b
 
 
 async def test_auth_manager_from_config_validates_config(mock_hass) -> None:
@@ -153,6 +274,76 @@ async def test_auth_manager_from_config_auth_modules(mock_hass) -> None:
         {"name": "Module 1", "type": "insecure_example", "id": "insecure_example"},
         {"name": "Module 2", "type": "insecure_example", "id": "another"},
     ]
+
+
+async def test_auth_manager_child_provider_listing_and_lookup(
+    hass: HomeAssistant,
+) -> None:
+    """Test child providers are listed and resolved like configured providers."""
+    manager, child_a, child_b = await _async_child_provider_auth_manager(hass)
+
+    assert [
+        {"name": provider.name, "type": provider.type, "id": provider.id}
+        for provider in manager.auth_providers
+    ] == [
+        {"name": "Root", "type": CHILD_AUTH_PROVIDER_TYPE, "id": None},
+        {"name": "Child A", "type": CHILD_AUTH_PROVIDER_TYPE, "id": "child-a"},
+        {"name": "Child B", "type": CHILD_AUTH_PROVIDER_TYPE, "id": "child-b"},
+    ]
+    assert manager.get_auth_providers(CHILD_AUTH_PROVIDER_TYPE) == [
+        manager.get_auth_provider(CHILD_AUTH_PROVIDER_TYPE, None),
+        child_a,
+        child_b,
+    ]
+    assert manager.get_auth_provider(CHILD_AUTH_PROVIDER_TYPE, "child-a") is child_a
+    assert manager.get_auth_provider(CHILD_AUTH_PROVIDER_TYPE, "unknown") is None
+
+
+async def test_auth_manager_child_provider_login_and_token_resolution(
+    hass: HomeAssistant,
+) -> None:
+    """Test login and token validation resolve child providers."""
+    manager, child_a, _child_b = await _async_child_provider_auth_manager(hass)
+
+    step = await manager.login_flow.async_init((CHILD_AUTH_PROVIDER_TYPE, "child-a"))
+    assert step["type"] is data_entry_flow.FlowResultType.FORM
+
+    step = await manager.login_flow.async_configure(
+        step["flow_id"], {"username": "child-user"}
+    )
+    assert step["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    credential = step["result"]
+    assert credential.auth_provider_type == CHILD_AUTH_PROVIDER_TYPE
+    assert credential.auth_provider_id == "child-a"
+
+    user = await manager.async_get_or_create_user(credential)
+    assert user.name == "Child A"
+
+    refresh_token = await manager.async_create_refresh_token(
+        user, CLIENT_ID, credential=credential
+    )
+    access_token = manager.async_create_access_token(refresh_token, "127.0.0.1")
+
+    assert child_a.validated_refresh_tokens == [refresh_token.id]
+    assert manager.async_validate_access_token(access_token) is refresh_token
+
+
+async def test_auth_manager_child_provider_other_login_method(
+    hass: HomeAssistant,
+) -> None:
+    """Test fallback-login checks include child providers."""
+    manager, child_a, child_b = await _async_child_provider_auth_manager(hass)
+    user = await manager.async_create_user("Child User")
+    credential_a = child_a.async_create_credentials({"username": "child-a"})
+    credential_b = child_b.async_create_credentials({"username": "child-b"})
+    credential_a.is_new = False
+    credential_b.is_new = False
+    user.credentials.extend((credential_a, credential_b))
+
+    assert manager.async_has_other_login_method(user, credential_a) is True
+    assert (
+        manager.async_has_other_login_method(user, credential_a, credential_b) is False
+    )
 
 
 async def test_create_new_user(hass: HomeAssistant) -> None:
@@ -1664,6 +1855,190 @@ async def test_a_provider_that_cannot_initialize_is_not_fatal(
 
     assert "Error initializing auth provider insecure_example" in caplog.text
     assert len(manager.auth_providers) == 1
+
+
+async def test_has_other_login_method(mock_hass) -> None:
+    """Test what counts as another way into an account."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass,
+        [
+            {"type": "insecure_example", "users": []},
+            {"type": "trusted_networks", "trusted_networks": ["192.168.0.0/24"]},
+        ],
+        [],
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+    second = manager.auth_providers[0].async_create_credentials({"username": "second"})
+    user.credentials.append(second)
+    assert manager.async_has_other_login_method(user, credentials) is True
+    # Removing both at once would leave nothing to log in with.
+    assert manager.async_has_other_login_method(user, credentials, second) is False
+
+    # A credential of a provider that is no longer configured cannot be used.
+    user.credentials.remove(second)
+    user.credentials.append(
+        Credentials(
+            auth_provider_type="insecure_example",
+            auth_provider_id="removed",
+            data={},
+        )
+    )
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+    # A trusted network login only works from that network, so it is not a
+    # fallback the user can rely on to get back in.
+    user.credentials[:] = [credentials]
+    trusted_networks = manager.get_auth_provider("trusted_networks", None)
+    assert trusted_networks is not None
+    user.credentials.append(
+        trusted_networks.async_create_credentials({"user_id": user.id})
+    )
+    assert manager.async_has_other_login_method(user, credentials) is False
+
+
+async def test_get_step_up_providers(mock_hass) -> None:
+    """Test only the providers a user can re-verify with are offered."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass,
+        [{"type": "homeassistant"}, {"type": "insecure_example", "users": []}],
+        [],
+    )
+    hass_provider, example_provider = manager.auth_providers
+    user = MockUser().add_to_auth_manager(manager)
+
+    assert manager.async_get_step_up_providers(user) == []
+
+    # The example provider cannot re-verify anybody.
+    user.credentials.append(
+        example_provider.async_create_credentials({"username": "test-user"})
+    )
+    assert manager.async_get_step_up_providers(user) == []
+
+    user.credentials.append(
+        hass_provider.async_create_credentials({"username": "test-user"})
+    )
+    assert manager.async_get_step_up_providers(user) == [hass_provider]
+
+
+async def test_external_state_is_signed(mock_hass) -> None:
+    """Test a tampered state parameter does not name a flow."""
+    manager = await auth.auth_manager_from_config(mock_hass, [], [])
+    state = manager.login_flow.async_encode_external_state("the-flow-id")
+
+    assert manager.login_flow.async_decode_external_state(state) == "the-flow-id"
+    assert manager.login_flow.async_decode_external_state(f"{state}x") is None
+    assert manager.login_flow.async_decode_external_state("not-a-token") is None
+
+
+async def test_external_state_expires(mock_hass) -> None:
+    """Test an old state parameter cannot be replayed."""
+    manager = await auth.auth_manager_from_config(mock_hass, [], [])
+    with patch("time.time", return_value=time.time() - 3600):
+        state = manager.login_flow.async_encode_external_state("the-flow-id")
+
+    assert manager.login_flow.async_decode_external_state(state) is None
+
+
+async def test_external_state_requires_expiration(mock_hass) -> None:
+    """Test a state without an explicit expiration is refused."""
+    manager = await auth.auth_manager_from_config(mock_hass, [], [])
+    state = jwt.encode(
+        {"flow_id": "the-flow-id"},
+        manager.login_flow._external_state_secret,
+        algorithm="HS256",
+    )
+
+    assert manager.login_flow.async_decode_external_state(state) is None
+
+
+async def test_a_flow_that_is_not_parked_is_not_awaiting_a_callback(mock_hass) -> None:
+    """Test only a flow stopped on an external step can be called back into."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    step = await manager.login_flow.async_init(("insecure_example", None))
+
+    assert step["type"] is data_entry_flow.FlowResultType.FORM
+    assert (
+        manager.login_flow.async_is_awaiting_external_callback(step["flow_id"]) is False
+    )
+    assert manager.login_flow.async_is_awaiting_external_callback("unknown") is False
+
+
+async def test_remove_refresh_tokens_for_credentials(mock_hass) -> None:
+    """Test only the tokens issued for the given credentials are removed."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+
+    from_credentials = await manager.async_create_refresh_token(
+        user, CLIENT_ID, credential=credentials
+    )
+    unrelated = await manager.async_create_refresh_token(
+        user, "https://elsewhere.example.com/"
+    )
+
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+
+    assert manager.async_get_refresh_token(from_credentials.id) is None
+    assert manager.async_get_refresh_token(unrelated.id) is unrelated
+
+
+async def test_remove_refresh_tokens_for_credentials_notifies_listeners(
+    mock_hass,
+) -> None:
+    """Test state derived from a login can be dropped alongside its sessions."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+    revoked: list[Credentials] = []
+    remove_listener = manager.async_add_credentials_revoked_listener(revoked.append)
+
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+    assert revoked == [credentials]
+
+    remove_listener()
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+    assert revoked == [credentials]
+
+
+async def test_remove_refresh_tokens_for_detached_credentials(mock_hass) -> None:
+    """Test sessions can still be ended after the credentials were removed."""
+    manager = await auth.auth_manager_from_config(
+        mock_hass, [{"type": "insecure_example", "users": []}], []
+    )
+    user = MockUser().add_to_auth_manager(manager)
+    credentials = manager.auth_providers[0].async_create_credentials(
+        {"username": "test-user"}
+    )
+    await manager.async_link_user(user, credentials)
+    refresh_token = await manager.async_create_refresh_token(
+        user, CLIENT_ID, credential=credentials
+    )
+
+    await manager.async_remove_credentials(credentials)
+    assert credentials not in user.credentials
+
+    await manager.async_remove_refresh_tokens_for_credentials(credentials)
+
+    assert manager.async_get_refresh_token(refresh_token.id) is None
 
 
 async def test_provider_initialization_is_not_swallowed_when_cancelled(

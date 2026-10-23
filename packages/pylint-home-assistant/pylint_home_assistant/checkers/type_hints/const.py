@@ -201,6 +201,17 @@ _FUNCTION_MATCH: dict[str, list[TypeHintMatch]] = {
             mandatory=True,
         ),
     ],
+    Module.IDENTITY_PROVIDER: [
+        TypeHintMatch(
+            function_name="get_identity_provider",
+            arg_types={
+                0: "Mapping[str, Any]",
+                1: "Mapping[str, Any]",
+            },
+            return_type="IdentityProvider",
+            mandatory=True,
+        ),
+    ],
     Module.BACKUP: [
         TypeHintMatch(
             function_name="async_pre_backup",
